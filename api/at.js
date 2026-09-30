@@ -320,6 +320,28 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // update — THE SCOPE CHECK COMES FIRST, before any rule that reads the record.
+      //
+      // Every guard below answers differently depending on what the record holds ("locked",
+      // "signature outstanding", "last Admin"). Run ahead of this check, they told a caller with
+      // no access to the record that it existed and what state it was in -- the enumeration
+      // oracle the 404 below exists to prevent. Out of scope must look exactly like not found,
+      // so nothing runs until the record is in scope.
+      const existing = await at.get(baseId, tableId, recordId).catch((e) => {
+        if (e.status === 404) return null;
+        throw e;
+      });
+      const scopeFilter = P.buildReadFilter({
+        moduleKey: tableSymbol, baseSymbol, rule, scope, user: auth.user, clientFilter: null,
+      });
+      const inScope = existing && (await recordPassesScope({
+        rec: existing, baseId, tableId, filter: scopeFilter,
+      }));
+      if (!existing || !inScope) {
+        await A.auditNow({ ...ctx, action: 'Update', result: 'Denied', denialReason: 'scope_excluded', recordId });
+        return H.fail(res, 404, 'not_found', 'No such record, or it is outside your access.');
+      }
+
       // Lockout invariants. Checked here, not in the Admin UI, so a direct curl cannot
       // demote the last Admin either. See api/_lib/guards.js.
       if (op === 'update' && tableSymbol === 'users') {
@@ -337,16 +359,6 @@ module.exports = async function handler(req, res) {
         }
       }
 
-      // update — confirm the record is in scope before touching it
-      const existing = await at.get(baseId, tableId, recordId).catch((e) => {
-        if (e.status === 404) return null;
-        throw e;
-      });
-      const scopeFilter = P.buildReadFilter({
-        moduleKey: tableSymbol, baseSymbol, rule, scope, user: auth.user, clientFilter: null,
-      });
-
-    // A signed picking slip is evidence. Refuse the edit here, where a direct POST is refused
     // Rule 8: closing is earned, not asserted. Reads the signature rollup on the record
     // rather than anything the caller sent, and names what is still outstanding.
     const closeGuard = await G.guardDeliveryClose({
@@ -375,6 +387,7 @@ module.exports = async function handler(req, res) {
         closeGuard.missing ? { missing: closeGuard.missing } : undefined);
     }
 
+    // A signed picking slip is evidence. Refuse the edit here, where a direct POST is refused
     // too — not on the screen, where hiding the input would only stop the honest.
     const lock = await G.guardPickingSlipLock({
       tableSymbol,
@@ -397,13 +410,6 @@ module.exports = async function handler(req, res) {
         newValue: 'fields: ' + Object.keys(fields || {}).join(', '),
       });
     }
-      const inScope = existing && (await recordPassesScope({
-        rec: existing, baseId, tableId, filter: scopeFilter,
-      }));
-      if (!existing || !inScope) {
-        await A.auditNow({ ...ctx, action: 'Update', result: 'Denied', denialReason: 'scope_excluded', recordId });
-        return H.fail(res, 404, 'not_found', 'No such record, or it is outside your access.');
-      }
 
       const before = {};
       for (const k of Object.keys(fields)) before[k] = existing.fields[k];
@@ -423,6 +429,25 @@ module.exports = async function handler(req, res) {
     // ═══════════════════════════════════════════════════════════════════════
     if (op === 'delete') {
       if (!recordId) return H.fail(res, 400, 'bad_request', 'recordId is required for op "delete".');
+
+      // The same scope check as an update, for the same reason -- and until now a delete had
+      // none at all: any record id was deleted, whatever the caller's Record Scope. Only Admin
+      // may delete today, and Admin sees everything, so nothing was reachable yet; a per-user
+      // scope or override on a deleting role would have made it so.
+      const target = await at.get(baseId, tableId, recordId).catch((e) => {
+        if (e.status === 404) return null;
+        throw e;
+      });
+      const delInScope = target && (await recordPassesScope({
+        rec: target, baseId, tableId,
+        filter: P.buildReadFilter({
+          moduleKey: tableSymbol, baseSymbol, rule, scope, user: auth.user, clientFilter: null,
+        }),
+      }));
+      if (!target || !delInScope) {
+        await A.auditNow({ ...ctx, action: 'Delete', result: 'Denied', denialReason: 'scope_excluded', recordId });
+        return H.fail(res, 404, 'not_found', 'No such record, or it is outside your access.');
+      }
 
       if (tableSymbol === 'users') {
         const g = await G.guardUserDelete({ actorEmail: auth.email, targetRecordId: recordId });
