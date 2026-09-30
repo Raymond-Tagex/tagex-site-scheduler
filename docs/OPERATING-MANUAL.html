@@ -1,0 +1,690 @@
+<title>Scheduling Site Visits</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* Tokens: light on bare :root, dark redefined twice (media + stamp), tokens only. */
+:root {
+  --ground:   #F5F7F9;
+  --surface:  #FFFFFF;
+  --sunken:   #ECEFF3;
+  --ink:      #14171C;
+  --ink-2:    #3D454F;
+  --muted:    #6B7684;
+  --rule:     #DCE1E8;
+  --rule-2:   #C3CBD5;
+  --accent:   #A66A00;
+  --accent-b: #FBF0D8;
+  --accent-l: #7A4E00;
+  --yes:      #1C7A52;
+  --yes-bg:   #E3F3EB;
+  --warn:     #9A5B00;
+  --warn-bg:  #FBEEDA;
+  --stop:     #A32118;
+  --stop-bg:  #F9E4E2;
+  --shadow:   0 1px 2px rgba(20,23,28,.06), 0 8px 24px rgba(20,23,28,.05);
+  /* Visit type / status swatches — the app's own palette, unchanged in both themes
+     because they are data encoding, not chrome. */
+  --sw-inspect: #2E7BC4; --sw-fault: #C2711F; --sw-maint: #219367;
+  --sw-emerg:   #C43F3F; --sw-install: #7E4FC4; --sw-comm: #A67B00;
+  --sw-warranty:#1E8FA0; --sw-client: #3E9E63; --sw-coc: #C4508F;
+  --sw-eng:     #6B7684; --sw-draft: #8892A0; --sw-prog: #A67B00;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:   #0D0F12; --surface: #14171C; --sunken: #1A1E24;
+    --ink:      #E7EBF0; --ink-2:  #BAC3CE; --muted:  #8A94A2;
+    --rule:     #262B33; --rule-2: #363D47;
+    --accent:   #F0A500; --accent-b: #2A2008; --accent-l: #F5BC42;
+    --yes:      #4FBE8B; --yes-bg: #10281E;
+    --warn:     #DFA13C; --warn-bg: #2A2109;
+    --stop:     #E4776C; --stop-bg: #2C1512;
+    --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    --sw-inspect: #4AA3FF; --sw-fault: #FF9F43; --sw-maint: #3ECF8E;
+    --sw-emerg:   #EF5D5D; --sw-install: #B07CFF; --sw-comm: #F0C000;
+    --sw-warranty:#37C5D6; --sw-client: #5ED98A; --sw-coc: #FF7CC0;
+    --sw-eng:     #9AA3AD; --sw-draft: #9AA3AD; --sw-prog: #F0C000;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:   #0D0F12; --surface: #14171C; --sunken: #1A1E24;
+  --ink:      #E7EBF0; --ink-2:  #BAC3CE; --muted:  #8A94A2;
+  --rule:     #262B33; --rule-2: #363D47;
+  --accent:   #F0A500; --accent-b: #2A2008; --accent-l: #F5BC42;
+  --yes:      #4FBE8B; --yes-bg: #10281E;
+  --warn:     #DFA13C; --warn-bg: #2A2109;
+  --stop:     #E4776C; --stop-bg: #2C1512;
+  --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  --sw-inspect: #4AA3FF; --sw-fault: #FF9F43; --sw-maint: #3ECF8E;
+  --sw-emerg:   #EF5D5D; --sw-install: #B07CFF; --sw-comm: #F0C000;
+  --sw-warranty:#37C5D6; --sw-client: #5ED98A; --sw-coc: #FF7CC0;
+  --sw-eng:     #9AA3AD; --sw-draft: #9AA3AD; --sw-prog: #F0C000;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px; line-height: 1.65; margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px; margin: 0 auto; padding: 0 24px 96px;
+  display: grid; grid-template-columns: 210px minmax(0, 1fr);
+  gap: 56px; align-items: start;
+}
+
+.masthead {
+  grid-column: 1 / -1;
+  border-bottom: 2px solid var(--ink);
+  padding: 56px 0 20px; margin-bottom: 44px;
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 20px 32px;
+}
+.mark {
+  width: 46px; height: 46px; flex: none;
+  border: 2px solid var(--accent); border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 15px;
+  color: var(--accent);
+}
+.masthead h1 {
+  font-family: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: clamp(34px, 5.2vw, 52px); font-weight: 700;
+  letter-spacing: .3px; line-height: 1; margin: 0; text-wrap: balance;
+}
+.masthead .sub {
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  margin-top: 8px;
+}
+.masthead .meta {
+  margin-left: auto; font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px; color: var(--muted); text-align: right; line-height: 1.9;
+}
+
+.rail { position: sticky; top: 28px; }
+.rail h2 {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+  font-weight: 500; margin: 0 0 12px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail a {
+  display: flex; gap: 9px; color: var(--ink-2); text-decoration: none;
+  font-size: 13.5px; line-height: 1.35; padding: 5px 8px; margin-left: -8px;
+  border-radius: 5px;
+}
+.rail a:hover { background: var(--sunken); color: var(--ink); }
+.rail a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rail .n { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); flex: none; padding-top: 1px; }
+
+.doc { min-width: 0; display: flex; flex-direction: column; gap: 52px; }
+section { scroll-margin-top: 24px; }
+
+h2.sec {
+  font-family: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 30px; font-weight: 600; letter-spacing: .2px;
+  margin: 0 0 18px; padding-bottom: 10px; border-bottom: 1px solid var(--rule);
+  display: flex; align-items: baseline; gap: 12px; text-wrap: balance;
+}
+h2.sec .n { font-family: "IBM Plex Mono", monospace; font-size: 14px; font-weight: 500; color: var(--accent); }
+h3 {
+  font-family: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 21px; font-weight: 600; letter-spacing: .2px;
+  margin: 30px 0 10px; text-wrap: balance;
+}
+h4 {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--muted);
+  font-weight: 500; margin: 24px 0 8px;
+}
+p { margin: 0 0 14px; max-width: 68ch; }
+ul, ol.list { margin: 0 0 14px; padding-left: 20px; max-width: 68ch; }
+li { margin-bottom: 6px; }
+code {
+  font-family: "IBM Plex Mono", monospace; font-size: .87em;
+  background: var(--sunken); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 1px 5px; color: var(--ink);
+}
+kbd {
+  font-family: "IBM Plex Mono", monospace; font-size: .82em;
+  background: var(--surface); border: 1px solid var(--rule-2);
+  border-bottom-width: 2px; border-radius: 4px; padding: 1px 6px;
+}
+
+.scroller {
+  overflow-x: auto; border: 1px solid var(--rule); border-radius: 9px;
+  background: var(--surface); box-shadow: var(--shadow); margin-bottom: 16px;
+}
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+thead th {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  font-weight: 500; background: var(--sunken); white-space: nowrap;
+  border-bottom: 1px solid var(--rule-2);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.key { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; white-space: nowrap; font-weight: 500; }
+.num { font-variant-numeric: tabular-nums; }
+
+.note {
+  border-left: 3px solid var(--rule-2); background: var(--surface);
+  padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 0 0 16px; font-size: 14.5px;
+}
+.note p { margin: 0; max-width: none; }
+.note p + p { margin-top: 10px; }
+.note.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.note.stop { border-left-color: var(--stop); background: var(--stop-bg); }
+.note.key  { border-left-color: var(--accent); background: var(--accent-b); }
+.note .lbl {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  letter-spacing: .13em; text-transform: uppercase; display: block;
+  margin-bottom: 5px; font-weight: 500;
+}
+.note.warn .lbl { color: var(--warn); }
+.note.stop .lbl { color: var(--stop); }
+.note.key  .lbl { color: var(--accent-l); }
+.note:not(.warn):not(.stop):not(.key) .lbl { color: var(--muted); }
+
+ol.steps { list-style: none; counter-reset: s; margin: 0 0 16px; padding: 0; max-width: 68ch; }
+ol.steps > li { counter-increment: s; position: relative; padding-left: 34px; margin-bottom: 12px; }
+ol.steps > li::before {
+  content: counter(s); position: absolute; left: 0; top: 1px;
+  width: 22px; height: 22px; border: 1px solid var(--rule-2); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  color: var(--accent-l); background: var(--surface);
+}
+
+/* swatch legend */
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 2px 20px; margin: 0 0 16px; padding: 0; list-style: none; max-width: none; }
+.legend li { display: flex; align-items: center; gap: 9px; font-size: 14px; margin: 0; padding: 4px 0; }
+.legend .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.legend .lb { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; }
+
+/* field reference */
+.fieldlist { display: flex; flex-direction: column; gap: 0; margin: 0 0 16px; max-width: none; }
+.fr {
+  display: grid; grid-template-columns: 190px minmax(0, 1fr);
+  gap: 4px 20px; padding: 11px 0; border-bottom: 1px solid var(--rule);
+}
+.fr:last-child { border-bottom: none; }
+.fr dt { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; font-weight: 500; padding-top: 2px; }
+.fr dd { margin: 0; font-size: 14.5px; color: var(--ink-2); }
+.fr .req {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  color: var(--stop); letter-spacing: .08em; text-transform: uppercase;
+  display: block; margin-top: 2px;
+}
+
+footer {
+  grid-column: 1 / -1; margin-top: 64px; padding-top: 20px;
+  border-top: 1px solid var(--rule);
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 8px 28px;
+}
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .rail { position: static; margin-bottom: 40px; }
+  .rail ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0; }
+  .masthead .meta { margin-left: 0; text-align: left; }
+  .fr { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="mark">TX</div>
+    <div>
+      <h1>Scheduling Site Visits</h1>
+      <div class="sub">TAGEX Energy &middot; O&amp;M Scheduler &middot; Day-to-day operating manual</div>
+    </div>
+    <div class="meta">
+      Calendar &middot; Workload &middot; Tickets<br>
+      All times SAST (UTC+2)<br>
+      Revised 1 September 2026
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Sections">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#s1"><span class="n">1</span><span>Getting oriented</span></a></li>
+      <li><a href="#s2"><span class="n">2</span><span>The calendar</span></a></li>
+      <li><a href="#s3"><span class="n">3</span><span>Booking a visit</span></a></li>
+      <li><a href="#s4"><span class="n">4</span><span>Changing a visit</span></a></li>
+      <li><a href="#s5"><span class="n">5</span><span>Types and statuses</span></a></li>
+      <li><a href="#s6"><span class="n">6</span><span>Workload</span></a></li>
+      <li><a href="#s7"><span class="n">7</span><span>O&amp;M Tickets</span></a></li>
+      <li><a href="#s8"><span class="n">8</span><span>Habits that keep it clean</span></a></li>
+      <li><a href="#s9"><span class="n">9</span><span>Quick reference</span></a></li>
+    </ol>
+  </nav>
+
+  <main class="doc">
+
+    <!-- ══════════════════════════════════════ 1 -->
+    <section id="s1">
+      <h2 class="sec"><span class="n">1</span> Getting oriented</h2>
+
+      <p>This manual covers using the scheduler. For who can see what, and for creating and
+      managing accounts, see the companion <em>O&amp;M Scheduler Handbook</em>.</p>
+
+      <h3>The top bar</h3>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Element</th><th>Where</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td class="key">Calendar &middot; Workload &middot; O&amp;M Tickets</td><td>Top left</td><td>Switches between the three screens. Your place in each is kept as you move between them.</td></tr>
+            <tr><td class="key">+ Schedule Site Visit</td><td>Top right</td><td>Opens a blank visit form, with no date pre-filled.</td></tr>
+            <tr><td class="key">Refresh</td><td>Top right</td><td>Reloads immediately. Rarely needed — see below.</td></tr>
+            <tr><td class="key">Green dot &middot; count &middot; time</td><td>Far right</td><td>Connection is live, how many visits are loaded, and when they last updated.</td></tr>
+            <tr><td class="key">Your name and role</td><td>Header</td><td>Confirms which account you are working in. Worth a glance on a shared machine.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="lbl">It updates itself</span>
+        <p>The scheduler reloads every <strong>60 seconds</strong> while the tab is visible, so
+        a colleague's booking appears without you doing anything. It pauses while the tab is in
+        the background and catches up when you return. Use <strong>Refresh</strong> only when you
+        want to be certain right now — for instance while someone is on the phone with you.</p>
+      </div>
+
+      <h3>Everything is live</h3>
+      <p>There is no draft mode and no save-at-the-end. The moment you save a visit it is real,
+      visible to everyone, and part of the record. There is no undo — a mistake is corrected by
+      editing or cancelling, both of which leave a trail.</p>
+
+      <div class="note key">
+        <span class="lbl">All times are SAST</span>
+        <p>Every time you see or type is South African Standard Time (UTC+2). There is no
+        daylight saving to allow for, and the app does not shift times if you travel.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ 2 -->
+    <section id="s2">
+      <h2 class="sec"><span class="n">2</span> The calendar</h2>
+
+      <h3>Three views</h3>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>View</th><th>Best for</th><th>Booking behaviour</th></tr></thead>
+          <tbody>
+            <tr><td class="key">Month</td><td>Seeing the shape of the month and spotting empty weeks.</td><td>Clicking an empty day opens a new visit on that date; you set the time.</td></tr>
+            <tr><td class="key">Week</td><td>The normal planning view — the week's load across every technician.</td><td>Clicking an empty slot opens a new visit at that <strong>date and hour</strong>.</td></tr>
+            <tr><td class="key">Day</td><td>Tight days, and checking one technician's run in order.</td><td>Same as Week — the hour you click becomes the start time.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Move with <kbd>&lsaquo;</kbd> and <kbd>&rsaquo;</kbd> either side of <strong>Today</strong>.
+      They step by whichever view you are in — a month, a week, or a day. <strong>Today</strong>
+      always returns to now.</p>
+
+      <h3>Reading a visit block</h3>
+      <p>Each block shows the time span, the job card reference, the client and site, and the
+      technician. Its colour is the <strong>visit type</strong> (section 5), so a week's mix of
+      work reads at a glance without opening anything.</p>
+
+      <h3>Filtering</h3>
+      <p>Four controls sit above the calendar. They combine, and they apply to whichever view is
+      showing.</p>
+      <ul>
+        <li><strong>All technicians</strong> — one person's diary. The fastest way to answer
+            "what is Maurice doing on Thursday?"</li>
+        <li><strong>All statuses</strong> — hide cancelled and completed work to see only what is
+            still live.</li>
+        <li><strong>All owner categories</strong> — narrow to a class of client.</li>
+        <li><strong>Search</strong> — free text across job card, site and client.</li>
+      </ul>
+
+      <div class="note warn">
+        <span class="lbl">A filter looks exactly like an empty calendar</span>
+        <p>If work seems to have vanished, check these four controls before anything else. A
+        technician filter left on from yesterday is the usual explanation.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ 3 -->
+    <section id="s3">
+      <h2 class="sec"><span class="n">3</span> Booking a visit</h2>
+
+      <ol class="steps">
+        <li>Click the day or hour you want in the calendar — the date and time arrive
+            pre-filled. Or use <strong>+ Schedule Site Visit</strong> for a blank form.</li>
+        <li>Pick the <strong>Job Card</strong> first. The subject fills itself in, and the
+            client's owner category appears underneath so you can confirm you have the right
+            one.</li>
+        <li>Check <strong>Start</strong> and <strong>End</strong>. Both are SAST.</li>
+        <li>Choose the <strong>Technician</strong>, then <strong>Visit Type</strong>,
+            <strong>Priority</strong> and <strong>Status</strong>.</li>
+        <li>Add any <strong>Additional Attendees</strong>, and put access notes, gate codes or
+            equipment needs in <strong>Notes</strong>.</li>
+        <li><strong>Save Visit</strong>. It appears on the calendar at once, and for everyone
+            else within a minute.</li>
+      </ol>
+
+      <h3>The form, field by field</h3>
+      <dl class="fieldlist">
+        <div class="fr"><dt>Meeting Subject</dt><dd>Fills from the job card. Overwrite it only when the job card title would not tell a technician what this particular visit is for.</dd></div>
+        <div class="fr"><dt>Job Card</dt><dd>Ties the visit to real work. Everything downstream — workload, reporting, the ticket history — hangs off this link.<span class="req">Set this first</span></dd></div>
+        <div class="fr"><dt>Start &middot; End</dt><dd>SAST. A visit with no end is treated as one hour when checking for clashes.</dd></div>
+        <div class="fr"><dt>Technician</dt><dd>The person doing the work. This drives the clash check and the workload view — and it is what a technician's own calendar is matched on.</dd></div>
+        <div class="fr"><dt>Visit Type</dt><dd>Ten types, each with its own colour. See section 5.</dd></div>
+        <div class="fr"><dt>Priority</dt><dd>How this ranks against other work on a full day.</dd></div>
+        <div class="fr"><dt>Status</dt><dd>Where the visit stands. Start at <strong>Scheduled</strong>, or <strong>Draft</strong> if it is only pencilled in.</dd></div>
+        <div class="fr"><dt>Additional Attendees</dt><dd>A second technician, an engineer, a client contact — anyone who should be expected on site but is not the assigned technician.</dd></div>
+        <div class="fr"><dt>Notes</dt><dd>Scope, site access, gate codes, equipment. The most useful field on the form and the most often left blank.</dd></div>
+      </dl>
+
+      <div class="note key">
+        <span class="lbl">The clash check</span>
+        <p>On save, the scheduler looks for another visit for the same technician overlapping the
+        same time, counting only <strong>Scheduled</strong>, <strong>Confirmed</strong> and
+        <strong>In Progress</strong> work. If it finds one it names the technician, the clashing
+        job card and its time.</p>
+        <p>You can proceed with <strong>Override &amp; save anyway</strong> — sometimes two jobs
+        on one site genuinely do overlap. The point is that you decided, rather than finding out
+        on the day. Cancelled and completed visits never block a booking.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ 4 -->
+    <section id="s4">
+      <h2 class="sec"><span class="n">4</span> Changing a visit</h2>
+
+      <h3>Open it</h3>
+      <p>Click any block to see its detail — site, time, technician, attendees, type, status,
+      priority and notes. <strong>Edit</strong> opens the same form you booked it with;
+      <strong>Close</strong> returns to the calendar.</p>
+
+      <h3>Drag to move a day</h3>
+      <p>In Month view, drag a visit onto another day. The time of day and the duration are kept
+      exactly; only the date moves.</p>
+
+      <div class="note warn">
+        <span class="lbl">Dragging sets the status to Rescheduled</span>
+        <p>A dragged visit is automatically marked <strong>Rescheduled</strong> — the record
+        should show the appointment moved, not that it was always on the new day. If you are
+        correcting a capture error rather than genuinely moving an appointment, open the visit
+        and set the status back to what it should be.</p>
+        <p>Dragging does not run the clash check. On a busy week, glance at the technician's
+        other work on the target day before you drop.</p>
+      </div>
+
+      <h3>Cancelling</h3>
+      <p>Open the visit, choose <strong>Edit</strong>, then <strong>Cancel Visit</strong>. The
+      visit stays on the calendar marked Cancelled rather than disappearing, so the history of
+      what was planned survives. Put the reason in Notes before you cancel — a cancelled visit
+      with no explanation is a question somebody has to ask later.</p>
+
+      <div class="note stop">
+        <span class="lbl">Cancel rather than delete</span>
+        <p>Deleting removes the record and everything that referenced it. Cancelling keeps the
+        trail. Most roles cannot delete at all; if yours can, treat it as a tool for genuine
+        mistakes — a duplicate created twice by accident — and nothing else.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ 5 -->
+    <section id="s5">
+      <h2 class="sec"><span class="n">5</span> Types and statuses</h2>
+
+      <h3>Visit types</h3>
+      <p>The type sets the block's colour, so choosing accurately is what makes the calendar
+      readable at a glance.</p>
+
+      <ul class="legend">
+        <li><span class="sw" style="background:var(--sw-inspect)"></span><span class="lb">Site Inspection</span></li>
+        <li><span class="sw" style="background:var(--sw-fault)"></span><span class="lb">Fault Investigation</span></li>
+        <li><span class="sw" style="background:var(--sw-maint)"></span><span class="lb">Maintenance</span></li>
+        <li><span class="sw" style="background:var(--sw-emerg)"></span><span class="lb">Emergency Callout</span></li>
+        <li><span class="sw" style="background:var(--sw-install)"></span><span class="lb">Installation</span></li>
+        <li><span class="sw" style="background:var(--sw-comm)"></span><span class="lb">Commissioning</span></li>
+        <li><span class="sw" style="background:var(--sw-warranty)"></span><span class="lb">Warranty Assessment</span></li>
+        <li><span class="sw" style="background:var(--sw-client)"></span><span class="lb">Client Meeting</span></li>
+        <li><span class="sw" style="background:var(--sw-coc)"></span><span class="lb">COC Inspection</span></li>
+        <li><span class="sw" style="background:var(--sw-eng)"></span><span class="lb">Engineering Assessment</span></li>
+      </ul>
+
+      <h3>Statuses</h3>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Status</th><th>Means</th><th>Blocks the slot?</th></tr></thead>
+          <tbody>
+            <tr><td class="key">Draft</td><td>Pencilled in. Not committed, and nobody has been told.</td><td>No</td></tr>
+            <tr><td class="key">Scheduled</td><td>Booked. The normal starting state.</td><td>Yes</td></tr>
+            <tr><td class="key">Confirmed</td><td>The client or site has agreed the time.</td><td>Yes</td></tr>
+            <tr><td class="key">In Progress</td><td>The technician is on site now.</td><td>Yes</td></tr>
+            <tr><td class="key">Completed</td><td>Work finished.</td><td>No</td></tr>
+            <tr><td class="key">Cancelled</td><td>Not happening. Kept for the record.</td><td>No</td></tr>
+            <tr><td class="key">Rescheduled</td><td>Moved. Set automatically when a visit is dragged.</td><td>No</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>"Blocks the slot" is the clash check: only Scheduled, Confirmed and In Progress count
+      as the technician being committed. This is why leaving finished work as
+      <strong>Scheduled</strong> quietly blocks that technician's diary — and why the discipline
+      in section 8 matters.</p>
+    </section>
+
+    <!-- ══════════════════════════════════════ 6 -->
+    <section id="s6">
+      <h2 class="sec"><span class="n">6</span> Workload</h2>
+
+      <p>The Workload screen answers the question the calendar cannot: <em>who has capacity?</em>
+      Use it before you book, not after.</p>
+
+      <h4>At the top</h4>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Figure</th><th>Read it as</th></tr></thead>
+          <tbody>
+            <tr><td class="key">Visits Today</td><td>Everything on today's date, whatever its status.</td></tr>
+            <tr><td class="key">Active Now</td><td>Visits currently under way — who is on site at this moment.</td></tr>
+            <tr><td class="key">Hours Scheduled</td><td>Committed time across the period. The honest measure of load.</td></tr>
+            <tr><td class="key">Emergency</td><td>Emergency callouts. A rising number here is worth raising.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Below</h4>
+      <p>A per-technician breakdown of visits and hours, and a list of the visits behind the
+      numbers. The same filters as the calendar — technician, status, type and search — narrow
+      all of it together, so you can ask "how much maintenance is Maurice carrying this week?"
+      and get an answer in two clicks.</p>
+
+      <div class="note">
+        <span class="lbl">Use it as a booking check</span>
+        <p>Before committing a full day to one person, look at their hours here. The calendar
+        shows you that a slot is empty; Workload shows you whether the person is already
+        stretched around it.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ 7 -->
+    <section id="s7">
+      <h2 class="sec"><span class="n">7</span> O&amp;M Tickets</h2>
+
+      <p>The ticket board is the work itself — the job cards that visits are booked against. Its
+      own navigation sits along the top.</p>
+
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Screen</th><th>What it holds</th></tr></thead>
+          <tbody>
+            <tr><td class="key">Dashboard</td><td>The state of O&amp;M work at a glance.</td></tr>
+            <tr><td class="key">Job Cards</td><td>The full list, filtered by status.</td></tr>
+            <tr><td class="key">Triage</td><td>New tickets waiting to be assessed and turned into work.</td></tr>
+            <tr><td class="key">+ New Ticket</td><td>Log a fault or request as it comes in.</td></tr>
+            <tr><td class="key">+ New Job Card</td><td>Raise planned work directly, skipping triage.</td></tr>
+            <tr><td class="key">Clients</td><td>Client records and their history.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Ticket statuses</h3>
+      <p>The chips filter the list: <strong>All</strong>, <strong>New</strong>,
+      <strong>In Progress</strong>, <strong>Monitoring</strong>, <strong>Completed</strong>,
+      <strong>Closed</strong>. <em>Monitoring</em> is the useful one — work done, but the site is
+      being watched before anyone calls it closed.</p>
+
+      <h3>Priority</h3>
+      <p><strong>Normal</strong>, <strong>High</strong>, <strong>Urgent</strong>. Reserve Urgent
+      for work that displaces other work today. A board where most things are Urgent has no
+      priority at all.</p>
+
+      <div class="note warn">
+        <span class="lbl">Ticket priority is a label, not a field</span>
+        <p><strong>+ New Ticket</strong> does not create a job card. It writes a note onto an
+        existing one, and records the category and priority inside the note text —
+        <code>[Inverter Fault] [Urgent] Subject…</code>. That means a ticket's priority
+        <strong>cannot be filtered, sorted or reported on</strong>.</p>
+        <p>If the work needs a priority the business can act on, raise it with
+        <strong>+ New Job Card</strong>, where Priority is a real field
+        (Critical / High / Medium / Low / Planned Maintenance).</p>
+      </div>
+
+      <h3>Logging a ticket</h3>
+      <ol class="steps">
+        <li>Choose <strong>+ New Ticket</strong>.</li>
+        <li>Pick the <strong>Client</strong>, or add a new one if they are not listed.</li>
+        <li>Write a <strong>Subject</strong> a technician could act on. "Inverter 2 offline since
+            Monday, error E014" beats "inverter problem".</li>
+        <li>Set the <strong>Category</strong>, and add the site, asset or inverter, and any error
+            code.</li>
+        <li>Record who reported it and how to reach them.</li>
+        <li>Set the <strong>Priority</strong> and save.</li>
+      </ol>
+
+      <h3>Working a ticket</h3>
+      <p>Open a job card to see its detail, history and notes. Add a note whenever something
+      changes that the next person would need to know — what you found, what you did, what is
+      still outstanding. Notes are timestamped against your name automatically.</p>
+
+      <p>Technicians can update <strong>Status</strong>, <strong>Progress %</strong>,
+      <strong>Site Status</strong> and <strong>Resource Status</strong>. Everything else on a job
+      card is set by Ops or an Admin.</p>
+
+      <h3>What the job card sheet shows</h3>
+      <p>Alongside client, responsible person, progress and dates, the sheet carries the fields
+      that answer "where is this actually stuck":</p>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Field</th><th>Read it as</th></tr></thead>
+          <tbody>
+            <tr><td class="key">On hold &mdash; reason</td><td>Shown only when the job is held. Seventeen reasons, from Awaiting Stock and Awaiting Eskom to Awaiting COC and Safety Hold. If a job is stalled, this is where it says why.</td></tr>
+            <tr><td class="key">Started &middot; Completed</td><td>When work actually began and finished, as opposed to when it was issued or due.</td></tr>
+            <tr><td class="key">Project health</td><td>Green, Amber or Red, with the colour shown.</td></tr>
+            <tr><td class="key">SLA</td><td>Red, Orange, Yellow or Green against the service level.</td></tr>
+            <tr><td class="key">Compliance</td><td>Not Started, In Progress or Completed.</td></tr>
+            <tr><td class="key">Documents &middot; Sign-offs</td><td>How many are attached to this job card.</td></tr>
+            <tr><td class="key">Costing</td><td>How many costing entries exist. <strong>Not shown to Technician or Warehouse</strong> &mdash; they have no access to financial records.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>A row you cannot see at all is one your role may not read. It is left out rather than
+      shown empty, so an absent row never tells you what is behind it.</p>
+
+      <div class="note key">
+        <span class="lbl">The link that makes it all work</span>
+        <p>Every visit should point at a job card. That link is what lets you open a ticket and
+        see every visit made against it, and what makes the workload figures mean anything. A
+        visit booked without a job card is invisible to all of it.</p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════ 8 -->
+    <section id="s8">
+      <h2 class="sec"><span class="n">8</span> Habits that keep it clean</h2>
+
+      <p>None of these are enforced by the software. They are what separates a schedule people
+      trust from one they work around.</p>
+
+      <h3>Close out the day</h3>
+      <p>Finished visits left as <strong>Scheduled</strong> still block that technician's diary
+      against the clash check, and still count as committed hours in Workload. Five minutes at
+      the end of the day setting them to <strong>Completed</strong> keeps both honest.</p>
+
+      <h3>Write the note before you need it</h3>
+      <p>Gate codes, dog on site, which contact actually answers, where the DB board is. The
+      technician standing at a locked gate cannot ask the person who booked it three weeks ago.</p>
+
+      <h3>Cancel with a reason</h3>
+      <p>Put why in Notes before you cancel. A cancelled visit with no reason turns into a
+      question for somebody later, usually at month end.</p>
+
+      <h3>Treat an override as a decision</h3>
+      <p>Overriding a clash is sometimes right. Overriding it without looking at what you
+      clashed with is how two technicians end up at the same site while a third is idle.</p>
+
+      <h3>Book against the job card</h3>
+      <p>If there is no job card, raise one. A visit floating free is work nobody can report on
+      and nobody gets billed for.</p>
+
+      <h3>Keep technician emails right</h3>
+      <p>A technician on <strong>Assigned Only</strong> sees a visit only when its technician
+      record carries their exact sign-in address. This is the single most common cause of "my
+      calendar is empty" — see the Handbook.</p>
+    </section>
+
+    <!-- ══════════════════════════════════════ 9 -->
+    <section id="s9">
+      <h2 class="sec"><span class="n">9</span> Quick reference</h2>
+
+      <div class="scroller">
+        <table>
+          <thead><tr><th>To do this</th><th>Do this</th></tr></thead>
+          <tbody>
+            <tr><td>Book at a specific time</td><td>Switch to Week or Day and click the hour.</td></tr>
+            <tr><td>Book with no date in mind</td><td><strong>+ Schedule Site Visit</strong>, top right.</td></tr>
+            <tr><td>Move a visit to another day</td><td>Drag it in Month view. Status becomes Rescheduled.</td></tr>
+            <tr><td>Change the time on the same day</td><td>Open it, <strong>Edit</strong>, adjust Start and End.</td></tr>
+            <tr><td>See one technician's diary</td><td>Set the technician filter above the calendar.</td></tr>
+            <tr><td>Find a visit by client or site</td><td>Type into the search box; it covers job card, site and client.</td></tr>
+            <tr><td>Hide finished work</td><td>Use the status filter.</td></tr>
+            <tr><td>Check who has capacity</td><td>Workload — compare Hours Scheduled per technician.</td></tr>
+            <tr><td>See who is on site now</td><td>Workload &rarr; <strong>Active Now</strong>.</td></tr>
+            <tr><td>Log an incoming fault</td><td>O&amp;M Tickets &rarr; <strong>+ New Ticket</strong>.</td></tr>
+            <tr><td>Raise planned work</td><td>O&amp;M Tickets &rarr; <strong>+ New Job Card</strong>.</td></tr>
+            <tr><td>Record what happened on site</td><td>Open the job card and add a note.</td></tr>
+            <tr><td>Stop a visit happening</td><td>Open it, <strong>Edit</strong>, <strong>Cancel Visit</strong>. Reason in Notes first.</td></tr>
+            <tr><td>Be sure you have the latest</td><td><strong>Refresh</strong> — otherwise it self-updates every 60 seconds.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>If something looks wrong</h4>
+      <ul>
+        <li><strong>Calendar looks empty</strong> — check the four filters first.</li>
+        <li><strong>A colleague's booking is missing</strong> — wait a minute, or press Refresh.</li>
+        <li><strong>You cannot change a field</strong> — it is read-only for your role. Ask Ops.</li>
+        <li><strong>"Could not load the schedule"</strong> — press Refresh; if it persists, send
+            the exact wording to an administrator.</li>
+      </ul>
+    </section>
+
+  </main>
+
+  <footer>
+    <span>TAGEX Energy &middot; O&amp;M Site Visit Scheduler</span>
+    <span>Companion document: O&amp;M Scheduler Handbook (roles and access)</span>
+    <span>All times SAST (UTC+2)</span>
+  </footer>
+
+</div>

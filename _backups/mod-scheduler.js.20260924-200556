@@ -1,0 +1,2198 @@
+// TAGEX — O&M Site Visit Scheduler + Tickets, ported into the operations platform.
+//
+// Was a standalone page (tagex-merged-om-scheduler/index.html, 1,916 lines) in which every
+// user pasted an Airtable Personal Access Token, kept in localStorage as `tagex_pat`, and
+// identified themselves through a JavaScript prompt() stored as `tagex_user`.
+//
+// WHAT CHANGED
+//   - The PAT is gone. All seven Airtable calls go through TX.api -> /api/at.
+//   - Identity is the signed-in session, not a typed-in name.
+//   - The token gate is gone; the platform's login screen covers this module.
+//   - Inline on*= handlers are gone, so the Content-Security-Policy can stay strict.
+//   - Its CSS is scoped to .mod-scheduler (public/css/scheduler.css) so the two apps
+//     cannot restyle one another.
+//
+// WHAT DID NOT CHANGE
+//   The calendar, dashboard, tickets and all their behaviour. Beyond the API shim at the
+//   top and the wiring at the bottom, this is the original logic.
+
+/* eslint-disable */
+(function () {
+  'use strict';
+
+  let booted = false;
+
+// ── API SHIM — replaces the six functions that used to hold a PAT ────────────
+//
+// Same names, same signatures, same return shapes, so the 1,300 lines below are unchanged.
+// Only the transport moved: every call now goes through TX.api -> /api/at, which enforces
+// the permission matrix server-side.
+//
+// The app addresses Airtable fields by ID (returnFieldsByFieldId), which the proxy supports —
+// it resolves ids against the live schema before applying field rules, so a denied field is
+// stripped whichever way the record is keyed.
+
+// Airtable table ids -> the proxy's symbolic names. The client may never send a raw tbl… id;
+// the proxy rejects the request before it authenticates if it sees one.
+const SYM = {
+  tblny4UUKq8OIHQlw: 'site_visits',
+  tbl2wqnfM0eDa8M7P: 'job_cards',
+  tblYXKBqfN4zituh1: 'people',
+  tblWSJlbiGWlZ6yGL: 'activity_log',
+  tblljzSDboKGUJAXg: 'clients',
+  People: 'people',            // the tickets module refers to People by name
+};
+
+function symbolFor(table) {
+  const s = SYM[table];
+  if (!s) throw new Error(`Table "${table}" is not available to this application.`);
+  return s;
+}
+
+async function atGet(table, fields) {
+  const r = await TX.list('OM', symbolFor(table), {
+    fields: (fields && fields.length) ? fields : undefined,
+    pageSize: 100,
+    returnFieldsByFieldId: true,
+  });
+  return r.records || [];
+}
+
+async function atCreate(table, fields /* , typecast */) {
+  // typecast is deliberately ignored — the proxy validates against the live schema instead,
+  // and rejects an invalid value by name rather than silently coercing it.
+  const r = await TX.api({
+    op: 'create', base: 'OM', table: symbolFor(table), fields,
+    params: { returnFieldsByFieldId: true },
+  });
+  return (r.records || [])[0];
+}
+
+async function atUpdate(table, id, fields /* , typecast */) {
+  const r = await TX.api({
+    op: 'update', base: 'OM', table: symbolFor(table), recordId: id, fields,
+    params: { returnFieldsByFieldId: true },
+  });
+  return (r.records || [])[0];
+}
+
+// ── tickets module ──
+async function omPost(tableId, fields) {
+  const r = await TX.api({
+    op: 'create', base: 'OM', table: symbolFor(tableId), fields,
+    params: { returnFieldsByFieldId: true },
+  });
+  return (r.records || [])[0];
+}
+
+async function omPatch(tableId, recId, fields) {
+  const r = await TX.api({
+    op: 'update', base: 'OM', table: symbolFor(tableId), recordId: recId, fields,
+    params: { returnFieldsByFieldId: true },
+  });
+  return (r.records || [])[0];
+}
+
+async function omFetchAll(tableId, fieldIds, byId) {
+  const r = await TX.list('OM', symbolFor(tableId), {
+    fields: (fieldIds && fieldIds.length) ? fieldIds : undefined,
+    pageSize: 100,
+    returnFieldsByFieldId: !!byId,
+  });
+  return r.records || [];
+}
+
+async function omFetchFiltered(tableId) {
+  const r = await TX.list('OM', symbolFor(tableId), {
+    pageSize: 100, returnFieldsByFieldId: true,
+  });
+  const all = r.records || [];
+  all.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime)); // newest first
+  return all;
+}
+
+/* ============================================================
+   TAGEX O&M — Site Visit Scheduler
+   Base: app0tq4y9wH10h6Up  ·  Table: Site Visits (tblny4UUKq8OIHQlw)
+   Live Airtable REST read/write. SAST (UTC+2, no DST).
+   ============================================================ */
+"use strict";
+
+const BASE = "app0tq4y9wH10h6Up";
+const T = {
+  visits: "tblny4UUKq8OIHQlw",
+  jobcards: "tbl2wqnfM0eDa8M7P",
+  people: "tblYXKBqfN4zituh1",
+  activity: "tblWSJlbiGWlZ6yGL"
+};
+// Field IDs — Site Visits
+const F = {
+  subject:"fldl6AeZcPmO9gVj9", jobcard:"fldgtKHwY1VcJHT0s",
+  start:"fldDB3DUqHvADw0op", end:"fldaC9cFqOIpPKhDn", duration:"fldUG6X7k2ZCaqOQ3",
+  tech:"fld7pIfI0kICxP61v", attendees:"fldRHOylDslXsbFJ1",
+  vtype:"fldu5Aou8gQZoG38h", status:"fldEoAd9YkLfCIBDj", priority:"fldRIJWIwdEFfDams",
+  notes:"flddCyyVn6w0h5y0H", createdBy:"fldNj9om7JzeyY1Uy", visitId:"fldkpn9x6pM0wXXdz",
+  // A visit raised from a ticket carries it. Every visit that predates tickets has none, so
+  // nothing below may assume it is there.
+  ticket:"fldXKl0jI6lbIvj4u"
+};
+// Field IDs — Job Cards
+const JC = { ref:"fld0epAfApDO5Cxyv", title:"fldaNMYaVBdw4rxho", clientName:"fldsgE29yrzxXwn4d", site:"fldUhpNu8fh16J0Gb", status:"fldNoL4FzEHcT027I", owner:"fldzwUxqqTvMDwDak" };
+// Field IDs — People
+const P = { name:"fldtNDc2YQVZHxS4Q", role:"fldkYZozR0QGOf4pA", email:"fldWkXEQLmJ3TMAwh" };
+// Field IDs — Activity Log
+const AL = { update:"fldcciRgQcM8gPwBR", jobcard:"fldq3dlkkE6lRd9za", actionType:"fld3Im7LzAcn6ckQe" };
+
+// Visit Type colour map (mirrors Airtable singleSelect colours)
+const TYPE_COLOR = {
+  "Site Inspection":"#4aa3ff","Fault Investigation":"#ff9f43","Maintenance":"#3ecf8e",
+  "Emergency Callout":"#ef5d5d","Installation":"#b07cff","Commissioning":"#f0c000",
+  "Warranty Assessment":"#37c5d6","Client Meeting":"#5ed98a","COC Inspection":"#ff7cc0",
+  // Last, not first. VISIT_TYPES is derived from these keys in order, so putting it first
+  // also made it the default for every ordinary visit -- and made "the ticket's visit type was
+  // ignored" look exactly like success. Its colour is unlike the others on purpose: a return
+  // trip is a cost and should be visible as one on the calendar.
+  "Return Visit":"#e0457b",
+  "Engineering Assessment":"#9aa3ad"
+};
+const STATUS_COLOR = {
+  "Draft":"#9aa3ad","Scheduled":"#4aa3ff","Confirmed":"#3ecf8e","In Progress":"#f0c000",
+  "Completed":"#5ed98a","Cancelled":"#ef5d5d","Rescheduled":"#ff9f43"
+};
+const ACTIVE_STATUSES = ["Scheduled","Confirmed","In Progress"]; // for conflict detection
+// Named so scripts/verify-selects.js can read it and compare against the live schema. It was
+// an inline literal, which is exactly how a fourth option gets added here and nowhere else.
+const VISIT_PRIS = ["Low","Normal","High","Urgent"];
+const VISIT_TYPES = Object.keys(TYPE_COLOR);
+const STATUSES = Object.keys(STATUS_COLOR);
+
+// ---------- state ----------
+// PAT removed — all access is through the session proxy.
+let DATA = { visits:[], jobcards:[], people:[] };
+let peopleById = {}, jobcardById = {};
+let curView = "month";
+let cursor = new Date();             // anchor date
+let editingId = null;                // visit record id being edited (null = new)
+let pendingConflictOverride = false;
+
+// ---------- DOM refs (assigned in DOMContentLoaded) ----------
+let el = {};
+
+// ============================================================
+//  TIME HELPERS  (SAST = UTC+2, fixed)
+// ============================================================
+const SAST_OFFSET = 2 * 60; // minutes
+function utcToSast(iso){ if(!iso) return null; const d=new Date(iso); return new Date(d.getTime()+SAST_OFFSET*60000); }
+function sastFieldsToUtcISO(localStr){ // "2026-06-10T08:00" (wall clock SAST) -> UTC ISO
+  if(!localStr) return null;
+  const [datePart,timePart]=localStr.split("T");
+  const [y,mo,da]=datePart.split("-").map(Number);
+  const [h,mi]=timePart.split(":").map(Number);
+  const utcMs=Date.UTC(y,mo-1,da,h,mi)-SAST_OFFSET*60000;
+  return new Date(utcMs).toISOString();
+}
+function isoToLocalInput(iso){ // UTC ISO -> "YYYY-MM-DDTHH:MM" in SAST
+  const d=utcToSast(iso); if(!d) return "";
+  const p=n=>String(n).padStart(2,"0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+function fmtTime(iso){ const d=utcToSast(iso); if(!d) return ""; const p=n=>String(n).padStart(2,"0"); return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`; }
+function fmtDate(iso){ const d=utcToSast(iso); if(!d) return ""; const p=n=>String(n).padStart(2,"0"); return `${p(d.getUTCDate())}/${p(d.getUTCMonth()+1)}/${d.getUTCFullYear()}`; }
+function fmtDateTime(iso){ return fmtDate(iso)+" "+fmtTime(iso); }
+// day key in SAST for bucketing
+function dayKey(iso){ const d=utcToSast(iso); if(!d) return ""; const p=n=>String(n).padStart(2,"0"); return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}`; }
+function dateToKey(d){ const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DOW=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+// helpers for reading singleSelect / lookup
+const selName=v=>(v&&typeof v==="object")?v.name:(v||"");
+const arr1=v=>Array.isArray(v)?(v[0]||""):(v||"");
+const joinArr=v=>Array.isArray(v)?v.join(", "):String(v||"");
+
+// ============================================================
+//  LOAD
+// ============================================================
+async function loadAll(silent){
+  if(!silent) setConn("Loading…",true);
+  const [visits,jobcards,people]=await Promise.all([
+    atGet(T.visits,[F.subject,F.jobcard,F.start,F.end,F.duration,F.tech,F.attendees,F.vtype,F.status,F.priority,F.notes,F.createdBy,F.visitId,F.ticket]),
+    atGet(T.jobcards,[JC.ref,JC.title,JC.clientName,JC.site,JC.status,JC.owner]),
+    atGet(T.people,[P.name,P.role,P.email])
+  ]);
+  DATA.visits=visits; DATA.jobcards=jobcards; DATA.people=people;
+  peopleById={}; people.forEach(r=>peopleById[r.id]=r.fields[P.name]||"(unnamed)");
+  jobcardById={}; jobcards.forEach(r=>jobcardById[r.id]=r.fields);
+  setConn(`Live · ${visits.length} visits · ${new Date().toLocaleTimeString("en-ZA",{hour:"2-digit",minute:"2-digit"})}`,true);
+}
+
+// Full refresh: reload Airtable data + re-render current view
+async function doRefresh(){
+  const btn=document.getElementById("refreshBtn");
+  btn.classList.add("spinning"); btn.textContent="Refreshing…";
+  try{
+    await loadAll(true);
+    refreshAllViews();
+    toast("Data refreshed","ok");
+  }catch(err){
+    toast("Refresh failed: "+err.message,"bad");
+    setConn("Error — retry",false);
+  }finally{
+    btn.classList.remove("spinning"); btn.textContent="↻ Refresh";
+  }
+}
+
+// Auto-refresh every 60 seconds (keeps calendar live for all users)
+let _autoRefreshTimer;
+function startAutoRefresh(){
+  clearInterval(_autoRefreshTimer);
+  _autoRefreshTimer=setInterval(()=>{
+    if(document.visibilityState==="visible" && TX.isSignedIn()){
+      loadAll(true).then(refreshAllViews)
+        .catch(()=>{});
+    }
+  },60000);
+}
+
+// normalised visit object
+function normVisit(rec){
+  const f=rec.fields;
+  const techIds=f[F.tech]||[];
+  return {
+    id:rec.id, subject:f[F.subject]||"", jcIds:f[F.jobcard]||[],
+    start:f[F.start]||null, end:f[F.end]||null,
+    techIds, techNames:techIds.map(i=>peopleById[i]||"?"),
+    attIds:f[F.attendees]||[],
+    type:selName(f[F.vtype]), status:selName(f[F.status]), priority:selName(f[F.priority]),
+    notes:f[F.notes]||"", visitId:f[F.visitId]||"",
+    ticketIds:f[F.ticket]||[]
+  };
+}
+function jcLabel(jcId){ const f=jobcardById[jcId]; if(!f) return "(no JC)"; return (f[JC.ref]||"")+" — "+(f[JC.title]||""); }
+function jcRef(jcId){ const f=jobcardById[jcId]; return f?(f[JC.ref]||""):""; }
+function jcClient(jcId){ const f=jobcardById[jcId]; return f?joinArr(f[JC.clientName]):""; }
+const OWNER_CATS=["PPA","SUB-RES","SUB-C&I","DIRECT-PURC"];
+function jcOwner(jcId){ const f=jobcardById[jcId]; return f?joinArr(f[JC.owner]):""; }
+function jcSite(jcId){ const f=jobcardById[jcId]; return f?joinArr(f[JC.site]):""; }
+
+// apply filters
+function filteredVisits(){
+  const tech=el.filterTech.value, st=el.filterStatus.value, q=el.filterSearch.value.trim().toLowerCase();
+  const own=(el.filterOwner&&el.filterOwner.value)||"";
+  return DATA.visits.map(normVisit).filter(v=>{
+    if(!v.start) return false;
+    // Always exclude Cancelled visits from calendar unless user explicitly filters for them
+    if(v.status==="Cancelled" && st!=="Cancelled") return false;
+    if(tech && !v.techIds.includes(tech)) return false;
+    if(st && v.status!==st) return false;
+    if(own && jcOwner(v.jcIds[0])!==own) return false;
+    if(q){
+      const hay=(v.subject+" "+v.jcIds.map(jcLabel).join(" ")+" "+v.jcIds.map(jcClient).join(" ")+" "+v.jcIds.map(jcSite).join(" ")+" "+v.jcIds.map(jcOwner).join(" ")).toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+// ============================================================
+//  RENDER — period label + dispatch
+// ============================================================
+function render(){
+  if(curView==="month") renderMonth();
+  else if(curView==="week") renderWeek();
+  else renderDay();
+}
+function setPeriod(txt){ el.periodLabel.textContent=txt; }
+// Re-render BOTH the calendar and the Workload after any data change,
+// regardless of which top-level tab is active (Workload is a tab, not a curView).
+function refreshAllViews(){ refreshFilters(); render(); try{ renderDashboard(); }catch(e){} }
+
+// ---------- MONTH ----------
+function renderMonth(){
+  setPeriod(`${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`);
+  const vis=filteredVisits();
+  const byDay={}; vis.forEach(v=>{ const k=dayKey(v.start); (byDay[k]=byDay[k]||[]).push(v); });
+  Object.values(byDay).forEach(a=>a.sort((x,y)=>new Date(x.start)-new Date(y.start)));
+
+  const first=new Date(cursor.getFullYear(),cursor.getMonth(),1);
+  const startGrid=new Date(first); startGrid.setDate(1-first.getDay());
+  const todayKey=dateToKey(new Date());
+
+  let h=`<div class="month"><div class="dow">${DOW.map(d=>`<div>${d}</div>`).join("")}</div><div class="weeks">`;
+  let d=new Date(startGrid);
+  for(let w=0;w<6;w++){
+    h+=`<div class="week">`;
+    for(let i=0;i<7;i++){
+      const k=dateToKey(d);
+      const dim=d.getMonth()!==cursor.getMonth()?"dim":"";
+      const today=k===todayKey?"today":"";
+      const evs=byDay[k]||[];
+      let evHtml="";
+      evs.forEach(v=>{
+        const c=TYPE_COLOR[v.type]||"#9aa3ad";
+        evHtml+=`<div class="ev" draggable="true" data-id="${v.id}" style="background:${c}" title="${esc(v.subject)}${v.jcIds[0]&&jcOwner(v.jcIds[0])?' — Owner: '+esc(jcOwner(v.jcIds[0])):''}">
+          <span class="t">${fmtTime(v.start)}</span><span class="label-txt">${esc(v.techNames[0]||v.type||v.subject)}${v.jcIds[0]&&jcClient(v.jcIds[0])?' · '+esc(jcClient(v.jcIds[0])):''}</span></div>`;
+      });
+      h+=`<div class="cell ${dim} ${today}" data-date="${k}">
+        <span class="dnum">${d.getDate()}</span>${evHtml}</div>`;
+      d.setDate(d.getDate()+1);
+    }
+    h+=`</div>`;
+  }
+  h+=`</div>`;
+  el.calHost.innerHTML=h;
+  wireMonthInteractions();
+}
+
+function wireMonthInteractions(){
+  el.calHost.querySelectorAll(".cell").forEach(cell=>{
+    cell.addEventListener("click",e=>{
+      if(e.target.closest(".ev")) return;
+      openVisitModal(null,{date:cell.dataset.date});
+    });
+    cell.addEventListener("dragover",e=>{e.preventDefault();cell.classList.add("drop");});
+    cell.addEventListener("dragleave",()=>cell.classList.remove("drop"));
+    cell.addEventListener("drop",async e=>{
+      e.preventDefault();cell.classList.remove("drop");
+      const id=e.dataTransfer.getData("text/id");
+      if(id) await rescheduleToDate(id,cell.dataset.date);
+    });
+  });
+  el.calHost.querySelectorAll(".ev").forEach(ev=>{
+    ev.addEventListener("click",e=>{e.stopPropagation();openDetail(ev.dataset.id);});
+    ev.addEventListener("dragstart",e=>e.dataTransfer.setData("text/id",ev.dataset.id));
+  });
+}
+
+// ---------- WEEK / DAY (time grid) ----------
+function startOfWeek(d){ const s=new Date(d); s.setDate(d.getDate()-d.getDay()); s.setHours(0,0,0,0); return s; }
+const DAY_START=6, DAY_END=20; // 06:00–20:00 visible
+function renderWeek(){ renderTimeGrid(7); }
+function renderDay(){ renderTimeGrid(1); }
+
+function renderTimeGrid(ncols){
+  const days=[];
+  if(ncols===7){ const s=startOfWeek(cursor); for(let i=0;i<7;i++){ const dd=new Date(s); dd.setDate(s.getDate()+i); days.push(dd);} 
+    setPeriod(`${days[0].getDate()} ${MONTHS[days[0].getMonth()].slice(0,3)} – ${days[6].getDate()} ${MONTHS[days[6].getMonth()].slice(0,3)} ${days[6].getFullYear()}`);
+  } else { const dd=new Date(cursor); dd.setHours(0,0,0,0); days.push(dd); setPeriod(`${DOW[dd.getDay()]} ${dd.getDate()} ${MONTHS[dd.getMonth()]} ${dd.getFullYear()}`); }
+
+  const vis=filteredVisits();
+  const todayKey=dateToKey(new Date());
+  const colTmpl=`70px repeat(${days.length},1fr)`;
+
+  let head=`<div class="tg-head" style="grid-template-columns:${colTmpl}"><div class="corner"></div>`;
+  days.forEach(dd=>{ const t=dateToKey(dd)===todayKey?"today":""; head+=`<div class="col ${t}"><div class="w">${DOW[dd.getDay()]}</div><div class="d">${dd.getDate()}</div></div>`; });
+  head+=`</div>`;
+
+  // body grid
+  let grid=`<div class="tg-grid" style="grid-template-columns:${colTmpl}">`;
+  // hour label column
+  grid+=`<div class="hour-col">`;
+  for(let hh=DAY_START;hh<DAY_END;hh++) grid+=`<div class="hour-lbl">${String(hh).padStart(2,"0")}:00</div>`;
+  grid+=`</div>`;
+  // day columns
+  days.forEach(dd=>{
+    const k=dateToKey(dd);
+    grid+=`<div class="day-col" data-date="${k}">`;
+    for(let hh=DAY_START;hh<DAY_END;hh++) grid+=`<div class="slot" data-date="${k}" data-hour="${hh}"></div>`;
+    // events for this day
+    const dayVis=vis.filter(v=>dayKey(v.start)===k);
+    // conflict map (per tech overlap)
+    dayVis.forEach(v=>{
+      const sd=utcToSast(v.start), ed=v.end?utcToSast(v.end):new Date(sd.getTime()+3600000);
+      const sH=sd.getUTCHours()+sd.getUTCMinutes()/60;
+      const eH=ed.getUTCHours()+ed.getUTCMinutes()/60;
+      const top=(Math.max(sH,DAY_START)-DAY_START)*52;
+      const height=Math.max(22,(Math.min(eH,DAY_END)-Math.max(sH,DAY_START))*52-2);
+      const c=TYPE_COLOR[v.type]||"#9aa3ad";
+      const conf=hasConflict(v,dayVis)?"conflict":"";
+      grid+=`<div class="tev ${conf}" data-id="${v.id}" style="top:${top}px;height:${height}px;background:${c}">
+        <div class="ttime">${fmtTime(v.start)}${v.end?"–"+fmtTime(v.end):""}</div>
+        <div>${esc(jcRef(v.jcIds[0])||v.subject)}</div>
+        <div style="font-size:10px;opacity:.85;font-weight:600">${v.jcIds[0]&&jcClient(v.jcIds[0])?esc(jcClient(v.jcIds[0])):""}</div>
+        <div style="font-size:10px;opacity:.7">${esc(v.techNames.join(", "))}</div></div>`;
+    });
+    grid+=`</div>`;
+  });
+  grid+=`</div>`;
+
+  el.calHost.innerHTML=`<div class="timegrid">${head}<div class="tg-body">${grid}</div></div>`;
+  // wire
+  el.calHost.querySelectorAll(".slot").forEach(s=>{
+    s.addEventListener("click",()=>openVisitModal(null,{date:s.dataset.date,hour:+s.dataset.hour}));
+  });
+  el.calHost.querySelectorAll(".tev").forEach(t=>{
+    t.addEventListener("click",e=>{e.stopPropagation();openDetail(t.dataset.id);});
+  });
+}
+
+function hasConflict(v,sameDay){
+  if(!ACTIVE_STATUSES.includes(v.status)) return false;
+  const s=new Date(v.start).getTime(), e=v.end?new Date(v.end).getTime():s+3600000;
+  return sameDay.some(o=>{
+    if(o.id===v.id) return false;
+    if(!ACTIVE_STATUSES.includes(o.status)) return false;
+    if(!o.techIds.some(t=>v.techIds.includes(t))) return false;
+    const os=new Date(o.start).getTime(), oe=o.end?new Date(o.end).getTime():os+3600000;
+    return s<oe && os<e;
+  });
+}
+
+// ============================================================
+//  VISIT MODAL (Outlook-style invite)
+// ============================================================
+// Overlays must be attached INSIDE the scheduler container, not to document.body.
+// Every scheduler rule is scoped `.mod-scheduler …` and the custom properties (--card,
+// --line2, --accent) are declared on that container too. A modal parented to <body> matches
+// none of them and resolves no variables, so it renders as an invisible unstyled div —
+// which looks exactly like the New Visit button doing nothing.
+//
+// .modal-bg is position:fixed, and an absolutely-positioned ancestor does not create a
+// containing block for fixed children, so it still covers the viewport from in here.
+function overlayHost() {
+  return document.getElementById('modScheduler') || document.body;
+}
+
+// ── Spares ─────────────────────────────────────────────────────────────────
+//
+// The catalogue is the Palladium Stock Master, which is also what the warehouse raises
+// picking slips against. Loaded once, on the first open, because it is thousands of rows and
+// most visits never ask for it.
+let STOCK=null, stockLoading=null;
+let modalTicketId=null;      // the ticket the open modal belongs to, if any
+let modalSpares=[];          // [{id, code, desc, unit, qty}]
+
+const STK_F={ code:'Palladium Stock Code', desc:'Item Description', unit:'Unit' };
+
+async function loadStock(){
+  if(STOCK) return STOCK;
+  if(stockLoading) return stockLoading;
+  stockLoading=(async()=>{
+    const r=await TX.list('STK','stock_items',{pageSize:100});
+    STOCK=(r.records||[]).map(rec=>({
+      id:rec.id,
+      code:String(rec.fields[STK_F.code]||'').trim(),
+      desc:String(rec.fields[STK_F.desc]||'').trim(),
+      unit:String(rec.fields[STK_F.unit]||'').trim(),
+    })).filter(x=>x.code||x.desc);
+    return STOCK;
+  })();
+  try{ return await stockLoading; } finally { stockLoading=null; }
+}
+
+/** The chosen lines, above the picker, each with a stepper and a way out. */
+function renderSpareLines(wrap){
+  const host=wrap.querySelector('#mSpareLines'); if(!host) return;
+  host.innerHTML=modalSpares.length?modalSpares.map((l,i)=>
+    `<div class="om-spare">
+       <div class="om-sparetxt"><b>${esc(l.code)}</b><span>${esc(l.desc)}</span></div>
+       <div class="om-stepper">
+         <button type="button" class="om-step" data-spare="dec" data-i="${i}" aria-label="One fewer">\u2212</button>
+         <span class="om-qty">${l.qty}</span>
+         <button type="button" class="om-step" data-spare="inc" data-i="${i}" aria-label="One more">+</button>
+         <button type="button" class="om-step om-x" data-spare="rm" data-i="${i}" aria-label="Remove">\u00d7</button>
+       </div>
+     </div>`).join('')
+    :'<div class="om-empty" style="padding:10px">Nothing listed yet.</div>';
+}
+
+function wireSpares(wrap){
+  const sel=wrap.querySelector('#mSpareSel');
+  const msg=wrap.querySelector('#mSpareMsg');
+
+  wrap.querySelector('#mSpareLines').addEventListener('click',(e)=>{
+    const b=e.target.closest('[data-spare]'); if(!b) return;
+    const i=+b.dataset.i, line=modalSpares[i]; if(!line) return;
+    if(b.dataset.spare==='inc') line.qty+=1;
+    else if(b.dataset.spare==='dec') line.qty=Math.max(1,line.qty-1);
+    else modalSpares.splice(i,1);
+    renderSpareLines(wrap);
+  });
+
+  sel.addEventListener('change',()=>{
+    const item=(STOCK||[]).find(x=>x.id===sel.value);
+    if(!item) return;
+    const have=modalSpares.find(l=>l.id===item.id);
+    // Choosing the same part twice means two of it, not a second line saying the same thing.
+    if(have) have.qty+=1;
+    else modalSpares.push({id:item.id,code:item.code,desc:item.desc,unit:item.unit,qty:1});
+    sel.value='';
+    renderSpareLines(wrap);
+  });
+
+  // Filled on first open, not on page load: most visits never touch it.
+  msg.textContent='Loading the stock catalogue\u2026';
+  loadStock().then((rows)=>{
+    sel.innerHTML='<option value="">\u2014 search the stock catalogue \u2014</option>'
+      +rows.map(x=>`<option value="${esc(x.id)}">${esc(x.code+(x.desc?' \u2014 '+x.desc:''))}</option>`).join('');
+    TX.pick.scan(wrap);
+    msg.textContent=rows.length+' item'+(rows.length===1?'':'s')+' \u00b7 type a code or a description';
+  }).catch((e)=>{
+    // A picker that silently shows nothing looks like an empty catalogue.
+    msg.innerHTML='<span class="om-err">The stock catalogue could not be read: '+esc(TX.errorText(e))+'</span>';
+  });
+}
+
+/** Previous visits on this ticket, shown in the modal so nobody re-books the same trip. */
+function ticketHistoryHtml(ticketId){
+  const prior=DATA.visits.map(normVisit)
+    .filter(v=>v.ticketIds.includes(ticketId))
+    .sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+  if(!prior.length) return '<div class="om-empty" style="padding:10px">No earlier visits on this ticket.</div>';
+  return prior.map(v=>`<div class="om-tli"><div class="om-tld g"></div>
+    <div class="om-tlt">${esc(fmtDate(v.start))} ${esc(fmtTime(v.start))} \u00b7 <span style="color:var(--accent)">${esc(v.type||'')}</span> \u00b7 ${esc(v.status||'')}</div>
+    <div class="om-tltx">${esc(v.techNames.join(', ')||'unassigned')}${v.notes?' \u2014 '+esc(v.notes):''}</div></div>`).join('');
+}
+
+function openVisitModal(visitId, preset){
+  editingId=visitId; pendingConflictOverride=false;
+  const v=visitId?normVisit(DATA.visits.find(r=>r.id===visitId)):null;
+  preset=preset||{};
+
+  // defaults
+  let startLocal, endLocal;
+  if(v){ startLocal=isoToLocalInput(v.start); endLocal=isoToLocalInput(v.end); }
+  else {
+    const h=preset.hour!=null?preset.hour:9;
+    const dpart=preset.date||dateToKey(new Date());
+    startLocal=`${dpart}T${String(h).padStart(2,"0")}:00`;
+    endLocal=`${dpart}T${String(Math.min(h+2,23)).padStart(2,"0")}:00`;
+  }
+
+  const jcOptions=DATA.jobcards
+    .slice().sort((a,b)=>String(b.fields[JC.ref]).localeCompare(String(a.fields[JC.ref])))
+    .map(r=>{const cl=joinArr(r.fields[JC.clientName]);const ow=joinArr(r.fields[JC.owner]);return `<option value="${r.id}" ${v&&v.jcIds[0]===r.id?"selected":""}>${esc((r.fields[JC.ref]||"")+" — "+(r.fields[JC.title]||"")+(cl?" · "+cl:"")+(ow?" ["+ow+"]":""))}</option>`;}).join("");
+  const wantTech=v?v.techIds[0]:(preset.techId||"");
+  const techOptions=`<option value="">— select —</option>`+DATA.people
+    .map(r=>`<option value="${r.id}" ${r.id===wantTech?"selected":""}>${esc(r.fields[P.name]||"")}</option>`).join("");
+  const attOptions=DATA.people.map(r=>`<label><input type="checkbox" value="${r.id}" ${v&&v.attIds.includes(r.id)?"checked":""}> ${esc(r.fields[P.name]||"")}</label>`).join("");
+  // A preset only applies to a NEW visit; editing an existing one always shows what it is.
+  const wantType=v?v.type:(preset.type||"");
+  const wantPrio=v?v.priority:(preset.prio||"Normal");
+  const typeOptions=VISIT_TYPES.map(t=>`<option ${t===wantType?"selected":""}>${t}</option>`).join("");
+  // Four, matching Site Visits -> Priority in Airtable and the ticket form, so a ticket
+  // pre-fills its visit one for one.
+  const prioOptions=VISIT_PRIS
+    .map(p=>`<option ${p===wantPrio?"selected":""}>${p}</option>`).join("");
+  const statusOptions=STATUSES.map(s=>`<option ${v?(v.status===s?"selected":""):(s==="Scheduled"?"selected":"")}>${s}</option>`).join("");
+
+  const wrap=document.createElement("div");
+  wrap.className="modal-bg"; wrap.id="modalBg";
+  wrap.innerHTML=`<div class="modal">
+    <div class="mh"><div class="ic">📅</div><h2>${visitId?"Edit Site Visit":"Schedule Site Visit"}</h2><button class="x" id="mClose">×</button></div>
+    <div class="mbody">
+      <div class="fld"><label>Meeting Subject</label><input id="mSubject" value="${v?esc(v.subject):""}" placeholder="Auto-fills from Job Card"></div>
+      <div class="fld"><label>Job Card</label><select id="mJC" data-search="job cards"><option value="">— select job card —</option>${jcOptions}</select>
+        <div id="mJCowner" style="font-family:ui-monospace,monospace;font-size:11px;color:var(--muted2);margin-top:5px;"></div></div>
+      <div class="two">
+        <div class="fld"><label>Start (SAST)</label><input type="datetime-local" id="mStart" value="${startLocal}"></div>
+        <div class="fld"><label>End (SAST)</label><input type="datetime-local" id="mEnd" value="${endLocal}"></div>
+      </div>
+      <div class="two">
+        <div class="fld"><label>Technician</label><select id="mTech">${techOptions}</select></div>
+        <div class="fld"><label>Visit Type</label><select id="mType">${typeOptions}</select></div>
+      </div>
+      <div class="two">
+        <div class="fld"><label>Priority</label><select id="mPrio">${prioOptions}</select></div>
+        <div class="fld"><label>Status</label><select id="mStatus">${statusOptions}</select></div>
+      </div>
+      <div class="fld"><label>Additional Attendees</label><div class="multi">${attOptions||'<span style="color:var(--muted);font-size:12px;padding:6px">No people records found</span>'}</div></div>
+      ${preset.ticketId?`
+      <div class="fld"><label>Earlier visits on this ticket</label>
+        <div class="om-hist">${ticketHistoryHtml(preset.ticketId)}</div>
+        <div class="om-hint">Only the visits you are allowed to see. A colleague's visit on this ticket may not be listed.</div>
+      </div>
+      <div class="fld"><label>Spares to take</label>
+        <div id="mSpareLines"></div>
+        <select id="mSpareSel" data-search="stock items"><option value="">Loading\u2026</option></select>
+        <div class="om-hint" id="mSpareMsg"></div>
+      </div>`:""}
+      <div class="fld"><label>Notes</label><textarea id="mNotes" placeholder="Scope, access notes, equipment…">${v?esc(v.notes):""}</textarea></div>
+      <div class="conflict-warn hidden" id="mConflict"></div>
+    </div>
+    <div class="mfoot">
+      ${visitId?`<button class="btn danger sm" id="mCancelVisit">Cancel Visit</button>`:""}
+      <div class="grow"></div>
+      <button class="btn ghost" id="mDiscard">Close</button>
+      <button class="btn" id="mSave">${visitId?"Save Changes":"Save Visit"}</button>
+    </div>
+  </div>`;
+  overlayHost().appendChild(wrap);
+
+  const jcSel=wrap.querySelector("#mJC"), subj=wrap.querySelector("#mSubject");
+  function autofill(){
+    if(!jcSel.value){ const o=wrap.querySelector("#mJCowner"); if(o)o.textContent=""; return; }
+    const f=jobcardById[jcSel.value];
+    if(f && (!subj.value || subj.dataset.auto==="1")){ subj.value=(f[JC.ref]||"")+" - "+(f[JC.title]||""); subj.dataset.auto="1"; }
+    const o=wrap.querySelector("#mJCowner");
+    if(o){ const ow=jcOwner(jcSel.value), cl=jcClient(jcSel.value); o.innerHTML=[cl?"🏢 "+esc(cl):"",ow?'Owner: <span style="color:#f0a500">'+esc(ow)+'</span>':""].filter(Boolean).join(" · "); }
+  }
+  if(!v && preset.jcId){ jcSel.value=preset.jcId; }
+  modalTicketId=preset.ticketId||null;
+  modalSpares=[];
+  if(modalTicketId){ renderSpareLines(wrap); wireSpares(wrap); }
+  autofill();
+  jcSel.addEventListener("change",autofill);
+  TX.pick.scan(wrap);   // built after the page loaded, so it is scanned when it is built
+  subj.addEventListener("input",()=>subj.dataset.auto="0");
+
+  wrap.querySelector("#mClose").onclick=closeModal;
+  wrap.querySelector("#mDiscard").onclick=closeModal;
+  wrap.addEventListener("click",e=>{ if(e.target===wrap) closeModal(); });
+  wrap.querySelector("#mSave").onclick=()=>saveVisit(wrap);
+  if(visitId){ wrap.querySelector("#mCancelVisit").onclick=()=>cancelVisit(visitId); }
+}
+function closeModal(){ const m=document.getElementById("modalBg"); if(m) m.remove(); editingId=null; }
+
+function collectModal(wrap){
+  const atts=[...wrap.querySelectorAll(".multi input:checked")].map(c=>c.value);
+  return {
+    subject:wrap.querySelector("#mSubject").value.trim(),
+    jcId:wrap.querySelector("#mJC").value,
+    start:wrap.querySelector("#mStart").value,
+    end:wrap.querySelector("#mEnd").value,
+    techId:wrap.querySelector("#mTech").value,
+    type:wrap.querySelector("#mType").value,
+    prio:wrap.querySelector("#mPrio").value,
+    status:wrap.querySelector("#mStatus").value,
+    atts, notes:wrap.querySelector("#mNotes").value.trim()
+  };
+}
+
+async function saveVisit(wrap){
+  const m=collectModal(wrap);
+  if(!m.jcId){ toast("Select a Job Card first","bad"); return; }
+  if(!m.start||!m.end){ toast("Start and End are required","bad"); return; }
+  const startISO=sastFieldsToUtcISO(m.start), endISO=sastFieldsToUtcISO(m.end);
+  if(new Date(endISO)<=new Date(startISO)){ toast("End must be after Start","bad"); return; }
+
+  // ---- conflict detection ----
+  if(m.techId && ACTIVE_STATUSES.includes(m.status) && !pendingConflictOverride){
+    const sMs=new Date(startISO).getTime(), eMs=new Date(endISO).getTime();
+    const clash=DATA.visits.map(normVisit).find(v=>{
+      if(v.id===editingId) return false;
+      if(!v.techIds.includes(m.techId)) return false;
+      if(!ACTIVE_STATUSES.includes(v.status)) return false;
+      const vs=new Date(v.start).getTime(), ve=v.end?new Date(v.end).getTime():vs+3600000;
+      return sMs<ve && vs<eMs;
+    });
+    if(clash){
+      const box=wrap.querySelector("#mConflict");
+      box.classList.remove("hidden");
+      box.innerHTML=`<span>⚠️</span><div><b>${esc(peopleById[m.techId]||"Technician")}</b> already assigned to
+        <b>${esc(jcRef(clash.jcIds[0])||clash.subject)}</b> on ${fmtDateTime(clash.start)}.
+        <div style="margin-top:8px;display:flex;gap:8px"><button class="btn sm" id="ovrBtn">Override &amp; save anyway</button></div></div>`;
+      wrap.querySelector("#ovrBtn").onclick=()=>{ pendingConflictOverride=true; box.classList.add("hidden"); saveVisit(wrap); };
+      return;
+    }
+  }
+
+  const fields={
+    [F.subject]:m.subject||((jobcardById[m.jcId]?.[JC.ref]||"")+" - "+(jobcardById[m.jcId]?.[JC.title]||"")),
+    [F.jobcard]:[m.jcId],
+    [F.start]:startISO,[F.end]:endISO,
+    [F.vtype]:m.type,[F.priority]:m.prio,[F.status]:m.status,
+    [F.notes]:m.notes
+  };
+  if(modalTicketId && !editingId) fields[F.ticket]=[modalTicketId];
+  if(m.techId) fields[F.tech]=[m.techId]; else fields[F.tech]=[];
+  fields[F.attendees]=m.atts;
+  // Identity now comes from the signed-in session, not a prompt() the user typed once.
+  if(!editingId) fields[F.createdBy]=TX.userEmail()||"unknown";
+
+  const btn=wrap.querySelector("#mSave"); btn.disabled=true; btn.textContent="Saving…";
+  try{
+    let rec, action, msg;
+    if(editingId){
+      const before=normVisit(DATA.visits.find(r=>r.id===editingId));
+      rec=await atUpdate(T.visits, editingId, fields, true);
+      // reschedule detection
+      if(before.start!==startISO || before.end!==endISO){
+        action="Visit Rescheduled";
+        msg=`Site visit moved from ${fmtDateTime(before.start)} to ${fmtDateTime(startISO)} (${m.subject||jcRef(m.jcId)})`;
+      } else if(before.status!==m.status && m.status==="Completed"){
+        action="Visit Completed"; msg=`Site visit completed by ${peopleById[m.techId]||"technician"} (${m.subject||jcRef(m.jcId)})`;
+      } else { action=null; }
+      // update local
+      const idx=DATA.visits.findIndex(r=>r.id===editingId); if(idx>=0) DATA.visits[idx]=rec;
+    } else {
+      rec=await atCreate(T.visits, fields, true);
+      DATA.visits.push(rec);
+      action="Visit Scheduled";
+      msg=`Site visit scheduled for ${fmtDateTime(startISO)} by ${TX.userName()||TX.userEmail()||"unknown"} (${m.subject||jcRef(m.jcId)})`;
+    }
+    if(action) await logActivity(m.jcId, action, msg);
+
+    // ── the ticket side of a second visit ──────────────────────────────────
+    // The visit is saved by this point. Anything that fails from here on is reported
+    // precisely, because "save failed" over a visit that DID save is how someone ends up
+    // booking it twice.
+    let ticketProblems=[];
+    if(modalTicketId && !editingId){
+      const problems=ticketProblems;
+      const saved=[];
+      for(const line of modalSpares){
+        try{
+          await spareCreate({
+            [TKS.ticket]:[modalTicketId], [TKS.visit]:[rec.id],
+            [TKS.code]:line.code, [TKS.desc]:line.desc, [TKS.unit]:line.unit,
+            [TKS.srcId]:line.id, [TKS.qtyReq]:line.qty, [TKS.status]:'Requested',
+          });
+          saved.push(line);
+        }catch(e){ problems.push(line.code+': '+e.message); }
+      }
+      try{
+        await tktUpdate(modalTicketId,{ [TK.status]: saved.length?'Awaiting Spares':'Second Visit Scheduled' });
+      }catch(e){ problems.push('the ticket status: '+e.message); }
+      if(saved.length){
+        try{
+          await omPost(OM_T.ACT,{
+            [OM_F.AL_NOTE]:'Spares requested for the visit on '+fmtDateTime(startISO)+':\n'
+              +saved.map(l=>l.qty+' \u00d7 '+l.code+(l.desc?' ('+l.desc+')':'')).join('\n'),
+            [OM_F.AL_JC]:[m.jcId],
+            [OM_F.AL_TICKET]:[modalTicketId],
+            [OM_F.AL_TYPE]:'Spares Requested',
+          });
+        }catch(e){ problems.push('the spares activity entry: '+e.message); }
+      }
+      omTktData=[];                       // the list and detail re-read
+    }
+    closeModal();
+    // ONE toast, and the bad news wins. This used to raise the problem and then immediately
+    // overwrite it with "Visit scheduled — syncing…", so a part that failed to save was
+    // reported to nobody: the visit went in the diary and the spare was never ordered.
+    if(ticketProblems.length){
+      toast('Visit saved, but these did not: '+ticketProblems.join('; '),'bad');
+    } else {
+      toast(editingId?"Visit updated — syncing…":"Visit scheduled — syncing…","ok");
+    }
+    // Reload from Airtable so calendar reflects true state for all users
+    loadAll(true).then(refreshAllViews)
+      .catch(()=>refreshAllViews()); // fallback: use local data if reload fails
+  }catch(err){ toast("Save failed: "+err.message,"bad"); btn.disabled=false; btn.textContent="Save Visit"; }
+}
+
+async function cancelVisit(id){
+  if(!confirm("Mark this visit as Cancelled? (record is kept, not deleted)")) return;
+  try{
+    const v=normVisit(DATA.visits.find(r=>r.id===id));
+    const rec=await atUpdate(T.visits,id,{[F.status]:"Cancelled"},true);
+    const idx=DATA.visits.findIndex(r=>r.id===id); if(idx>=0) DATA.visits[idx]=rec;
+    await logActivity(v.jcIds[0],"Visit Cancelled",`Site visit cancelled (${v.subject||jcRef(v.jcIds[0])}) — was ${fmtDateTime(v.start)}`);
+    closeModal(); toast("Visit cancelled — syncing…","ok");
+    loadAll(true).then(refreshAllViews).catch(()=>refreshAllViews());
+  }catch(err){ toast("Failed: "+err.message,"bad"); }
+}
+
+async function rescheduleToDate(id, newDateKey){
+  const v=normVisit(DATA.visits.find(r=>r.id===id));
+  if(!v.start) return;
+  const oldStart=utcToSast(v.start), oldEnd=v.end?utcToSast(v.end):new Date(oldStart.getTime()+3600000);
+  const durMin=(oldEnd-oldStart)/60000;
+  const [y,mo,da]=newDateKey.split("-").map(Number);
+  const newStartLocal=`${newDateKey}T${String(oldStart.getUTCHours()).padStart(2,"0")}:${String(oldStart.getUTCMinutes()).padStart(2,"0")}`;
+  const newStartISO=sastFieldsToUtcISO(newStartLocal);
+  const newEndISO=new Date(new Date(newStartISO).getTime()+durMin*60000).toISOString();
+  try{
+    const rec=await atUpdate(T.visits,id,{[F.start]:newStartISO,[F.end]:newEndISO,[F.status]:"Rescheduled"},true);
+    const idx=DATA.visits.findIndex(r=>r.id===id); if(idx>=0) DATA.visits[idx]=rec;
+    await logActivity(v.jcIds[0],"Visit Rescheduled",`Site visit moved from ${fmtDateTime(v.start)} to ${fmtDateTime(newStartISO)} (drag-drop)`);
+    toast("Visit rescheduled — syncing…","ok");
+    loadAll(true).then(refreshAllViews).catch(()=>refreshAllViews());
+  }catch(err){ toast("Reschedule failed: "+err.message,"bad"); }
+}
+
+async function logActivity(jcId, actionType, text){
+  if(!jcId) return;
+  try{
+    await atCreate(T.activity,{ [AL.update]:text, [AL.jobcard]:[jcId], [AL.actionType]:actionType }, true);
+  }catch(err){ console.warn("Activity log write failed:",err.message); toast("Visit saved, but Activity Log write failed: "+err.message,"bad"); }
+}
+
+// ============================================================
+//  DETAIL POPOVER
+// ============================================================
+function openDetail(id){
+  const v=normVisit(DATA.visits.find(r=>r.id===id));
+  const jc=v.jcIds[0];
+  const wrap=document.createElement("div");
+  wrap.className="modal-bg"; wrap.id="modalBg";
+  wrap.innerHTML=`<div class="modal">
+    <div class="mh"><div class="ic" style="background:${TYPE_COLOR[v.type]||'#9aa3ad'}">📍</div>
+      <h2>${esc(v.subject||"Site Visit")}</h2><button class="x" id="dClose">×</button></div>
+    <div class="mbody" style="gap:0">
+      <div class="detail-row"><div class="k">Visit ID</div><div class="v">${esc(v.visitId)}</div></div>
+      <div class="detail-row"><div class="k">Job Card</div><div class="v">${esc(jcLabel(jc))}</div></div>
+      <div class="detail-row"><div class="k">Client</div><div class="v">${esc(jcClient(jc)||"—")}</div></div>
+      <div class="detail-row"><div class="k">Owner category</div><div class="v">${jcOwner(jc)?`<span class="chip" style="background:#f0a500;color:#0a0a0b">${esc(jcOwner(jc))}</span>`:"—"}</div></div>
+      <div class="detail-row"><div class="k">Site</div><div class="v">${esc(jcSite(jc)||"—")}</div></div>
+      <div class="detail-row"><div class="k">When</div><div class="v">${fmtDateTime(v.start)} → ${v.end?fmtTime(v.end):"?"} <span style="color:var(--muted)">(${v.end?Math.round((new Date(v.end)-new Date(v.start))/60000):0} min)</span></div></div>
+      <div class="detail-row"><div class="k">Technician</div><div class="v">${esc(v.techNames.join(", ")||"—")}</div></div>
+      <div class="detail-row"><div class="k">Attendees</div><div class="v">${esc(v.attIds.map(i=>peopleById[i]||"?").join(", ")||"—")}</div></div>
+      <div class="detail-row"><div class="k">Type</div><div class="v"><span class="chip" style="background:${TYPE_COLOR[v.type]||'#9aa3ad'}">${esc(v.type||"—")}</span></div></div>
+      <div class="detail-row"><div class="k">Status</div><div class="v"><span class="chip" style="background:${STATUS_COLOR[v.status]||'#9aa3ad'}">${esc(v.status||"—")}</span></div></div>
+      <div class="detail-row"><div class="k">Priority</div><div class="v">${esc(v.priority||"—")}</div></div>
+      ${v.notes?`<div class="detail-row"><div class="k">Notes</div><div class="v">${esc(v.notes)}</div></div>`:""}
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost sm" id="dComplete">✓ Mark Completed</button>
+      <div class="grow"></div>
+      <button class="btn ghost" id="dCloseB">Close</button>
+      <button class="btn" id="dEdit">Edit</button>
+    </div>
+  </div>`;
+  overlayHost().appendChild(wrap);
+  wrap.querySelector("#dClose").onclick=closeModal;
+  wrap.querySelector("#dCloseB").onclick=closeModal;
+  wrap.addEventListener("click",e=>{ if(e.target===wrap) closeModal(); });
+  wrap.querySelector("#dEdit").onclick=()=>{ closeModal(); openVisitModal(id); };
+  wrap.querySelector("#dComplete").onclick=async()=>{
+    try{
+      const rec=await atUpdate(T.visits,id,{[F.status]:"Completed"},true);
+      const idx=DATA.visits.findIndex(r=>r.id===id); if(idx>=0) DATA.visits[idx]=rec;
+      await logActivity(v.jcIds[0],"Visit Completed",`Site visit completed by ${v.techNames.join(", ")||"technician"} (${v.subject||jcRef(v.jcIds[0])})`);
+      closeModal(); toast("Marked completed — syncing…","ok");
+      loadAll(true).then(refreshAllViews).catch(()=>render());
+    }catch(err){ toast("Failed: "+err.message,"bad"); }
+  };
+}
+
+// ============================================================
+//  DASHBOARD
+// ============================================================
+function renderDashboard(){
+  const vis=DATA.visits.map(normVisit).filter(v=>v.start);
+  const todayKey=dateToKey(new Date());
+  const now=new Date();
+  const wkStart=startOfWeek(now), wkEnd=new Date(wkStart); wkEnd.setDate(wkStart.getDate()+7);
+
+  const today=vis.filter(v=>dayKey(v.start)===todayKey);
+  const week=vis.filter(v=>{ const d=new Date(v.start); return d>=wkStart && d<wkEnd; });
+  const activeNow=vis.filter(v=>ACTIVE_STATUSES.includes(v.status));
+  const completedWk=week.filter(v=>v.status==="Completed");
+  const emergWk=week.filter(v=>v.type==="Emergency Callout");
+
+  // per-technician (this week)
+  const perTech={};
+  week.forEach(v=>{
+    v.techIds.forEach(tid=>{
+      const n=peopleById[tid]||"Unassigned";
+      perTech[n]=perTech[n]||{visits:0,minutes:0,emerg:0};
+      perTech[n].visits++;
+      if(v.end) perTech[n].minutes+=(new Date(v.end)-new Date(v.start))/60000;
+      if(v.type==="Emergency Callout") perTech[n].emerg++;
+    });
+  });
+  const techRows=Object.entries(perTech).sort((a,b)=>b[1].visits-a[1].visits);
+  const maxV=Math.max(1,...techRows.map(r=>r[1].visits));
+
+  // upcoming list (next 7)
+  const upcoming=vis.filter(v=>new Date(v.start)>=new Date(Date.now()-3600000) && ACTIVE_STATUSES.includes(v.status))
+    .sort((a,b)=>new Date(a.start)-new Date(b.start)).slice(0,8);
+
+  // type breakdown this week
+  const typeCount={}; week.forEach(v=>{ typeCount[v.type]=(typeCount[v.type]||0)+1; });
+
+  // filter option lists (across all visits)
+  const allTechs=[...new Set(vis.flatMap(v=>v.techNames))].filter(Boolean).sort();
+  const allStatuses=[...new Set(vis.map(v=>v.status))].filter(Boolean).sort();
+  const allTypes=[...new Set(vis.map(v=>v.type))].filter(Boolean).sort();
+  const _selSty='background:var(--card);border:1px solid var(--line2);color:var(--text);padding:8px 10px;border-radius:8px;font-size:12px;';
+  const techOpts=`<option value="">All technicians</option>`+allTechs.map(t=>`<option>${esc(t)}</option>`).join("");
+  const statusOpts=`<option value="">All statuses</option>`+allStatuses.map(t=>`<option>${esc(t)}</option>`).join("");
+  const typeOpts=`<option value="">All types</option>`+allTypes.map(t=>`<option>${esc(t)}</option>`).join("");
+  const allOwners=[...new Set(vis.map(v=>jcOwner(v.jcIds[0])))].filter(Boolean).sort();
+  const ownerOpts=`<option value="">All owner categories</option>`+allOwners.map(t=>`<option>${esc(t)}</option>`).join("");
+
+  let h=`
+  <div class="grid-cards">
+    <div class="kcard accent"><div class="label">Visits Today</div><div class="val">${today.length}</div><div class="sub">${todayKey.split("-").reverse().join("/")}</div></div>
+    <div class="kcard"><div class="label">Active Now</div><div class="val">${activeNow.length}</div><div class="sub">Scheduled · Confirmed · In Progress</div></div>
+    <div class="kcard"><div class="label">Completed (wk)</div><div class="val">${completedWk.length}</div><div class="sub">of ${week.length} this week</div></div>
+    <div class="kcard ${emergWk.length?'bad':''}"><div class="label">Emergency (wk)</div><div class="val">${emergWk.length}</div><div class="sub">callouts this week</div></div>
+  </div>
+
+  <div class="panel">
+    <h3><span class="bar"></span>Technician Workload — This Week</h3>
+    <div class="twrap"><table>
+      <thead><tr><th>Technician</th><th style="width:40%">Visits</th><th>Hours Scheduled</th><th>Emergency</th></tr></thead>
+      <tbody>
+      ${techRows.length?techRows.map(([n,d])=>`<tr>
+        <td>${esc(n)}</td>
+        <td><div class="barcell"><div class="bar-track"><div class="bar-fill" style="width:${(d.visits/maxV*100).toFixed(0)}%"></div></div><b>${d.visits}</b></div></td>
+        <td>${(d.minutes/60).toFixed(1)} h</td>
+        <td>${d.emerg?`<span class="chip" style="background:var(--bad);color:#fff">${d.emerg}</span>`:"—"}</td>
+      </tr>`).join(""):`<tr><td colspan="4" style="color:var(--muted)">No visits scheduled this week.</td></tr>`}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="panel">
+    <h3><span class="bar"></span><span id="dashVisitsTitle">Upcoming Visits</span></h3>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+      <input id="dashSearch" type="text" placeholder="Search JC, client, subject, technician…" data-on="input" data-act="dashApply" style="flex:1;min-width:200px;${_selSty}">
+      <select id="dashTech" data-on="change" data-act="dashApply" style="${_selSty}">${techOpts}</select>
+      <select id="dashStatus" data-on="change" data-act="dashApply" style="${_selSty}">${statusOpts}</select>
+      <select id="dashType" data-on="change" data-act="dashApply" style="${_selSty}">${typeOpts}</select>
+      <select id="dashOwner" data-on="change" data-act="dashApply" style="${_selSty}">${ownerOpts}</select>
+      <button data-act="dashClear" style="background:transparent;border:1px solid var(--line2);color:var(--muted2);padding:8px 12px;border-radius:8px;font-size:12px;cursor:pointer;">Clear</button>
+    </div>
+    <div class="twrap"><table>
+      <thead><tr><th>When</th><th>JC</th><th>Client</th><th>Owner</th><th>Subject</th><th>Technician</th><th>Type</th><th>Status</th></tr></thead>
+      <tbody id="dashVisitsBody"></tbody>
+    </table></div>
+  </div>
+
+  <div class="panel">
+    <h3><span class="bar"></span>Visit Type Mix — This Week</h3>
+    <div class="legend">
+      ${Object.entries(typeCount).length?Object.entries(typeCount).map(([t,c])=>`<span><i style="background:${TYPE_COLOR[t]||'#9aa3ad'}"></i>${esc(t)} · <b>${c}</b></span>`).join(""):`<span style="color:var(--muted)">No data</span>`}
+    </div>
+  </div>`;
+  el.dashHost.innerHTML=h;
+  document.getElementById('dashSearch').value=dashFilter.q;
+  document.getElementById('dashTech').value=dashFilter.tech;
+  document.getElementById('dashStatus').value=dashFilter.status;
+  document.getElementById('dashType').value=dashFilter.type;
+  document.getElementById('dashOwner').value=dashFilter.owner;
+  renderDashVisits();
+}
+
+// Workload dashboard search/filter (filters the visits list; KPIs stay weekly aggregates)
+let dashFilter={q:'',tech:'',status:'',type:'',owner:''};
+function renderDashVisits(){
+  const body=document.getElementById('dashVisitsBody'); if(!body)return;
+  const titleEl=document.getElementById('dashVisitsTitle');
+  const vis=DATA.visits.map(normVisit).filter(v=>v.start);
+  const f=dashFilter, active=f.q||f.tech||f.status||f.type||f.owner;
+  let list;
+  if(active){
+    const q=(f.q||'').toLowerCase();
+    list=vis.filter(v=>{
+      if(f.tech && !v.techNames.includes(f.tech)) return false;
+      if(f.status && v.status!==f.status) return false;
+      if(f.type && v.type!==f.type) return false;
+      if(f.owner && jcOwner(v.jcIds[0])!==f.owner) return false;
+      if(q){ const hay=(v.subject+' '+jcRef(v.jcIds[0])+' '+jcClient(v.jcIds[0])+' '+jcOwner(v.jcIds[0])+' '+v.techNames.join(' ')).toLowerCase(); if(!hay.includes(q)) return false; }
+      return true;
+    }).sort((a,b)=>new Date(a.start)-new Date(b.start));
+    if(titleEl) titleEl.textContent=`Results (${list.length})`;
+  }else{
+    list=vis.filter(v=>new Date(v.start)>=new Date(Date.now()-3600000) && ACTIVE_STATUSES.includes(v.status))
+      .sort((a,b)=>new Date(a.start)-new Date(b.start)).slice(0,8);
+    if(titleEl) titleEl.textContent='Upcoming Visits';
+  }
+  body.innerHTML=list.length?list.map(v=>`<tr style="cursor:pointer" data-act="openDetail" data-a1="${v.id}">
+    <td style="white-space:nowrap">${fmtDateTime(v.start)}</td>
+    <td>${esc(jcRef(v.jcIds[0]))}</td>
+    <td>${esc(jcClient(v.jcIds[0])||"—")}</td>
+    <td>${jcOwner(v.jcIds[0])?`<span class="chip" style="background:#f0a500;color:#0a0a0b">${esc(jcOwner(v.jcIds[0]))}</span>`:"—"}</td>
+    <td>${esc(v.subject)}</td>
+    <td>${esc(v.techNames.join(", ")||"—")}</td>
+    <td><span class="chip" style="background:${TYPE_COLOR[v.type]||'#9aa3ad'}">${esc(v.type||"—")}</span></td>
+    <td><span class="chip" style="background:${STATUS_COLOR[v.status]||'#9aa3ad'}">${esc(v.status||"—")}</span></td>
+  </tr>`).join(""):`<tr><td colspan="8" style="color:var(--muted)">${active?'No matching visits.':'Nothing upcoming.'}</td></tr>`;
+}
+function dashApply(){
+  dashFilter={
+    q:(document.getElementById('dashSearch')||{}).value||'',
+    tech:(document.getElementById('dashTech')||{}).value||'',
+    status:(document.getElementById('dashStatus')||{}).value||'',
+    type:(document.getElementById('dashType')||{}).value||'',
+    owner:(document.getElementById('dashOwner')||{}).value||'',
+  };
+  renderDashVisits();
+}
+function dashClear(){
+  dashFilter={q:'',tech:'',status:'',type:'',owner:''};
+  const s=document.getElementById('dashSearch'); if(s)s.value='';
+  ['dashTech','dashStatus','dashType','dashOwner'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  renderDashVisits();
+}
+
+// ============================================================
+//  FILTERS / TABS / NAV
+// ============================================================
+function refreshFilters(){
+  const techSel=el.filterTech, cur=techSel.value;
+  techSel.innerHTML=`<option value="">All technicians</option>`+DATA.people.map(r=>`<option value="${r.id}">${esc(r.fields[P.name]||"")}</option>`).join("");
+  techSel.value=cur;
+  if(!el.filterStatus.dataset.init){
+    el.filterStatus.innerHTML=`<option value="">All statuses</option>`+STATUSES.map(s=>`<option>${s}</option>`).join("");
+    el.filterStatus.dataset.init="1";
+  }
+}
+function switchTab(tab){
+  el.app.querySelectorAll("nav.tabs button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab));
+  el.viewCal.classList.toggle("hidden",tab!=="calendar");
+  el.viewDash.classList.toggle("hidden",tab!=="dashboard");
+  document.getElementById("view-omtickets").classList.toggle("hidden",tab!=="omtickets");
+  el.app.querySelector("main").classList.toggle("om-mode",tab==="omtickets");
+  if(tab==="dashboard") renderDashboard();
+  if(tab==="omtickets"){ if(!omLoaded){ omLoaded=true; omLoadAll(); } else omGoView(omCurrentView); }
+}
+function shiftCursor(dir){
+  if(curView==="month") cursor.setMonth(cursor.getMonth()+dir);
+  else if(curView==="week") cursor.setDate(cursor.getDate()+7*dir);
+  else cursor.setDate(cursor.getDate()+dir);
+  render();
+}
+
+// ============================================================
+//  UTIL
+// ============================================================
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+let toastTimer;
+function toast(msg,kind){ const t=el.toast; t.textContent=msg; t.className=""; if(kind)t.classList.add(kind); t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),4200); }
+function setConn(txt,ok){ el.connTxt.textContent=txt; el.connPulse.classList.toggle("bad",!ok); }
+
+// ============================================================
+//  BOOT
+// ============================================================
+function wireScheduler(){
+  // The PAT-gate elements this map used to hold (gate, patInput, connectBtn, rememberToggle,
+  // gateErr, disconnectBtn) are gone with the token gate itself. Nothing ever read them, so
+  // they resolved to null harmlessly — but they described a screen that no longer exists.
+  //
+  // `app` and `toast` are #schedApp / #schedToast, not #app / #toast: this markup shares a
+  // page with the login shell, and those two ids were too generic to keep. Reading the old
+  // names gave null, and el.app.querySelectorAll() then threw on every load.
+  el={
+    app:document.getElementById("schedApp"),
+    connPulse:document.getElementById("connPulse"), connTxt:document.getElementById("connTxt"),
+    periodLabel:document.getElementById("periodLabel"), calHost:document.getElementById("calHost"),
+    dashHost:document.getElementById("dashHost"),
+    filterTech:document.getElementById("filterTech"), filterStatus:document.getElementById("filterStatus"), filterOwner:document.getElementById("filterOwner"),
+    filterSearch:document.getElementById("filterSearch"),
+    viewCal:document.getElementById("view-calendar"), viewDash:document.getElementById("view-dashboard"),
+    toast:document.getElementById("schedToast")
+  };
+
+  // toolbar
+  document.getElementById("prevBtn").onclick=()=>shiftCursor(-1);
+  document.getElementById("nextBtn").onclick=()=>shiftCursor(1);
+  document.getElementById("todayBtn").onclick=()=>{ cursor=new Date(); render(); };
+  document.getElementById("viewSeg").querySelectorAll("button").forEach(b=>{
+    b.onclick=()=>{ curView=b.dataset.v; document.getElementById("viewSeg").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b)); render(); };
+  });
+  el.filterTech.onchange=render; el.filterStatus.onchange=render; if(el.filterOwner) el.filterOwner.onchange=render;
+  el.filterSearch.oninput=()=>{ render(); };
+  el.app.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+  document.getElementById("newVisitTop").onclick=()=>openVisitModal(null,{});
+  document.getElementById("refreshBtn").onclick=doRefresh;
+}
+
+// ═══════════════════════════════════════════════════════════
+// O&M TICKETS MODULE — embedded in scheduler shell
+// Shares the session with the parent app. Prefixed with om_ to avoid collisions.
+// ═══════════════════════════════════════════════════════════
+
+const OM_BASE = 'app0tq4y9wH10h6Up';
+const OM_T = {
+  JC:  'tbl2wqnfM0eDa8M7P',
+  ACT: 'tblWSJlbiGWlZ6yGL',
+  CLI: 'tblljzSDboKGUJAXg',
+  PPL: 'People',
+};
+const OM_F = {
+  JC_REF:'fld0epAfApDO5Cxyv', JC_TITLE:'fldaNMYaVBdw4rxho', JC_STAT:'fldNoL4FzEHcT027I', JC_OWNER:'fldzwUxqqTvMDwDak',
+  JC_PRI:'fldliJYCbS5nrRT6R', JC_PROG:'fldOYTsZ9k0QaKsGg', JC_DUE:'fldahcH4NfVwKVqrd',
+  JC_ISS:'fldA3dPpZqlWVot44', JC_RESP:'fld8S3uhtvvf065Wk', JC_OVER:'fldNMeufuo0dWXDDA',
+  JC_DAYS:'fldqgGWaRmVomc09K', JC_CLI:'fldd22cBqRMjzsPet', JC_CLINAME:'fldsgE29yrzxXwn4d', JC_SITE:'fldUhpNu8fh16J0Gb',
+  JC_TYPE:'fldoXa4TkBVTk13NB', JC_ACTLOG:'fldv0d0Y43jpuiboU',
+  AL_NOTE:'fldcciRgQcM8gPwBR', AL_JC:'fldq3dlkkE6lRd9za', AL_TYPE:'fld3Im7LzAcn6ckQe',
+  AL_TICKET:'fldReqf27Knw3N1nk',
+  CL_NAME:'fldKeSstygWbQ07lm', CL_CONT:'fldRrqkPKFiwDg1yj', CL_EMAIL:'fldZ6AYZk0Jfd1QUu', CL_SITE:'fldIy8T4aETIDOtHm',
+  // Status, health and linked-record fields surfaced on the job card sheet. A role that
+  // cannot read one of these never receives it — the proxy strips it — so every renderer
+  // below treats an absent value as 'do not draw the row' rather than as empty.
+  JC_HOLD:'fldRNEUnCkXE1ilIe',   JC_COMPL:'flduo4vkvUSLkBiqv', JC_HEALTH:'fldvHA23p2K2U8e3m',
+  JC_SLA:'fldTiIBJqA2YcfZzR',    JC_START:'fldg6e3e8cBU0KHMq',  JC_DONE:'fld5C8sACx5iWoEJl',
+  JC_DOCS:'fldyAexoO4YZVBWPl',   JC_COST:'fldO7Uk0MU2gIkNnB',   JC_SIGN:'fldUHKaatAu0fQld5',
+};
+const OM_JC_FIELDS=[OM_F.JC_REF,OM_F.JC_TITLE,OM_F.JC_STAT,OM_F.JC_PRI,OM_F.JC_PROG,OM_F.JC_DUE,
+  OM_F.JC_ISS,OM_F.JC_RESP,OM_F.JC_OVER,OM_F.JC_DAYS,OM_F.JC_CLI,OM_F.JC_CLINAME,OM_F.JC_SITE,OM_F.JC_TYPE,OM_F.JC_OWNER,OM_F.JC_ACTLOG,
+  OM_F.JC_HOLD,OM_F.JC_COMPL,OM_F.JC_HEALTH,OM_F.JC_SLA,OM_F.JC_START,OM_F.JC_DONE,
+  OM_F.JC_DOCS,OM_F.JC_COST,OM_F.JC_SIGN];
+
+// ── TICKETS ────────────────────────────────────────────────────────────────
+//
+// A ticket is one reported fault: the layer between a job card (the installation) and a site
+// visit (one trip to it). One job card has many tickets; one ticket has many visits.
+//
+// ADDRESSED BY SUB-SYMBOL. Both tables sit under the single 'tickets' permission key that
+// every role already carries, so there is no second place to grant access. The client still
+// never names a tbl... id — 'tickets' + 'ticket'/'spares' is all it sends.
+const TK = {
+  ref:'fldbjeLNIHNPDF7kq', seq:'fldHw9KCazaDa1vv4', jc:'fldp7kgz6Dt9E9QUg', client:'fldBcFPZibnYFr3jk',
+  channel:'fld6cRgibIeM3XNEo', channelDetail:'fld0Hi9Vz0xnDfzWE',
+  reportedBy:'fldYNYydGzgSXYcIx', reportedAt:'fldy71i7KJKzKmM26',
+  category:'fld6LEgRNYBCI6Y9U', subject:'fldeOJhKpW4SsoSFD', desc:'fld0Q7seNAGeBrEPb',
+  asset:'fldgxoCSUUybNFczV', errCode:'fldgGw0Bg4I8kIyph',
+  priority:'fldYfWPp2iFUWsXjF', status:'fldmYRxOOgzKwRMy2',
+  visits:'fld8vQQgOFxSsv1yR', spares:'fldt4q3WAnxrV9jLX', activity:'fldHl7YtoVS0jnYQe',
+  resolution:'fldhnFgGkhtQ6IsvG', closedAt:'fldeAsdC8J55Xy18Q', createdBy:'fld2DdtjAurZvtJT6',
+  // Technicians may neither read nor write this, and Warehouse may not read it. The proxy
+  // strips it either way; nothing below should render it without checking.
+  costRecoverable:'fldto6cIG5jPuSzXI',
+};
+const TKS = {
+  lineId:'flddRW5MNZaDXATLw', ticket:'fldTNufFJIZd10lna', visit:'fldkd9aIylu0lRM6S',
+  code:'fldmu2QbdHiDlXiSk', desc:'fld0tFJKj13BegCqF', unit:'fld6qXvekCu3D12DS',
+  srcId:'fldUzuuhDJJJVu7Yg', qtyReq:'fldueqeUg4G4UZIUg', qtyIssued:'fldEPJRO7xMblgpmZ',
+  status:'fldVKfpzjnkmhc2aU', notes:'fldRNOalW10kQeiqU',
+};
+const TICKET_STATUSES = ['New','Assigned','In Progress','Awaiting Spares','Awaiting Client',
+  'Second Visit Required','Second Visit Scheduled','Resolved','Closed','Cancelled'];
+
+const tktCreate = async (fields) => ((await TX.api({ op:'create', base:'OM', table:'tickets', sub:'ticket',
+  fields, params:{ returnFieldsByFieldId:true } })).records || [])[0];
+const tktUpdate = async (id, fields) => ((await TX.api({ op:'update', base:'OM', table:'tickets', sub:'ticket',
+  recordId:id, fields, params:{ returnFieldsByFieldId:true } })).records || [])[0];
+const tktAll = async () => (await TX.list('OM','tickets',
+  { pageSize:100, returnFieldsByFieldId:true }, { sub:'ticket' })).records || [];
+const spareCreate = async (fields) => ((await TX.api({ op:'create', base:'OM', table:'tickets', sub:'spares',
+  fields, params:{ returnFieldsByFieldId:true } })).records || [])[0];
+const spareAll = async () => (await TX.list('OM','tickets',
+  { pageSize:100, returnFieldsByFieldId:true }, { sub:'spares' })).records || [];
+
+let omJcData=[], omCliData=[], omPplData=[], omTktData=[];
+let omFilter='ALL', omSelJCId='', omPriVal='High', omChannel='';
+let omTktFilter='OPEN', omTktSearchQ='', omTktDetailId=null;
+let omCurrentView='dash', omPrevView='dash', omDetailId=null, omLoaded=false;
+
+// ── API: see the shim at the top of this file ──
+async function omLoadAll(silent){
+  if(!silent) omSetDot('loading');
+  try{
+    const[jcR,clR,ppR]=await Promise.all([
+      omFetchAll(OM_T.JC,OM_JC_FIELDS,true),
+      omFetchAll(OM_T.CLI,[OM_F.CL_NAME,OM_F.CL_CONT,OM_F.CL_EMAIL],true),
+      omFetchAll(OM_T.PPL,[]),
+    ]);
+    omJcData=jcR; omCliData=clR; omPplData=ppR;
+    omSetDot('live');
+    document.getElementById('om-pill').textContent=`${jcR.length} JCs`;
+    omUpdateBadge(); omRenderDash();
+    // Cheap and silent: a role without ticket access simply gets no badge.
+    omLoadTickets().then(omUpdateTktBadge).catch(()=>{});
+    if(omCurrentView==='jc') omRenderList(omFilteredJCs());
+    if(omCurrentView==='triage') omRenderTriage();
+    omPopJCDropdown();
+  }catch(e){ omSetDot('err'); toast('O&M: '+e.message,'bad'); }
+}
+
+async function omRefresh(){
+  omSetDot('loading');
+  try{
+    await omLoadAll(true);
+    if(omCurrentView==='jc') omRenderList(omFilteredJCs());
+    if(omCurrentView==='triage') omRenderTriage();
+    toast('O&M data refreshed','ok');
+  }catch(e){ toast('O&M refresh failed: '+e.message,'bad'); }
+}
+
+// ── Field helpers ──
+function omFstr(f,id){const v=f[id];if(v==null)return'';if(typeof v==='string')return v;if(typeof v==='number')return String(v);if(v?.name)return v.name;if(Array.isArray(v)&&v[0]?.name)return v[0].name;return'';}
+function omCli(f){
+  const cn=f[OM_F.JC_CLINAME];
+  if(cn){ if(Array.isArray(cn)){const j=cn.filter(Boolean).join(', ');if(j)return j;} else if(typeof cn==='string'&&cn.trim()) return cn; }
+  const c=f[OM_F.JC_CLI];if(Array.isArray(c)&&c[0]?.name)return c[0].name;
+  const s=f[OM_F.JC_SITE];if(Array.isArray(s)&&s[0]?.name)return s[0].name;
+  return'—';
+}
+function omResp(f){return f[OM_F.JC_RESP]?.name||'—';}
+function omOver(r){return(r.fields[OM_F.JC_OVER]||'').toUpperCase()==='OVERDUE';}
+function omStCls(s){return{New:'s-new','Under Review':'s-new','In Progress':'s-prog',Monitoring:'s-mon',Completed:'s-done',Closed:'s-closed',Cancelled:'s-closed'}[s]||'s-other';}
+// ── job card sheet: extra field renderers ───────────────────────────────────
+//
+// A field the role may not read is ABSENT from the record, not empty — the proxy removes it
+// before the browser sees it. So `undefined` means "not permitted" and the row is skipped
+// entirely, while a permitted-but-blank value still draws, so a real gap stays visible and
+// can be filled in. Drawing an empty row for a denied field would tell a technician that the
+// field exists and happens to be empty, which is a different fact and not theirs to have.
+function omRow(label, html){
+  return html == null ? '' :
+    `<div class="om-df"><label>${label}</label><div style="font-size:13px;">${html}</div></div>`;
+}
+function omOpt(f, id){
+  if (!(id in f)) return null;
+  return omFstr(f, id) || '<span style="color:var(--muted2)">—</span>';
+}
+function omLinkCount(f, id, noun){
+  if (!(id in f)) return null;
+  const n = Array.isArray(f[id]) ? f[id].length : (f[id] ? 1 : 0);
+  if (!n) return '<span style="color:var(--muted2)">none</span>';
+  return `<span style="font-family:monospace;font-size:12px;color:var(--accent)">${n}</span> ${noun}${n === 1 ? '' : 's'}`;
+}
+// Health and SLA are traffic lights in Airtable; show the colour, not only the word.
+const OM_LIGHT = { Green:'#3ecf8e', Amber:'#f0c000', Yellow:'#f0c000', Orange:'#ff9f43', Red:'#ef5d5d' };
+function omLight(f, id){
+  if (!(id in f)) return null;
+  const v = omFstr(f, id);
+  if (!v) return '<span style="color:var(--muted2)">—</span>';
+  const c = OM_LIGHT[v] || 'var(--muted)';
+  return `<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:9px;height:9px;border-radius:50%;background:${c};flex:none"></span>${v}</span>`;
+}
+
+function omPrCls(p){return{Critical:'p-crit',High:'p-high',Medium:'p-med',Low:'p-low'}[p]||'p-low';}
+function omInits(n){if(!n||n==='—')return'?';const p=n.trim().split(' ');return p.length>=2?(p[0][0]+p[p.length-1][0]).toUpperCase():n.slice(0,2).toUpperCase();}
+function omAgo(d){if(!d)return'—';const dy=Math.floor((new Date()-new Date(d))/86400000);if(dy<0)return`In ${Math.abs(dy)}d`;if(dy===0)return'Today';if(dy===1)return'Yesterday';return`${dy}d ago`;}
+
+// ── Job Card card HTML ──
+function omJcCard(rec){
+  const f=rec.fields;
+  const ref=omFstr(f,OM_F.JC_REF)||'—',ttl=omFstr(f,OM_F.JC_TITLE)||'Untitled';
+  const stat=omFstr(f,OM_F.JC_STAT)||'—',pri=omFstr(f,OM_F.JC_PRI)||'Normal';
+  const due=f[OM_F.JC_DUE]||'',prog=f[OM_F.JC_PROG],over=omOver(rec),days=f[OM_F.JC_DAYS];
+  const cli=omCli(f),resp=omResp(f);
+  const owner=omFstr(f,OM_F.JC_OWNER);
+  return`<div class="om-jc" data-act="omOpenDetail" data-a1="${rec.id}">
+    <div class="om-jcref">${ref}</div>
+    <div class="om-jcttl">${ttl}</div>
+    <div class="om-jcmeta">
+      <span class="om-sb ${omStCls(stat)}">${stat}</span>
+      <span class="om-pb ${omPrCls(pri)}">${pri}</span>
+      ${owner?`<span class="om-own">${owner}</span>`:''}
+      ${over?`<span class="om-ov">⚠ ${days!=null?Math.round(days)+'d overdue':'OVERDUE'}</span>`:''}
+    </div>
+    <div class="om-jcfoot">
+      <div style="display:flex;align-items:center;gap:4px;font-family:monospace;font-size:9px;color:var(--muted)">
+        <div class="om-av">${omInits(resp)}</div>${resp}
+      </div>
+      <div style="text-align:right;font-family:monospace;font-size:9px;color:var(--muted2)">
+        ${prog!=null?`<div>${prog}%</div>`:''}
+        <div>${omAgo(due)}</div>
+      </div>
+    </div>
+    <div class="om-jccli">🏢 ${cli}</div>
+  </div>`;
+}
+
+// ── Dashboard ──
+function omRenderDash(){
+  if(!omJcData.length)return;
+  const total=omJcData.length,inprog=omJcData.filter(r=>omFstr(r.fields,OM_F.JC_STAT)==='In Progress').length;
+  const done=omJcData.filter(r=>['Completed','Closed'].includes(omFstr(r.fields,OM_F.JC_STAT))).length;
+  const over=omJcData.filter(r=>omOver(r)).length;
+  document.getElementById('om-s-total').textContent=total;
+  document.getElementById('om-s-prog').textContent=inprog;
+  document.getElementById('om-s-done').textContent=done;
+  document.getElementById('om-s-over').textContent=over;
+  document.getElementById('om-dash-status').innerHTML=`<div style="display:flex;align-items:center;gap:7px;font-family:monospace;font-size:9px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:12px;"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;"></span>O&amp;M live · ${total} job cards · ${omCliData.length} clients</div>`;
+  const crits=omJcData.filter(r=>omOver(r)||omFstr(r.fields,OM_F.JC_PRI)==='Critical');
+  document.getElementById('om-dash-crit').innerHTML=crits.length?crits.slice(0,5).map(omJcCard).join(''):'<div class="om-trie">✓ No critical issues</div>';
+  const recent=[...omJcData].filter(r=>r.fields[OM_F.JC_ISS]).sort((a,b)=>new Date(b.fields[OM_F.JC_ISS])-new Date(a.fields[OM_F.JC_ISS])).slice(0,5);
+  document.getElementById('om-dash-recent').innerHTML=recent.length?recent.map(omJcCard).join(''):'<div class="om-trie">No records</div>';
+}
+
+// ── JC List (status chip + owner category + search + sort) ──
+let omOwnerFilter='ALL', omSortBy='ref', omSearchQ='';
+function omApplyJCFilters(){
+  let list=omJcData.slice();
+  if(omFilter!=='ALL') list=list.filter(r=>omFstr(r.fields,OM_F.JC_STAT)===omFilter);
+  if(omOwnerFilter!=='ALL') list=list.filter(r=>omFstr(r.fields,OM_F.JC_OWNER)===omOwnerFilter);
+  if(omSearchQ){ const q=omSearchQ.toLowerCase(); list=list.filter(r=>
+    omFstr(r.fields,OM_F.JC_REF).toLowerCase().includes(q)||
+    omFstr(r.fields,OM_F.JC_TITLE).toLowerCase().includes(q)||
+    omCli(r.fields).toLowerCase().includes(q)||
+    omFstr(r.fields,OM_F.JC_STAT).toLowerCase().includes(q)||
+    omFstr(r.fields,OM_F.JC_OWNER).toLowerCase().includes(q)); }
+  const g=(r,fld)=>omFstr(r.fields,fld)||'';
+  list.sort((a,b)=>{
+    if(omSortBy==='owner'){ const c=g(a,OM_F.JC_OWNER).localeCompare(g(b,OM_F.JC_OWNER)); if(c)return c; return g(b,OM_F.JC_REF).localeCompare(g(a,OM_F.JC_REF)); }
+    if(omSortBy==='status') return g(a,OM_F.JC_STAT).localeCompare(g(b,OM_F.JC_STAT))||g(b,OM_F.JC_REF).localeCompare(g(a,OM_F.JC_REF));
+    if(omSortBy==='due'){ const da=a.fields[OM_F.JC_DUE]||'9999',db=b.fields[OM_F.JC_DUE]||'9999'; return String(da).localeCompare(String(db)); }
+    return g(b,OM_F.JC_REF).localeCompare(g(a,OM_F.JC_REF)); // ref, newest first
+  });
+  omRenderList(list);
+}
+function omFilteredJCs(){return omJcData;} // retained for callers; render goes through omApplyJCFilters
+function omRenderList(list){document.getElementById('om-jclist').innerHTML=list.length?list.map(omJcCard).join(''):'<div class="om-empty">No job cards found</div>';}
+function omSetFilter(el,s){document.querySelectorAll('.om-chip').forEach(c=>c.classList.remove('on'));el.classList.add('on');omFilter=s;omApplyJCFilters();}
+function omSetOwner(v){omOwnerFilter=v;omApplyJCFilters();}
+function omSetSort(v){omSortBy=v;omApplyJCFilters();}
+function omFilterJCs(q){omSearchQ=q;omApplyJCFilters();}
+
+// ── Tickets: list ──────────────────────────────────────────────────────────
+//
+// Read once and cached in omTktData, the same way job cards are. Emptying omTktData is how
+// anything that changes a ticket asks for a re-read.
+async function omLoadTickets(force){
+  if(omTktData.length && !force) return omTktData;
+  omTktData = await tktAll();
+  // Newest first. A service desk reads top-down and the newest fault is the live one.
+  omTktData.sort((a,b)=>String(b.fields[TK.ref]||'').localeCompare(String(a.fields[TK.ref]||'')));
+  return omTktData;
+}
+
+const OM_TKT_OPEN = ['New','Assigned','In Progress','Awaiting Spares','Awaiting Client',
+  'Second Visit Required','Second Visit Scheduled'];
+
+/** The job card a ticket hangs off, when the role can see it. */
+function omTktJc(rec){
+  const id=[].concat(rec.fields[TK.jc]||[])[0];
+  return id?omJcData.find(r=>r.id===id):null;
+}
+
+function omTktCard(rec){
+  const f=rec.fields;
+  const jc=omTktJc(rec);
+  const st=omFstr(f,TK.status)||'New';
+  const pri=omFstr(f,TK.priority)||'Normal';
+  const chan=omFstr(f,TK.channel);
+  return`<div class="om-jc" data-act="omOpenTicket" data-a1="${rec.id}">
+    <div class="om-jcref">${esc(omFstr(f,TK.ref)||'\u2014')}</div>
+    <div class="om-jcttl">${esc(omFstr(f,TK.subject)||'(no subject)')}</div>
+    <div class="om-jcmeta">
+      <span class="om-sb ${omStCls(st)}">${esc(st)}</span>
+      <span class="om-pb ${omPrCls(pri)}">${esc(pri)}</span>
+      ${chan?`<span class="om-own">${esc(chan)}</span>`:''}
+    </div>
+    <div class="om-jcfoot">
+      <div style="font-family:monospace;font-size:9px;color:var(--muted)">
+        ${jc?esc(omFstr(jc.fields,OM_F.JC_REF)):'<span style="color:var(--muted2)">no job card</span>'}
+      </div>
+      <div style="text-align:right;font-family:monospace;font-size:9px;color:var(--muted2)">
+        ${f[TK.reportedAt]?esc(fmtDateTime(f[TK.reportedAt])):''}
+      </div>
+    </div>
+    <div class="om-jccli">\ud83c\udfe2 ${jc?esc(omCli(jc.fields)):'\u2014'}</div>
+  </div>`;
+}
+
+function omFilteredTkts(){
+  let list=omTktData.slice();
+  if(omTktFilter==='OPEN') list=list.filter(r=>OM_TKT_OPEN.includes(omFstr(r.fields,TK.status)||'New'));
+  else if(omTktFilter!=='ALL') list=list.filter(r=>(omFstr(r.fields,TK.status)||'New')===omTktFilter);
+  const q=omTktSearchQ.trim().toLowerCase();
+  if(q){
+    list=list.filter(r=>{
+      const f=r.fields, jc=omTktJc(r);
+      const hay=[omFstr(f,TK.ref),omFstr(f,TK.subject),omFstr(f,TK.desc),omFstr(f,TK.reportedBy),
+        omFstr(f,TK.channel),omFstr(f,TK.category),omFstr(f,TK.status),
+        jc?omFstr(jc.fields,OM_F.JC_REF):'', jc?omCli(jc.fields):''].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  return list;
+}
+
+function omBuildTktChips(){
+  const host=document.getElementById('om-tktchips'); if(!host)return;
+  const count=(s)=>s==='ALL'?omTktData.length
+    :s==='OPEN'?omTktData.filter(r=>OM_TKT_OPEN.includes(omFstr(r.fields,TK.status)||'New')).length
+    :omTktData.filter(r=>(omFstr(r.fields,TK.status)||'New')===s).length;
+  const chips=['OPEN','ALL'].concat(TICKET_STATUSES);
+  host.innerHTML=chips.map(c=>'<div class="om-chip'+(omTktFilter===c?' on':'')
+    +'" data-act="omSetTktFilter" data-a1="@el" data-a2="'+esc(c)+'">'
+    +esc(c==='OPEN'?'Open':c==='ALL'?'All':c)+' <b>'+count(c)+'</b></div>').join('');
+}
+
+function omRenderTickets(){
+  const list=omFilteredTkts();
+  const host=document.getElementById('om-tktlist');
+  if(host) host.innerHTML=list.length?list.map(omTktCard).join('')
+    :'<div class="om-empty">No tickets match</div>';
+  omBuildTktChips();
+}
+
+function omSetTktFilter(el,v){omTktFilter=v;omRenderTickets();}
+function omFilterTkts(q){omTktSearchQ=q||'';omRenderTickets();}
+
+function omUpdateTktBadge(){
+  const b=document.getElementById('om-tktbadge'); if(!b)return;
+  const open=omTktData.filter(r=>OM_TKT_OPEN.includes(omFstr(r.fields,TK.status)||'New')).length;
+  b.textContent=open; b.style.display=open?'':'none';
+}
+
+async function omShowTickets(){
+  const host=document.getElementById('om-tktlist');
+  if(host) host.innerHTML='<div class="om-loading"><span class="om-sp"></span>Loading tickets\u2026</div>';
+  try{
+    await omLoadTickets();
+    omUpdateTktBadge();
+    omRenderTickets();
+  }catch(e){
+    // A role that cannot read tickets must be told that, not shown an empty list that reads
+    // as "there are none".
+    if(host) host.innerHTML='<div class="om-err">Tickets could not be loaded: '+esc(TX.errorText(e))+'</div>';
+  }
+}
+
+// ── Tickets: detail ────────────────────────────────────────────────────────
+async function omOpenTicket(id){
+  const rec=omTktData.find(r=>r.id===id); if(!rec)return;
+  omTktDetailId=id; omPrevView=omCurrentView; omCurrentView='tktdetail';
+  document.querySelectorAll('.om-view').forEach(v=>v.classList.remove('active'));
+  const host=document.getElementById('om-view-tktdetail');
+  host.classList.add('active');
+  host.innerHTML='<div class="om-loading"><span class="om-sp"></span>Loading ticket\u2026</div>';
+
+  // Fetched fresh rather than read from the 60-second cache: this is the screen someone acts
+  // on, and a stale status here is a second visit booked against a closed fault.
+  let acts=[], spares=[];
+  try{
+    const all=await omFetchFiltered(OM_T.ACT);
+    acts=all.filter(r=>[].concat(r.fields[OM_F.AL_TICKET]||[]).includes(id));
+  }catch(e){ acts=null; }
+  try{
+    spares=(await spareAll()).filter(r=>[].concat(r.fields[TKS.ticket]||[]).includes(id));
+  }catch(e){ spares=null; }
+  omBuildTicket(rec,acts,spares);
+}
+
+
+function omBuildTicket(rec,acts,spares){
+  const f=rec.fields, jc=omTktJc(rec);
+  const st=omFstr(f,TK.status)||'New';
+  const pri=omFstr(f,TK.priority)||'Normal';
+  const ref=omFstr(f,TK.ref)||'\u2014';
+  // DATA.visits holds raw records; normVisit is what turns one into the shape the calendar
+  // and every other reader uses.
+  const visits=[].concat(f[TK.visits]||[])
+    .map(vid=>DATA.visits.find(v=>v.id===vid)).filter(Boolean).map(normVisit)
+    .sort((x,y)=>String(x.start).localeCompare(String(y.start)));
+
+  const facts=[
+    ['Job card', jc?omFstr(jc.fields,OM_F.JC_REF):''],
+    ['Client', jc?omCli(jc.fields):''],
+    ['Site', jc?omFstr(jc.fields,OM_F.JC_SITE):''],
+    ['Reported via', omFstr(f,TK.channel)],
+    ['Source', omFstr(f,TK.channelDetail)],
+    ['Reported by', omFstr(f,TK.reportedBy)],
+    ['Reported at', f[TK.reportedAt]?fmtDateTime(f[TK.reportedAt]):''],
+    ['Category', omFstr(f,TK.category)],
+    ['Asset', omFstr(f,TK.asset)],
+    ['Error code', omFstr(f,TK.errCode)],
+  ].filter(([,v])=>v).map(([k,v])=>
+    `<div class="om-fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+
+  const visitRows=visits.length?visits.map(v=>
+    `<div class="om-tli"><div class="om-tld g"></div>
+      <div class="om-tlt">${esc(fmtDate(v.start))} ${esc(fmtTime(v.start))} \u00b7 <span style="color:var(--accent)">${esc(v.type||'')}</span> \u00b7 ${esc(v.status||'')}</div>
+      <div class="om-tltx">${esc(v.techNames.join(', ')||'unassigned')}${v.notes?' \u2014 '+esc(v.notes):''}</div>
+    </div>`).join('')
+    :'<div class="om-empty">No visits booked against this ticket yet.</div>';
+
+  const spareRows = spares===null
+    ? '<div class="om-err">Spares could not be read.</div>'
+    : spares.length?(`<table class="om-tbl"><tr><th>Code</th><th>Description</th><th>Req</th><th>Issued</th><th>Status</th></tr>`
+      +spares.map(sp=>`<tr><td>${esc(omFstr(sp.fields,TKS.code))}</td><td>${esc(omFstr(sp.fields,TKS.desc))}</td>`
+        +`<td>${esc(String(sp.fields[TKS.qtyReq]??''))}</td><td>${esc(String(sp.fields[TKS.qtyIssued]??''))}</td>`
+        +`<td>${esc(omFstr(sp.fields,TKS.status))}</td></tr>`).join('')+'</table>')
+    :'<div class="om-empty">No spares requested.</div>';
+
+  const actRows = acts===null
+    ? '<div class="om-err">The activity log could not be read.</div>'
+    : acts.length?acts.map((a,i)=>{
+        const typ=omFstr(a.fields,OM_F.AL_TYPE);
+        return `<div class="om-tli"><div class="om-tld ${i===0?'g':''}"></div>
+          <div class="om-tlt">${esc(fmtDateTime(a.createdTime))}${typ?` \u00b7 <span style="color:var(--accent)">${esc(typ)}</span>`:''}</div>
+          <div class="om-tltx">${esc(omFstr(a.fields,OM_F.AL_NOTE)||'(no note)')}</div></div>`;
+      }).join('')
+    :'<div class="om-empty">Nothing logged against this ticket yet.</div>';
+
+  const closed=['Resolved','Closed','Cancelled'].includes(st);
+  const statusBtns=TICKET_STATUSES.filter(x=>x!==st).map(x=>
+    `<button class="btn ghost sm" data-act="omTktStatus" data-a1="${esc(rec.id)}" data-a2="${esc(x)}">${esc(x)}</button>`).join('');
+
+  document.getElementById('om-view-tktdetail').innerHTML=`
+    <div class="om-dhead">
+      <button class="btn ghost sm" data-act="omCloseTicket">\u2190 Back</button>
+      <div style="flex:1;min-width:0">
+        <div class="om-dref">${esc(ref)}</div>
+        <div class="om-dtitle">${esc(omFstr(f,TK.subject)||'(no subject)')}</div>
+      </div>
+      <span class="om-sb ${omStCls(st)}">${esc(st)}</span>
+      <span class="om-pb ${omPrCls(pri)}">${esc(pri)}</span>
+    </div>
+    <div class="om-dbody">
+      <div class="om-acts">
+        ${closed?'':`<button class="btn sm" data-act="omSecondVisit" data-a1="${esc(rec.id)}">\ud83d\udcc5 Schedule second visit</button>`}
+        ${TX.can('tickets','export')?`<button class="btn ghost sm" data-act="omTktReport" data-a1="${esc(rec.id)}">\ud83d\udcc4 Download report</button>`:''}
+      </div>
+      <div class="om-fcard"><div class="om-fttl">Ticket</div><div class="om-facts">${facts}</div></div>
+      ${omFstr(f,TK.desc)?`<div class="om-fcard"><div class="om-fttl">Description</div><div class="om-tltx">${esc(omFstr(f,TK.desc))}</div></div>`:''}
+      <div class="om-fcard"><div class="om-fttl">Site visits</div>${visitRows}</div>
+      <div class="om-fcard"><div class="om-fttl">Spares</div>${spareRows}</div>
+      ${omFstr(f,TK.resolution)?`<div class="om-fcard"><div class="om-fttl">Resolution</div><div class="om-tltx">${esc(omFstr(f,TK.resolution))}</div>${f[TK.closedAt]?`<div class="om-jcmeta">Closed ${esc(fmtDateTime(f[TK.closedAt]))}</div>`:''}</div>`:''}
+      <div class="om-fcard"><div class="om-fttl">Move to</div><div class="om-acts">${statusBtns}</div><div id="om-tktmsg"></div></div>
+      <div class="om-fcard"><div class="om-fttl">Activity</div>${actRows}</div>
+    </div>`;
+}
+
+/**
+ * Book the return trip for a ticket.
+ *
+ * It reuses openVisitModal rather than building a second form, so the technician-conflict
+ * check still runs. A parallel form would be the one place a double-booking could slip out.
+ */
+function omSecondVisit(id){
+  const rec=omTktData.find(r=>r.id===id); if(!rec)return;
+  const jcId=[].concat(rec.fields[TK.jc]||[])[0];
+  if(!jcId){ toast('That ticket has no job card, so a visit cannot be booked from it','bad'); return; }
+  openVisitModal(null,{
+    jcId, ticketId:id, type:'Return Visit',
+    prio:omFstr(rec.fields,TK.priority)||'Normal',
+  });
+}
+
+/**
+ * Download the ticket's report.
+ *
+ * The page sends a record id and gets back a finished PDF. Everything in it is read on the
+ * server under this role's own permissions, which is the only way a report can be trusted not
+ * to print a field the reader is not allowed to see.
+ *
+ * tickets:export is Operations and Admin. A Technician gets a plain refusal, not a broken
+ * download.
+ */
+async function omTktReport(id){
+  const btn=document.querySelector('[data-act="omTktReport"]');
+  const was=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
+  try{
+    const r=await TX.request('/api/ticket-report',{ ticketId:id });
+    // base64 -> bytes. A PDF is binary; anything that treats it as text corrupts it.
+    const bin=atob(r.content);
+    const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    const url=URL.createObjectURL(new Blob([bytes],{type:r.contentType||'application/pdf'}));
+    const a=document.createElement('a');
+    a.href=url; a.download=r.filename||'ticket-report.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    // Revoked on a later turn of the loop: revoking immediately cancels the download in
+    // some browsers before it has started.
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    toast('Report downloaded','ok');
+  }catch(e){
+    toast('Report failed: '+TX.errorText(e),'bad');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent=was; }
+  }
+}
+
+function omCloseTicket(){omGoView(omPrevView==='tktdetail'?'tickets':omPrevView);}
+
+/**
+ * Move a ticket's status, and say so in its activity.
+ *
+ * Resolved and Closed stamp Closed At. The log entry names both the old and the new status,
+ * because "Status Change" on its own tells you nothing six months later.
+ */
+async function omTktStatus(id,next){
+  const rec=omTktData.find(r=>r.id===id); if(!rec)return;
+  const msg=document.getElementById('om-tktmsg');
+  const was=omFstr(rec.fields,TK.status)||'New';
+  if(was===next) return;
+  if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving\u2026</div>';
+  try{
+    const patch={[TK.status]:next};
+    if(['Resolved','Closed'].includes(next) && !rec.fields[TK.closedAt]){
+      patch[TK.closedAt]=new Date().toISOString();
+    }
+    const updated=await tktUpdate(id,patch);
+    if(updated) Object.assign(rec.fields,updated.fields);
+    try{
+      await omPost(OM_T.ACT,{
+        [OM_F.AL_NOTE]:'['+(omFstr(rec.fields,TK.ref)||'')+'] Status '+was+' \u2192 '+next,
+        [OM_F.AL_JC]:[].concat(rec.fields[TK.jc]||[]),
+        [OM_F.AL_TICKET]:[id],
+        [OM_F.AL_TYPE]:'Ticket Status Change',
+      });
+    }catch(logErr){
+      if(msg) msg.innerHTML='<div class="om-ok">\u2713 Now '+esc(next)+'</div>'
+        +'<div class="om-err">\u26a0 Not written to the activity log: '+esc(logErr.message)+'</div>';
+      omUpdateTktBadge();
+      return;
+    }
+    omUpdateTktBadge();
+    omOpenTicket(id);
+  }catch(e){
+    if(msg) msg.innerHTML='<div class="om-err">\u2715 '+esc(e.message)+'</div>';
+  }
+}
+
+// ── Detail ──
+async function omOpenDetail(id){
+  const rec=omJcData.find(r=>r.id===id); if(!rec)return;
+  omDetailId=id; omPrevView=omCurrentView;
+  const f=rec.fields;
+  document.getElementById('om-d-ref').textContent=omFstr(f,OM_F.JC_REF)||id;
+  document.getElementById('om-d-title').textContent=omFstr(f,OM_F.JC_TITLE)||'Untitled';
+  document.querySelectorAll('.om-view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('om-view-detail').classList.add('active');
+  document.getElementById('om-d-body').innerHTML='<div class="om-loading"><span class="om-sp"></span>Loading activity log…</div>';
+  const actLog=await omLoadActLog(id);
+  omBuildDetail(rec,actLog);
+}
+
+function omBuildDetail(rec,actLog){
+  const f=rec.fields,id=rec.id;
+  const stat=omFstr(f,OM_F.JC_STAT)||'—',pri=omFstr(f,OM_F.JC_PRI)||'Normal';
+  const over=omOver(rec),days=f[OM_F.JC_DAYS],cli=omCli(f),resp=omResp(f);
+  const prog=f[OM_F.JC_PROG]??0,due=f[OM_F.JC_DUE]||'—',iss=f[OM_F.JC_ISS]||'—';
+  const hold=omFstr(f,OM_F.JC_HOLD);
+  // Costing is a financial module and Technician / Warehouse have no access to it, so the
+  // row is not drawn for them at all — a link count alone would still signal commercial
+  // activity they are deliberately kept out of. The server refuses the records regardless.
+  const canCost=TX.can('costing','view');
+  const aHtml=actLog.length?actLog.map((a,i)=>{
+    const ts=new Date(a.createdTime).toLocaleString('en-ZA',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+    const typ=a.fields[OM_F.AL_TYPE]?.name||a.fields[OM_F.AL_TYPE]||'';
+    const note=(a.fields[OM_F.AL_NOTE]||'').trim().replace(/</g,'&lt;').replace(/>/g,'&gt;')||'(no note)';
+    return`<div class="om-tli"><div class="om-tld ${i===0?'g':''}"></div><div class="om-tlt">${ts}${typ?` · <span style="color:var(--accent)">${typ}</span>`:''}</div><div class="om-tltx">${note}</div></div>`;
+  }).join(''):'<div style="font-family:monospace;font-size:10px;color:var(--muted2);padding:8px 0;">No activity log entries yet.</div>';
+  document.getElementById('om-d-body').innerHTML=`
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;">
+      <span class="om-sb ${omStCls(stat)}">${stat}</span>
+      <span class="om-pb ${omPrCls(pri)}">${pri}</span>
+      ${over?`<span class="om-ov">⚠ ${days!=null?Math.round(days)+'d overdue':'OVERDUE'}</span>`:''}
+      ${omFstr(f,OM_F.JC_OWNER)?`<span class="om-own">${omFstr(f,OM_F.JC_OWNER)}</span>`:''}
+    </div>
+    <div class="om-acts">
+      <button class="om-act go"  data-act="omUpdStat" data-a1="${id}" data-a2="In Progress">▶ In Progress</button>
+      <button class="om-act mon" data-act="omUpdStat" data-a1="${id}" data-a2="Monitoring">👁 Monitoring</button>
+      <button class="om-act ok"  data-act="omUpdStat" data-a1="${id}" data-a2="Completed">✓ Completed</button>
+      <button class="om-act cl"  data-act="omUpdStat" data-a1="${id}" data-a2="Closed">🔒 Close</button>
+      <button class="om-act bad" data-act="omLogNote" data-a1="${id}" data-a2="Escalating — urgent attention required" data-a3="Issue Raised">↑ Escalate</button>
+    </div>
+    <div class="om-df"><label>Client</label><div style="font-size:13px;">${cli}</div></div>
+    <div class="om-df"><label>Responsible</label><div style="font-size:13px;">${resp}</div></div>
+    <div class="om-df"><label>Progress — drag to update</label>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+        <div style="flex:1;"><div class="om-pbw"><div class="om-pbf" id="om-pb-${id}" style="width:${prog}%"></div></div>
+          <input type="range" min="0" max="100" step="5" value="${prog}" style="width:100%;accent-color:var(--accent);margin-top:6px;"
+            data-on="input" data-act="omProgPreview" data-a1="${id}" data-a2="@val"
+              data-on2="change" data-act2="omUpdProg" data-b1="${id}" data-b2="@val">
+        </div>
+        <span id="om-pv-${id}" style="font-family:monospace;font-size:11px;color:var(--accent);min-width:34px;">${prog}%</span>
+      </div>
+    </div>
+    <div class="om-df"><label>Due Date</label>
+      <input type="date" value="${due!=='—'?due:''}" style="background:#0e0f11;border:1px solid var(--line2);border-radius:8px;color:var(--text);font-family:monospace;font-size:12px;padding:7px 10px;width:100%;outline:none;"
+        data-on="change" data-act="omUpdDue" data-a1="${id}" data-a2="@val">
+    </div>
+    <div class="om-df"><label>Issued</label><div style="font-family:monospace;font-size:11px;">${iss}</div></div>
+    ${omRow('Started',   omOpt(f, OM_F.JC_START))}
+    ${omRow('Completed', omOpt(f, OM_F.JC_DONE))}
+    ${hold ? `<div class="om-df"><label>On hold &mdash; reason</label><div style="font-size:13px;color:#f0c000;font-weight:600;">\u23f8 ${hold}</div></div>` : ''}
+    ${omRow('Compliance',     omOpt(f, OM_F.JC_COMPL))}
+    ${omRow('Project health', omLight(f, OM_F.JC_HEALTH))}
+    ${omRow('SLA',            omLight(f, OM_F.JC_SLA))}
+    ${omRow('Documents',      omLinkCount(f, OM_F.JC_DOCS, 'document'))}
+    ${omRow('Sign-offs',      omLinkCount(f, OM_F.JC_SIGN, 'sign-off'))}
+    ${canCost ? omRow('Costing', omLinkCount(f, OM_F.JC_COST, 'entry')) : ''}
+    <div class="om-df"><label>Record ID</label><div style="font-family:monospace;font-size:10px;color:var(--muted2);">${id}</div></div>
+    <hr style="border-color:var(--line);margin:12px 0;">
+    <div class="om-slbl">Activity Log (${actLog.length})</div>
+    <div class="om-tl">${aHtml}</div>
+    <div class="om-nr">
+      <input type="text" id="om-note-in" placeholder="Add a note…" onkeydown="if(event.key==='Enter')omAddNote('${id}')">
+      <button class="om-nrsend" data-act="omAddNote" data-a1="${id}">LOG</button>
+    </div>`;
+}
+
+function omCloseDetail(){omGoView(omPrevView);}
+
+// Resolve an Activity Log entry's linked Job Card → {ref, client}.
+// AL_JC returns record IDs (returnFieldsByFieldId) or {id,name} objects — handle both.
+function omActJC(a){
+  const l=a.fields[OM_F.AL_JC];
+  const first=Array.isArray(l)?l[0]:l;
+  if(!first) return {ref:'',client:''};
+  const rid=(first&&typeof first==='object')?(first.id||''):first;
+  const jc=omJcData.find(r=>r.id===rid);
+  if(jc) return {ref:omFstr(jc.fields,OM_F.JC_REF)||'', client:omCli(jc.fields)||''};
+  return {ref:(first&&typeof first==='object'&&first.name)?first.name:'', client:''};
+}
+async function omLoadActLog(jcId){
+  try{
+    const all=await omFetchFiltered(OM_T.ACT);
+    return all.filter(r=>{const l=r.fields[OM_F.AL_JC];return Array.isArray(l)?l.includes(jcId):l===jcId;});
+  }catch(e){return[];}
+}
+
+// ── Writes ──
+async function omUpdStat(id,s){
+  try{
+    await omPatch(OM_T.JC,id,{[OM_F.JC_STAT]:s});
+    await omPost(OM_T.ACT,{[OM_F.AL_NOTE]:`Status updated to: ${s}`,[OM_F.AL_JC]:[id],[OM_F.AL_TYPE]:'Status Change'});
+    const r=omJcData.find(x=>x.id===id);if(r)r.fields[OM_F.JC_STAT]={name:s};
+    toast(`✓ Status → ${s}`,'ok'); omOpenDetail(id);
+  }catch(e){toast('✕ '+e.message,'bad');}
+}
+async function omUpdProg(id,v){
+  try{
+    await omPatch(OM_T.JC,id,{[OM_F.JC_PROG]:parseInt(v)});
+    const r=omJcData.find(x=>x.id===id);if(r)r.fields[OM_F.JC_PROG]=parseInt(v);
+    toast(`✓ Progress → ${v}%`,'ok');
+  }catch(e){toast('✕ '+e.message,'bad');}
+}
+async function omUpdDue(id,d){
+  if(!d)return;
+  try{
+    await omPatch(OM_T.JC,id,{[OM_F.JC_DUE]:d});
+    const r=omJcData.find(x=>x.id===id);if(r)r.fields[OM_F.JC_DUE]=d;
+    toast(`✓ Due → ${d}`,'ok');
+  }catch(e){toast('✕ '+e.message,'bad');}
+}
+async function omLogNote(jcId,note,type='Comment'){
+  try{await omPost(OM_T.ACT,{[OM_F.AL_NOTE]:note,[OM_F.AL_JC]:[jcId],[OM_F.AL_TYPE]:type});toast('✓ Logged','ok');omOpenDetail(jcId);}catch(e){toast('✕ '+e.message,'bad');}
+}
+async function omAddNote(jcId){const el=document.getElementById('om-note-in');const t=el.value.trim();if(!t)return;el.value='';await omLogNote(jcId,t,'Comment');}
+
+// ── New Ticket ──
+function omPopJCDropdown(){
+  const sel=document.getElementById('om-jcsel');
+  if(!sel)return;
+  sel.innerHTML='<option value="">— Select Job Card (O&M) —</option>';
+  [...omJcData].sort((a,b)=>(b.fields[OM_F.JC_REF]||'').localeCompare(a.fields[OM_F.JC_REF]||'')).forEach(r=>{
+    const ref=r.fields[OM_F.JC_REF]||r.id,ttl=omFstr(r.fields,OM_F.JC_TITLE),stat=omFstr(r.fields,OM_F.JC_STAT),cli=omCli(r.fields),own=omFstr(r.fields,OM_F.JC_OWNER);
+    const opt=document.createElement('option');
+    opt.value=r.id; opt.dataset.ref=ref; opt.dataset.ttl=ttl; opt.dataset.stat=stat; opt.dataset.cli=cli; opt.dataset.own=own;
+    const lbl=(cli&&cli!=='—')?cli:ttl;
+    opt.textContent=`${ref}${lbl?' — '+lbl.slice(0,40):''}${own?' ['+own+']':''}`;
+    sel.appendChild(opt);
+  });
+  if(omSelJCId)sel.value=omSelJCId;
+}
+function omJCPick(sel){
+  const opt=sel.options[sel.selectedIndex],prev=document.getElementById('om-jcprev');
+  if(opt?.value){omSelJCId=opt.value;prev.style.display='block';prev.innerHTML=`<strong style="color:var(--accent)">${opt.dataset.ref||opt.value}</strong><br>${opt.dataset.ttl||''}<br>🏢 ${opt.dataset.cli||'—'}${opt.dataset.own?' · Owner: <span style="color:#f0a500">'+opt.dataset.own+'</span>':''}<br>Status: <span style="color:var(--accent)">${opt.dataset.stat||'—'}</span>`;}
+  else{omSelJCId='';prev.style.display='none';}
+}
+function omSelPri(el,v){document.querySelectorAll('.om-priopt').forEach(o=>o.classList.remove('sel'));el.classList.add('sel');omPriVal=v;}
+// How the fault reached us. Mandatory, and a tap target rather than a dropdown because it is
+// answered on a phone, often while the caller is still on the line.
+function omSelChan(el,v){document.querySelectorAll('.om-chanopt').forEach(o=>o.classList.remove('sel'));el.classList.add('sel');omChannel=v;}
+/** Reported At defaults to now, in SAST, and stays editable for an after-hours call. */
+function omSetReportedNow(){
+  const e=document.getElementById('om-reportedat');
+  if(e&&!e.value) e.value=isoToLocalInput(new Date().toISOString());
+}
+function omResetTicketForm(){
+  ['om-cat','om-jcsel','om-subj','om-desc','om-rep','om-asset','om-err','om-chandetail']
+    .forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  const jp=document.getElementById('om-jcprev'); if(jp)jp.style.display='none';
+  omSelJCId=''; omPriVal='High'; omChannel='';
+  document.querySelectorAll('.om-priopt').forEach(o=>o.classList.remove('sel'));
+  document.querySelector('.om-priopt.phigh')?.classList.add('sel');
+  document.querySelectorAll('.om-chanopt').forEach(o=>o.classList.remove('sel'));
+  const ra=document.getElementById('om-reportedat'); if(ra) ra.value='';
+  omSetReportedNow();
+}
+async function omSubmit(){
+  const msg=document.getElementById('om-newmsg');
+  const fail=(t)=>{msg.innerHTML='<div class="om-err">\u26a0 '+esc(t)+'</div>';};
+  const cat=document.getElementById('om-cat').value;
+  const subj=document.getElementById('om-subj').value.trim();
+  const jcId=omSelJCId||document.getElementById('om-jcsel').value;
+  if(!cat||!subj) return fail('Category and Subject are required');
+  if(!jcId) return fail('Select a Job Card');
+  // Mandatory: "how did this reach us" is the question nobody remembers to ask later.
+  if(!omChannel) return fail('Choose how this was reported');
+
+  const rep=document.getElementById('om-rep').value.trim();
+  const asset=document.getElementById('om-asset').value.trim();
+  const err=document.getElementById('om-err').value.trim();
+  const desc=document.getElementById('om-desc').value.trim();
+  const detail=document.getElementById('om-chandetail').value.trim();
+  const atRaw=document.getElementById('om-reportedat').value;
+
+  document.getElementById('om-subtxt').innerHTML='<span class="om-sp"></span> Submitting\u2026';
+  msg.innerHTML='';
+  try{
+    // The job card's client comes across so the ticket stands on its own. A job card whose
+    // client the role may not read simply yields no link rather than failing the save.
+    const jc=omJcData.find(r=>r.id===jcId);
+    const cli=jc?[].concat(jc.fields[OM_F.JC_CLI]||[]):[];
+
+    const f={
+      [TK.jc]:[jcId],
+      [TK.channel]:omChannel,
+      [TK.category]:cat,
+      [TK.subject]:subj,
+      [TK.priority]:omPriVal,
+      [TK.status]:'New',
+      [TK.createdBy]:(TX.me()&&TX.me().user&&TX.me().user.email)||'',
+      [TK.reportedAt]:atRaw?sastFieldsToUtcISO(atRaw):new Date().toISOString(),
+    };
+    if(cli.length) f[TK.client]=cli;
+    if(desc)   f[TK.desc]=desc;
+    if(rep)    f[TK.reportedBy]=rep;
+    if(asset)  f[TK.asset]=asset;
+    if(err)    f[TK.errCode]=err;
+    if(detail) f[TK.channelDetail]=detail;
+
+    const rec=await tktCreate(f);
+    // Ticket Ref is a formula, so it exists the moment the record does. No second write, and
+    // no window in which a ticket has no reference.
+    const ref=(rec&&rec.fields&&rec.fields[TK.ref])||'';
+
+    // Linked to BOTH the job card and the ticket. Filtering the log by job card and a date
+    // window would sweep in entries belonging to other tickets on the same installation.
+    try{
+      await omPost(OM_T.ACT,{
+        [OM_F.AL_NOTE]:'['+ref+'] ['+omChannel+'] ['+cat+'] ['+omPriVal+'] '+subj
+          +(desc?'\n\n'+desc:'')+(rep?'\nReported by: '+rep:'')
+          +(detail?'\nSource: '+detail:''),
+        [OM_F.AL_JC]:[jcId],
+        [OM_F.AL_TICKET]:[rec.id],
+        [OM_F.AL_TYPE]:'Ticket Logged',
+      });
+    }catch(logErr){
+      // The ticket is saved and that is the record that matters. Say what did not happen
+      // rather than implying the whole thing failed.
+      msg.innerHTML='<div class="om-ok">\u2713 Ticket '+esc(ref)+' logged</div>'
+        +'<div class="om-err">\u26a0 Its activity-log entry could not be written: '+esc(logErr.message)+'</div>';
+      document.getElementById('om-subtxt').textContent='\ud83d\udce4 Submit Ticket';
+      omTktData=[];
+      return;
+    }
+
+    msg.innerHTML='<div class="om-ok">\u2713 Ticket '+esc(ref)+' logged</div>';
+    omResetTicketForm();
+    omTktData=[];                       // the list re-reads next time it is opened
+    setTimeout(()=>omGoView('jc'),1500);
+  }catch(e){
+    fail(e.message);
+  }
+  document.getElementById('om-subtxt').textContent='\ud83d\udce4 Submit Ticket';
+}
+
+// ── Triage ──
+function omTriScore(rec){
+  const f=rec.fields,s=omFstr(f,OM_F.JC_STAT),p=omFstr(f,OM_F.JC_PRI);
+  if(['Completed','Closed','Cancelled'].includes(s))return -1;
+  let sc=0;
+  if(p==='Critical')sc+=100;else if(p==='High')sc+=50;else if(p==='Medium')sc+=20;
+  if(omOver(rec))sc+=Math.min(Math.abs(f[OM_F.JC_DAYS]||0)*2,60);
+  if(s==='In Progress')sc+=10; if(s==='New')sc+=5;
+  return sc;
+}
+function omRenderTriage(){
+  const el=document.getElementById('om-triage');
+  if(!omJcData.length){el.innerHTML='<div class="om-empty">No data</div>';return;}
+  const open=omJcData.filter(r=>omTriScore(r)>=0).sort((a,b)=>omTriScore(b)-omTriScore(a));
+  const crit=open.filter(r=>{const p=omFstr(r.fields,OM_F.JC_PRI),d=r.fields[OM_F.JC_DAYS]||0;return p==='Critical'||(omOver(r)&&Math.abs(d)>7);});
+  const urg=open.filter(r=>{const p=omFstr(r.fields,OM_F.JC_PRI);return!crit.includes(r)&&(omOver(r)||p==='High');});
+  const prog=open.filter(r=>!crit.includes(r)&&!urg.includes(r)&&omFstr(r.fields,OM_F.JC_STAT)==='In Progress');
+  const pend=open.filter(r=>!crit.includes(r)&&!urg.includes(r)&&!prog.includes(r));
+  el.innerHTML=`
+    <div style="font-family:monospace;font-size:9px;color:var(--muted2);padding:7px 10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;margin-bottom:12px;">${open.length} open tickets · sorted by urgency · tap to view</div>
+    <div class="om-bucket"><div class="om-bhdr b-crit">🔴 Critical &amp; Long Overdue<span class="om-bcnt">${crit.length}</span></div>${crit.length?crit.map(omJcCard).join(''):'<div class="om-trie">✓ None</div>'}</div>
+    <div class="om-bucket"><div class="om-bhdr b-warn">🟡 Overdue &amp; High Priority<span class="om-bcnt">${urg.length}</span></div>${urg.length?urg.map(omJcCard).join(''):'<div class="om-trie">✓ None</div>'}</div>
+    <div class="om-bucket"><div class="om-bhdr b-prog">🔵 In Progress<span class="om-bcnt">${prog.length}</span></div>${prog.length?prog.map(omJcCard).join(''):'<div class="om-trie">No active work</div>'}</div>
+    <div class="om-bucket"><div class="om-bhdr b-pend">⚪ Pending<span class="om-bcnt">${pend.length}</span></div>${pend.length?pend.map(omJcCard).join(''):'<div class="om-trie">Nothing pending</div>'}</div>`;
+}
+
+// ── Clients/People/Log ──
+async function omCliTab(el,tab){document.querySelectorAll('.om-tab').forEach(t=>t.classList.remove('on'));el.classList.add('on');await omRenderCli(tab);}
+async function omRenderCli(tab){
+  const el=document.getElementById('om-cli');
+  if(tab==='clients'){
+    el.innerHTML=omCliData.length?omCliData.map(r=>{
+      const f=r.fields,n=f[OM_F.CL_NAME]||f['Name']||'—',c=f[OM_F.CL_CONT]||'',em=f[OM_F.CL_EMAIL]||'';
+      return`<div class="om-clic"><div style="font-size:13px;font-weight:500;margin-bottom:3px;">${n}</div>${c?`<div style="font-family:monospace;font-size:9px;color:var(--muted)">👤 ${c}</div>`:''} ${em?`<div style="font-family:monospace;font-size:9px;color:var(--muted)">✉ ${em}</div>`:''}</div>`;
+    }).join(''):'<div class="om-empty">No clients</div>';
+  }else if(tab==='people'){
+    el.innerHTML=omPplData.length?omPplData.map(r=>{
+      const f=r.fields,n=f['Name']||'—',role=f['Role']||'',em=f['Email']||'',ph=f['Phone']||'';
+      return`<div class="om-clic"><div style="font-size:13px;font-weight:500;">${n}${role?` <span style="font-family:monospace;font-size:9px;color:var(--muted2)">· ${role}</span>`:''}</div>${em?`<div style="font-family:monospace;font-size:9px;color:var(--muted)">✉ ${em}</div>`:''} ${ph?`<div style="font-family:monospace;font-size:9px;color:var(--muted)">📞 ${ph}</div>`:''}</div>`;
+    }).join(''):'<div class="om-empty">No people</div>';
+  }else{
+    el.innerHTML='<div class="om-loading"><span class="om-sp"></span>Loading…</div>';
+    try{
+      const all=await omFetchFiltered(OM_T.ACT);
+      const logs=all.filter(a=>omFstr(a.fields,OM_F.AL_NOTE).trim()!=='');
+      el.innerHTML=logs.length?`<div class="om-tl">${logs.slice(0,60).map((a,i)=>{
+        const ts=new Date(a.createdTime).toLocaleString('en-ZA',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+        const typ=a.fields[OM_F.AL_TYPE]?.name||a.fields[OM_F.AL_TYPE]||'';
+        const note=(a.fields[OM_F.AL_NOTE]||'').trim().replace(/</g,'&lt;')||'(empty)';
+        const jc=omActJC(a), esc=s=>String(s||'').replace(/</g,'&lt;');
+        const meta=[jc.ref?`<span style="color:var(--accent)">${esc(jc.ref)}</span>`:'', jc.client?`🏢 ${esc(jc.client)}`:''].filter(Boolean).join(' · ');
+        return`<div class="om-tli"><div class="om-tld ${i===0?'g':''}"></div>`+
+          `<div class="om-tlt">${ts}${typ?` · <span style="color:var(--accent)">${typ}</span>`:''}</div>`+
+          (meta?`<div style="font-family:monospace;font-size:10px;color:var(--muted);margin:2px 0;">${meta}</div>`:'')+
+          `<div class="om-tltx">${note}</div></div>`;
+      }).join('')}</div>`:'<div class="om-empty">No activity</div>';
+    }catch(e){el.innerHTML=`<div class="om-err">Failed: ${e.message}</div>`;}
+  }
+}
+
+// ── Navigation ──
+function omGoView(name){
+  document.querySelectorAll('.om-view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('[id^="ombn-"]').forEach(b=>{ b.style.background=''; b.style.color=''; b.classList.remove('active'); b.className=b.className.replace('btn sm','btn ghost sm'); });
+  const vEl=document.getElementById('om-view-'+name);
+  const bEl=document.getElementById('ombn-'+name);
+  if(vEl) vEl.classList.add('active');
+  if(bEl){bEl.classList.remove('ghost');bEl.style.background='#f0a500';bEl.style.color='#0a0a0b';}
+  omPrevView=omCurrentView; omCurrentView=name;
+  if(name==='dash') omRenderDash();
+  if(name==='jc')   omApplyJCFilters();
+  if(name==='triage') omRenderTriage();
+  if(name==='cli')  omRenderCli('clients');
+  if(name==='newjc') omRenderNewJC();
+  if(name==='new')   omSetReportedNow();
+  if(name==='tickets') omShowTickets();
+}
+
+// ── Helpers ──
+function omSetDot(state){
+  const d=document.getElementById('om-dot');
+  if(!d)return;
+  d.style.background=state==='live'?'var(--ok)':state==='err'?'var(--bad)':'var(--warn)';
+}
+function omUpdateBadge(){
+  const open=omJcData.filter(r=>!['Completed','Closed','Cancelled'].includes(omFstr(r.fields,OM_F.JC_STAT))).length;
+  const b=document.getElementById('om-badge');
+  if(!b)return;
+  if(open>0){b.style.display='inline';b.textContent=open>99?'99+':open;}else b.style.display='none';
+}
+// ═══════════════════════════════════════════════════════════
+// NEW JOB CARD (create in O&M base)
+// ═══════════════════════════════════════════════════════════
+const NJC_TYPES=['Reactive','Preventative','Project','Other','Maintenance','Repair','Inspection','Testing','Replacement','Renovation','Upgrade','Cleaning','Installation ','SSEG','Residential','De-Commissioning'];
+const NJC_PRIS=['Critical','High','Medium','Low','Planned Maintenance'];
+const NJC_STATS=['New','In Progress','Quotation Pending','COC Pending','Approved','Completed','Monitoring','Closed','Cancelled'];
+let omNJCMeta={next:1,width:4,year:String(new Date().getFullYear())};
+
+// Derive next reference + code lists from existing job cards (same pattern as base: OM-YYYY-NNNN/TYPE/ENTITY)
+function omParseRefs(){
+  let maxSeq=0,width=4,year=String(new Date().getFullYear());
+  const types=new Set(),ents=new Set();
+  const re=/^OM-(\d{4})-(\d+)\/([^/]+)\/(.+)$/i;
+  omJcData.forEach(r=>{
+    const ref=(r.fields[OM_F.JC_REF]||'').trim(); const m=ref.match(re);
+    if(m){ const n=parseInt(m[2],10); if(n>maxSeq)maxSeq=n; width=Math.max(width,m[2].length); types.add(m[3].trim()); ents.add(m[4].trim()); year=m[1]; }
+  });
+  return {next:maxSeq+1,width,year,types:[...types].sort(),ents:[...ents].sort()};
+}
+function omRefBuild(){
+  const t=(document.getElementById('njc-rtype').value||'').trim();
+  const e=(document.getElementById('njc-rent').value||'').trim();
+  const seq=String(omNJCMeta.next).padStart(omNJCMeta.width,'0');
+  document.getElementById('njc-ref').value=`OM-${omNJCMeta.year}-${seq}/${t}/${e}`;
+}
+function omFillSelect(id,opts,def){
+  const s=document.getElementById(id); if(!s)return;
+  s.innerHTML='<option value="">— Select —</option>'+opts.map(o=>`<option${o===def?' selected':''}>${o.trim()===''?'(blank)':o}</option>`).join('');
+  if(def) s.value=def;
+}
+function omRenderNewJC(){
+  omNJCMeta=omParseRefs();
+  // reference code datalists + sensible defaults
+  document.getElementById('njc-typelist').innerHTML=omNJCMeta.types.map(t=>`<option value="${t}">`).join('');
+  document.getElementById('njc-entlist').innerHTML=omNJCMeta.ents.map(t=>`<option value="${t}">`).join('');
+  document.getElementById('njc-rtype').value=omNJCMeta.types.includes('MAINT')?'MAINT':(omNJCMeta.types[0]||'MAINT');
+  document.getElementById('njc-rent').value=omNJCMeta.ents.includes('TE')?'TE':(omNJCMeta.ents[0]||'TE');
+  document.getElementById('njc-seqnote').textContent=`· next #${String(omNJCMeta.next).padStart(omNJCMeta.width,'0')} (editable)`;
+  omRefBuild();
+  // detail selects
+  omFillSelect('njc-type',NJC_TYPES,'');
+  omFillSelect('njc-pri',NJC_PRIS,'Medium');
+  omFillSelect('njc-stat',NJC_STATS,'New');
+  omFillSelect('njc-owner',OWNER_CATS,'');
+  // dates
+  document.getElementById('njc-iss').value=new Date().toISOString().slice(0,10);
+  document.getElementById('njc-due').value='';
+  document.getElementById('njc-prog').value='0';
+  document.getElementById('njc-title').value='';
+  // client list (existing + new)
+  const sel=document.getElementById('njc-cli');
+  const clients=[...omCliData].map(r=>({id:r.id,name:omFstr(r.fields,OM_F.CL_NAME)||'(unnamed)'})).sort((a,b)=>a.name.localeCompare(b.name));
+  sel.innerHTML='<option value="">— Select client —</option>'+clients.map(c=>`<option value="${c.id}">${c.name.replace(/</g,'&lt;')}</option>`).join('')+'<option value="__new__">➕ New client…</option>';
+  document.getElementById('njc-newcli').style.display='none';
+  ['njc-clinew-name','njc-clinew-cont','njc-clinew-email','njc-clinew-site'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});
+  document.getElementById('njc-msg').innerHTML='';
+}
+function omCliPick(){
+  document.getElementById('njc-newcli').style.display=document.getElementById('njc-cli').value==='__new__'?'block':'none';
+}
+async function omSubmitNewJC(){
+  const msg=document.getElementById('njc-msg'), btn=document.getElementById('njc-subtxt');
+  const ref=document.getElementById('njc-ref').value.trim();
+  const title=document.getElementById('njc-title').value.trim();
+  if(!ref){ msg.innerHTML='<div class="om-err">⚠ Reference is required</div>'; return; }
+  if(!title){ msg.innerHTML='<div class="om-err">⚠ Title is required</div>'; return; }
+  const cliVal=document.getElementById('njc-cli').value;
+  if(!cliVal){ msg.innerHTML='<div class="om-err">⚠ Select a client or add a new one</div>'; return; }
+  // duplicate-reference guard
+  if(omJcData.some(r=>(r.fields[OM_F.JC_REF]||'').trim().toLowerCase()===ref.toLowerCase())){
+    msg.innerHTML=`<div class="om-err">⚠ Reference ${ref} already exists</div>`; return;
+  }
+  btn.innerHTML='<span class="om-sp"></span> Creating…';
+  try{
+    // 1. create client on the fly if needed
+    let clientId=cliVal;
+    if(cliVal==='__new__'){
+      const cn=document.getElementById('njc-clinew-name').value.trim();
+      if(!cn){ msg.innerHTML='<div class="om-err">⚠ New client name is required</div>'; btn.textContent='➕ Create Job Card in Airtable'; return; }
+      const cf={[OM_F.CL_NAME]:cn};
+      const cont=document.getElementById('njc-clinew-cont').value.trim(); if(cont)cf[OM_F.CL_CONT]=cont;
+      const em=document.getElementById('njc-clinew-email').value.trim(); if(em)cf[OM_F.CL_EMAIL]=em;
+      const st=document.getElementById('njc-clinew-site').value.trim(); if(st)cf[OM_F.CL_SITE]=st;
+      const cRec=await omPost(OM_T.CLI,cf);
+      clientId=cRec.id;
+    }
+    // 2. assemble job card fields (write by field ID; selects as option-name strings)
+    const f={[OM_F.JC_REF]:ref,[OM_F.JC_TITLE]:title,[OM_F.JC_CLI]:[clientId]};
+    const ty=document.getElementById('njc-type').value; if(ty)f[OM_F.JC_TYPE]=ty;
+    const pr=document.getElementById('njc-pri').value;  if(pr)f[OM_F.JC_PRI]=pr;
+    const stt=document.getElementById('njc-stat').value;if(stt)f[OM_F.JC_STAT]=stt;
+    const own=document.getElementById('njc-owner').value;if(own)f[OM_F.JC_OWNER]=own;
+    const pg=document.getElementById('njc-prog').value; if(pg!=='')f[OM_F.JC_PROG]=Number(pg)||0;
+    const iss=document.getElementById('njc-iss').value; if(iss)f[OM_F.JC_ISS]=iss;
+    const due=document.getElementById('njc-due').value; if(due)f[OM_F.JC_DUE]=due;
+    const rec=await omPost(OM_T.JC,f);
+    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${ref}</strong></div>`;
+    await omLoadAll(true);
+    setTimeout(()=>omGoView('jc'),1300);
+  }catch(e){ msg.innerHTML=`<div class="om-err">✕ ${e.message}</div>`; }
+  btn.textContent='➕ Create Job Card in Airtable';
+}
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // DECLARATIVE EVENT DISPATCH
+  //
+  // Replaces the 44 inline on*= handlers this module used to carry. Those are blocked by the
+  // Content-Security-Policy, and relaxing the policy for one module would weaken it for the
+  // whole application — the delivery note app included.
+  //
+  // Markup now says what it wants:
+  //     <button data-act="omGoView" data-a1="jc">
+  //     <input data-on="input" data-act="omFilterJCs" data-a1="@val">
+  //
+  // One listener per event type on the module root handles all of it, including markup this
+  // module generates at runtime — no rebinding after a re-render.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // Only these can be triggered from markup. A name not on the list does nothing, so a
+  // stray or injected data-act cannot reach anything it was not meant to.
+  function actionRegistry() {
+    const reg = {};
+    const add = (name, fn) => { if (typeof fn === 'function') reg[name] = fn; };
+    add('omGoView', typeof omGoView === 'function' ? omGoView : null);
+    add('omSetFilter', typeof omSetFilter === 'function' ? omSetFilter : null);
+    add('omSelPri', typeof omSelPri === 'function' ? omSelPri : null);
+    add('omSelChan', typeof omSelChan === 'function' ? omSelChan : null);
+    add('omSetTktFilter', typeof omSetTktFilter === 'function' ? omSetTktFilter : null);
+    add('omFilterTkts', typeof omFilterTkts === 'function' ? omFilterTkts : null);
+    add('omOpenTicket', typeof omOpenTicket === 'function' ? omOpenTicket : null);
+    add('omCloseTicket', typeof omCloseTicket === 'function' ? omCloseTicket : null);
+    add('omTktStatus', typeof omTktStatus === 'function' ? omTktStatus : null);
+    add('omSecondVisit', typeof omSecondVisit === 'function' ? omSecondVisit : null);
+    add('omTktReport', typeof omTktReport === 'function' ? omTktReport : null);
+    add('omFilterJCs', typeof omFilterJCs === 'function' ? omFilterJCs : null);
+    add('omCliTab', typeof omCliTab === 'function' ? omCliTab : null);
+    add('omCliPick', typeof omCliPick === 'function' ? omCliPick : null);
+    add('omJCPick', typeof omJCPick === 'function' ? omJCPick : null);
+    add('omRefBuild', typeof omRefBuild === 'function' ? omRefBuild : null);
+    add('omSetOwner', typeof omSetOwner === 'function' ? omSetOwner : null);
+    add('omSetSort', typeof omSetSort === 'function' ? omSetSort : null);
+    add('omSubmit', typeof omSubmit === 'function' ? omSubmit : null);
+    add('omSubmitNewJC', typeof omSubmitNewJC === 'function' ? omSubmitNewJC : null);
+    add('omCloseDetail', typeof omCloseDetail === 'function' ? omCloseDetail : null);
+    add('omOpenDetail', typeof omOpenDetail === 'function' ? omOpenDetail : null);
+    add('omUpdStat', typeof omUpdStat === 'function' ? omUpdStat : null);
+    add('omUpdProg', typeof omUpdProg === 'function' ? omUpdProg : null);
+    add('omUpdDue', typeof omUpdDue === 'function' ? omUpdDue : null);
+    add('omLogNote', typeof omLogNote === 'function' ? omLogNote : null);
+    add('omAddNote', typeof omAddNote === 'function' ? omAddNote : null);
+    add('dashApply', typeof dashApply === 'function' ? dashApply : null);
+    add('dashClear', typeof dashClear === 'function' ? dashClear : null);
+    add('openDetail', typeof openDetail === 'function' ? openDetail : null);
+    add('omProgPreview', omProgPreview);
+    return reg;
+  }
+
+  /** Live preview while dragging the progress slider; the commit happens on change. */
+  function omProgPreview(id, value) {
+    const bar = document.getElementById('om-pb-' + id);
+    const label = document.getElementById('om-pv-' + id);
+    if (bar) bar.style.width = value + '%';
+    if (label) label.textContent = value + '%';
+  }
+
+  function resolveArg(raw, el) {
+    if (raw === '@el') return el;
+    if (raw === '@val') return el.value;
+    if (raw === '@checked') return el.checked;
+    return raw;
+  }
+
+  function dispatch(evtName, e, reg) {
+    // `data-on` names the event; its absence means click.
+    const sel = evtName === 'click'
+      ? '[data-act]:not([data-on]), [data-on="click"]'
+      : `[data-on="${evtName}"], [data-on2="${evtName}"]`;
+    const el = e.target.closest(sel);
+    if (!el || !el.closest('#schedApp')) return;
+
+    const secondary = el.getAttribute('data-on2') === evtName;
+    const name = secondary ? el.getAttribute('data-act2') : el.getAttribute('data-act');
+    const fn = reg[name];
+    if (!fn) return;
+
+    const prefix = secondary ? 'b' : 'a';
+    const args = [];
+    for (let i = 1; i <= 6; i++) {
+      const v = el.getAttribute(`data-${prefix}${i}`);
+      if (v === null) break;
+      args.push(resolveArg(v, el));
+    }
+    try { fn.apply(null, args); }
+    catch (err) { console.error(`[scheduler] ${name} failed:`, err); }
+  }
+
+  function bindDispatch(root) {
+    const reg = actionRegistry();
+    ['click', 'change', 'input'].forEach((evtName) => {
+      root.addEventListener(evtName, (e) => dispatch(evtName, e, reg));
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // BOOT — runs when the platform reports a signed-in session
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async function start() {
+    if (booted) return;
+
+    // Not rendered at all for a role without site visits. The tab is removed too, so this
+    // is a backstop rather than the primary control.
+    if (!TX.can('site_visits', 'view')) return;
+
+    booted = true;
+    try {
+      wireScheduler();
+      bindDispatch(document.getElementById('schedApp'));
+      await loadAll();
+      refreshFilters();
+      render();
+      startAutoRefresh();
+    } catch (e) {
+      booted = false;
+      const host = document.getElementById('calHost');
+      if (host) {
+        host.innerHTML = '<div class="om-err" style="margin:20px">Could not load the schedule: '
+          + TX.esc(TX.errorText(e)) + '</div>';
+      }
+    }
+  }
+
+  function stop() {
+    booted = false;
+    try { clearInterval(_autoRefreshTimer); } catch (e) { /* never started */ }
+  }
+
+  // Exposed so the page can start this module once a session exists, rather than loading
+  // four Airtable tables before anyone has signed in. In the combined operations platform
+  // the module shell calls this the first time the Scheduler tab is opened; here boot.js
+  // calls it on auth:ready.
+  TX.scheduler = { start, stop, isBooted: () => booted };
+  TX.on('auth:signedout', stop);
+})();

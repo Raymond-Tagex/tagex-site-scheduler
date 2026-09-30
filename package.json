@@ -1,0 +1,20 @@
+{
+  "name": "tagex-om-scheduler",
+  "version": "2.0.0",
+  "private": true,
+  "description": "TAGEX O&M Site Visit Scheduler and Tickets — session authentication, server-side permission enforcement, shared identity with the TAGEX operations platform.",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "deploy": "vercel --prod",
+    "test": "node test/verify-part-b.js && node test/verify-part-c.js && node test/verify-field-ids.js && node test/verify-ticket-report.js",
+    "check": "node scripts/check-config.js",
+    "users": "node scripts/manage-users.js",
+    "harness": "node scripts/ui-harness.js"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "tesseract.js": "^7.0.0"
+  }
+}

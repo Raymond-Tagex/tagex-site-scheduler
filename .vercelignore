@@ -1,0 +1,17 @@
+# Excluded from the deployment bundle
+node_modules
+.git
+.gitignore
+.env
+.env.*
+*.log
+tmp/
+
+# Dev-only — run locally, never on the server
+scripts/
+test/
+*.md
+
+# Superseded originals: the pre-security single-file app and its archives.
+# NEVER deploy these — index.html sent each user's Airtable token from the browser.
+legacy/

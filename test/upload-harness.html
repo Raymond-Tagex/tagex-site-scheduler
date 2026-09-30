@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upload classification — browser harness</title>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/siteinfo.css">
+</head>
+<body>
+<!--
+  Drives the Photos-tab upload queue, where an admin classifies a file as operational or FICA.
+
+  The decision that matters is on the server; this proves the screen offers the choice to the
+  right people, withholds it from everyone else, and sends what the person actually chose.
+
+  Open it with:  node scripts/ui-harness.js   then   http://localhost:4321/test/upload-harness.html
+-->
+<div class="mod-siteinfo" id="modSiteInfo">
+  <div id="siListView" hidden></div>
+  <div id="siDetail">
+    <header class="si-topbar">
+      <h2 id="siDetailName"></h2>
+      <div id="siDetailSub"></div>
+    </header>
+    <!-- renderDetail() replaces this wholesale with the real tab strip and tab body,
+         including the Photos tab's upload queue. Nothing here is hand-written markup. -->
+    <div id="siDetailBody"></div>
+  </div>
+  <div id="siNew" hidden></div>
+</div>
+<pre id="harnessOut" style="padding:12px;font:12px/1.6 monospace;"></pre>
+
+<script src="/js/core.js"></script>
+<script>
+window.__sent = [];
+window.__isAdmin = false;      // flipped by the test before start()
+
+TX.me = () => ({
+  user: { email: 'harness@tagexenergy.co.za', fullName: 'Harness',
+          canViewRestricted: window.__isAdmin },
+  role: { name: window.__isAdmin ? 'Admin / Director' : 'Technician / Field' },
+});
+TX.userEmail = () => 'harness@tagexenergy.co.za';
+TX.can = () => true;
+
+TX.request = async (path, body) => {
+  window.__sent.push({ path, body });
+  if (path === '/api/siteinfo-upload') return { ok: true, record: { id: 'recDOC', fields: {} } };
+  throw new Error('unexpected request to ' + path);
+};
+// A site with as many documents as the real one that failed.
+window.__docCount = 224;
+window.__docIds = Array.from({ length: 224 }, (_, i) => 'rec' + String(i).padStart(14, '0'));
+
+TX.api = async (q) => {
+  window.__sent.push({ path: '/api/at', body: q });
+  if (q.op === 'get' && q.table === 'site_information') {
+    return { records: [{ id: 'recSITE', fields: { 'Site Name': 'HARNESS SITE',
+      Documents: window.__docIds.slice(0, window.__docCount) } }] };
+  }
+  if (q.op === 'list' && q.table === 'documents') {
+    const f = (q.params && q.params.filterByFormula) || '';
+    // The proxy refuses any client filter over 4000 characters. Reproduce that exactly.
+    if (f.length > 4000) {
+      throw new TX.ApiError(400, { reason: 'filter_too_long',
+        detail: 'filterByFormula is too long.' });
+    }
+    const ids = [...f.matchAll(/RECORD_ID\(\)="([^"]+)"/g)].map((m) => m[1]);
+    return { records: ids.map((id) => ({ id, fields: {
+      'Document Name': 'photo ' + id.slice(-3) + '.jpeg',
+      'Document Type': 'Site Photos',
+      File: [{ url: 'about:blank', type: 'image/jpeg', filename: id + '.jpeg' }],
+    } })) };
+  }
+  if (q.op === 'update') return { records: [{ id: q.recordId, fields: q.fields }] };
+  return { records: [] };
+};
+TX.list = (b, t, p, e = {}) => TX.api({ op: 'list', base: b, table: t, params: p || {}, ...e });
+TX.get = (b, t, id, e = {}) => TX.api({ op: 'get', base: b, table: t, recordId: id, ...e });
+TX.create = (b, t, f, e = {}) => TX.api({ op: 'create', base: b, table: t, fields: f, ...e });
+TX.update = (b, t, id, f, e = {}) => TX.api({ op: 'update', base: b, table: t, recordId: id, fields: f, ...e });
+</script>
+<script src="/js/mod-siteinfo.js"></script>
+<script>
+window.__harness = {
+  /**
+   * Open a site through the module's own code path, so CURRENT is set the way it is in the
+   * real app rather than by a test-only back door.
+   */
+  async begin() {
+    TX.siteinfo.start();
+    await TX.siteinfo.open('recSITE', 'OM');
+  },
+  /** Drop files onto the queue through the real file input. */
+  addFiles(specs) {
+    const dt = new DataTransfer();
+    for (const [name, type] of specs) {
+      dt.items.add(new File([new Uint8Array(2048)], name, { type }));
+    }
+    const input = document.getElementById('siFiles');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  },
+};
+document.getElementById('harnessOut').textContent = 'harness ready';
+</script>
+</body>
+</html>

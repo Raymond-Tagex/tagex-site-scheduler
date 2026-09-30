@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Site batch builder — browser harness</title>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/siteinfo.css">
+</head>
+<body>
+<!--
+  A browser harness for the "build a site from its documents" modal.
+
+  It exists because every earlier UI check in this project was run by calling the module's own
+  functions from Node, which proved the functions worked and proved nothing about whether the
+  page did — a distinction that has already cost one round of "where is the tab?". This loads
+  the REAL core.js, mod-siteinfo.js and siteinfo-batch.js into a real document, stubs only the
+  network, and drives the modal through the clicks a person would make.
+
+  Open it with:  node scripts/ui-harness.js   then   http://localhost:4321/test/batch-harness.html
+-->
+<div class="mod-siteinfo" id="modSiteInfo">
+  <div id="siListView">
+    <header class="si-topbar">
+      <h2>Site Information</h2>
+      <button class="si-btn" data-act="siBatch" type="button"
+              data-requires="site_information:create">From Documents</button>
+      <button class="si-btn" data-act="siFromJobCard" type="button"
+              data-requires="site_information:create">From Job Card</button>
+      <button class="si-btn primary" data-act="siFolderReport" type="button"
+              data-requires="site_information:create">Folder &rarr; Site Report</button>
+    </header>
+    <div id="siList" class="si-list"></div>
+  </div>
+  <div id="siDetail" hidden><div id="siDetailBody"></div></div>
+  <div id="siNew" hidden></div>
+</div>
+<pre id="harnessOut" style="padding:12px;font:12px/1.6 monospace;white-space:pre-wrap;"></pre>
+
+<script src="/js/core.js"></script>
+<script>
+// ── stubs: the network, and the session ─────────────────────────────────────
+window.__sent = [];
+TX.me = () => ({ user: { email: 'harness@tagexenergy.co.za', fullName: 'Harness' },
+                 role: { name: 'Administrator' } });
+TX.userEmail = () => 'harness@tagexenergy.co.za';
+TX.can = () => true;
+
+TX.request = async (path, body) => {
+  window.__sent.push({ path, body });
+  if (path === '/api/siteinfo-ocr') {
+    const per = (window.__perDoc || {})[body.filename];
+    if (per) return per;
+    return window.__ocrReply;
+  }
+  if (path === '/api/siteinfo-report') {
+    window.__reportReq = body;
+    return { ok: true, filename: 'HARNESS - SOW and Site Report.pdf',
+             contentType: 'application/pdf', content: 'JVBERi0=', bytes: 4450, text: 'report' };
+  }
+  if (path === '/api/siteinfo-upload') return { ok: true, record: { id: 'recDOC', fields: {} } };
+  throw new Error('unexpected request to ' + path);
+};
+TX.api = async (q) => {
+  window.__sent.push({ path: '/api/at', body: q });
+  // C&I stores the client in a LINK called "Client"; its "Client Name" field is a link too
+  // and is empty on every card there. O&M's "Client Name" is a lookup holding the name. Both
+  // shapes are here, because a fixture that only has one of them proves nothing.
+  if (q.op === 'list' && q.table === 'clients') {
+    return { records: q.base === 'CI' ? [
+      { id: 'rec3vwDzbqzD4KUxN', fields: { 'Client Name': 'Easy Green' } },
+      { id: 'recPE1aBcDeFgHiJk', fields: { 'Client Name': 'Port Elizabeth Solar' } },
+    ] : [
+      { id: 'recCLIOM', fields: { 'Client Name': 'Should not be reached from C&I' } },
+    ] };
+  }
+  if (q.op === 'list' && q.table === 'site_information') {
+    return { records: q.base === 'CI' ? [
+      { id: 'recSITEH68', fields: { 'Site Name': 'H68 BOERDERYE' } },
+      // A site record with no name: the link exists but there is nothing to show.
+      { id: 'recSITEBLANK', fields: {} },
+    ] : [
+      { id: 'recSITE9', fields: { 'Site Name': 'ELXV' } },
+    ] };
+  }
+  if (q.op === 'list' && q.table === 'job_cards') {
+    if (q.base === 'CI') {
+      return { records: [
+        { id: 'recCI1', fields: { 'JC Reference': 'JC2026-0015 INS/TE',
+          Title: 'Commercial validation (Chris) - Scope of Work',
+          Client: ['rec3vwDzbqzD4KUxN'],
+          'Site / Address': ['Plot 149 Springbok St, Waterval, South Africa'],
+          Status: 'Completed', 'Site Information': [] } },
+        // No client at all: 12 of the 55 live C&I cards are like this.
+        { id: 'recCI2', fields: { 'JC Reference': 'JC2026-0104/MAINT/PPA',
+          Title: '', 'Site / Address': [], Status: '', 'Site Information': [] } },
+        // The day somebody fills in C&I's "Client Name" link, it holds record ids.
+        { id: 'recCI3', fields: { 'JC Reference': 'JC2026-0108/MAINT/PPA',
+          Title: 'Replace 60kw inverter', 'Client Name': ['recPE1aBcDeFgHiJk'],
+          'Site / Address': ['Port Elizabeth'],
+          Status: 'Awaiting JC Approval', 'Site Information': [] } },
+        // No address, but linked to a site record: the site's name says which site it is.
+        { id: 'recCI5', fields: { 'JC Reference': 'JC2026-0021/INS/TE',
+          Title: 'Commercial validation (Chris)', Client: ['rec3vwDzbqzD4KUxN'],
+          'Site / Address': [], Status: 'Commercial validation',
+          'Site Information': ['recSITEH68'] } },
+        // Linked to a site record that has no name. Nothing to fall back to, and the id must
+        // not leak out in its place.
+        { id: 'recCI6', fields: { 'JC Reference': 'JC2026-0033/INS/TE',
+          Title: 'Datalogger removed', 'Site / Address': [],
+          Status: 'Commercial validation', 'Site Information': ['recSITEBLANK'] } },
+        // A client the clients list did not return — deleted, or the read was refused. The
+        // id must not be shown as if it were a name.
+        { id: 'recCI4', fields: { 'JC Reference': 'JC2026-0096/MAINT/TE',
+          Title: 'Replace PCAB breakers', Client: ['recGONE0000000001'],
+          'Site / Address': ['Middelburg Eastern Cape'],
+          Status: 'Completed', 'Site Information': [] } },
+      ] };
+    }
+    return { records: q.base === 'OM' ? [
+      { id: 'recJC1', fields: { 'JC Reference': 'OM-2026-0146/MAINT/TE',
+        Title: 'Brendan Venter', 'Client Name': ['Brendan Venter', '327 Canyon Circle'],
+        'Site / Address': ['327 Canyon Circle Blue Saddle Ranches, 1961'],
+        Status: 'New', 'Site Information': [] } },
+      { id: 'recJC2', fields: { 'JC Reference': 'OM-2026-0067/INS/SE',
+        Title: 'ADDITIONAL BATTERY', 'Client Name': ['WILLEM SCOTT', '14 DRIVER AVENUE'],
+        'Site / Address': ['14 DRIVER AVENUE X24, CLUBVIEW, 0157'],
+        Status: 'Closed', 'Site Information': ['recSITE9'] } },
+    ] : [] };
+  }
+  if (q.op === 'list') return { records: [] };
+  if (q.op === 'create') return { records: [{ id: 'recNEWSITE', fields: q.fields }] };
+  if (q.op === 'update') return { records: [{ id: q.recordId, fields: q.fields }] };
+  return { records: [] };
+};
+TX.list = (base, table, params, extra = {}) => TX.api({ op: 'list', base, table, params: params || {}, ...extra });
+TX.get = (base, table, recordId, extra = {}) => TX.api({ op: 'get', base, table, recordId, ...extra });
+TX.create = (base, table, fields, extra = {}) => TX.api({ op: 'create', base, table, fields, ...extra });
+TX.update = (base, table, recordId, fields, extra = {}) => TX.api({ op: 'update', base, table, recordId, fields, ...extra });
+
+// The proposal a real /api/siteinfo-ocr returns for the scanned jobcard fixture.
+window.__noNameReply = {
+  ok: true, text: '', confidence: 25, pages: 2, available: 6,
+  note: 'Read 2 of 6 pages.',
+  verdict: 'REVIEW',
+  parsed: { fields: {}, serials: {}, equipment: [], warnings: [], matched: 0 },
+  existing: null, duplicates: [], jobCard: null, client: null,
+  proposal: {
+    'Date Issued': '2026-06-09',
+    'Job Card Number': 'JC2026-0134/INS/TE',
+    'Property Address': 'Perseel H68, Loskop Noord, Marble Hall, Limpopo, 0450',
+  },
+  provenance: {
+    'Date Issued': 'jobcard', 'Job Card Number': 'jobcard', 'Property Address': 'jobcard',
+  },
+  conflicts: [], stats: { fromOcr: 0, total: 3 },
+};
+
+window.__ocrReply = {
+  ok: true,
+  text: 'Site Name: ALAN AUCAMP RESIDENCE\nPanel Quantity: 164\n',
+  confidence: 94,
+  pages: 1,
+  note: '',
+  verdict: 'REVIEW',
+  parsed: {
+    fields: { 'Site Name': 'ALAN AUCAMP RESIDENCE', 'Panel Quantity': 164 },
+    serials: { Meter: 'MTR-4471902' },
+    equipment: [
+      { 'Equipment Type': 'Inverter', Manufacturer: 'Sungrow', Model: 'SG50CX', Quantity: 2 },
+      { 'Equipment Type': 'Meter', 'Serial Number': 'MTR-4471902' },
+    ],
+    warnings: ['"Installation Category": "Bananas" is not one of the allowed options.'],
+    matched: 17,
+  },
+  existing: null,
+  duplicates: [{ base: 'CI', id: 'recOTHER', name: 'ALAN AUCAMP FARM' }],
+  jobCard: { base: 'OM', id: 'recJC', number: 'JC-2026-0418' },
+  client: { base: 'OM', id: 'recCL', name: 'Alan Aucamp' },
+  proposal: {
+    'Site Name': 'ALAN AUCAMP RESIDENCE',
+    'Client Name': 'Alan Aucamp',
+    'Panel Quantity': 164,
+    'Installation Category': 'Commercial',
+    'SUB / SOL Number': 'SOL-88214',
+  },
+  provenance: {
+    'Site Name': 'ocr', 'Client Name': 'client', 'Panel Quantity': 'ocr',
+    'Installation Category': 'ocr', 'SUB / SOL Number': 'jobcard',
+  },
+  conflicts: [{ field: 'SUB / SOL Number', stored: 'SOL-88214', scanned: 'S0L-8B214', source: 'jobcard' }],
+  stats: { fromOcr: 3, total: 5 },
+};
+</script>
+<script src="/js/mod-siteinfo.js"></script>
+<script src="/js/siteinfo-batch.js"></script>
+<script>
+// mod-siteinfo's dispatcher is attached in its start(); the harness calls it directly.
+TX.siteinfo.start();
+
+// A stand-in for the dropped job card. The batch module asks the module for base64, which the
+// harness short-circuits so no FileReader is needed.
+TX.siteinfo.files.toBase64 = async () => 'AAAA';
+
+window.__harness = {
+  addFiles(names) {
+    const files = names.map((n) => {
+      const f = new File(['x'], n, { type: n.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg' });
+      return f;
+    });
+    TX.sitebatch.setState({ FILES: files.map((f) => ({ file: f, rel: f.name })) });
+  },
+};
+document.getElementById('harnessOut').textContent = 'harness ready';
+
+// ── THE JOB CARD PICKER NAMES THE CLIENT ────────────────────────────────────────────────
+// Every C&I row in this picker used to show a blank where the client should be, because the
+// two bases disagree about which field holds it. "Not displaying the site name eg Easy Green
+// on jobcard 0015" was that.
+(async () => {
+  const out = document.createElement('pre');
+  out.id = 'pickerOut';
+  document.body.appendChild(out);
+  let bad = 0;
+  const log = (l) => { out.textContent += l + '\n'; };
+  const t = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (!ok) bad++;
+    log((ok ? '  ok    ' : '  FAIL  ') + name
+      + (ok ? '' : '\n          got ' + JSON.stringify(got) + '\n          want ' + JSON.stringify(want)));
+  };
+  const settle = async (n) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
+
+  log('THE JOB CARD PICKER NAMES THE CLIENT');
+  TX.sitebatch.open('jobcard');
+  await settle(30);
+
+  const rowFor = (ref) => [...document.querySelectorAll('#batchCardList .si-cardrow')]
+    .find((e) => e.textContent.indexOf(ref) >= 0);
+  const metaFor = (ref) => {
+    const r = rowFor(ref);
+    const m = r && r.querySelector('.si-cardmeta');
+    return m ? m.textContent.trim() : null;
+  };
+
+  t('the C&I card is offered at all', !!rowFor('JC2026-0015'), true);
+  t('and names the client held in its Client link',
+    metaFor('JC2026-0015'), 'Easy Green \u00b7 Plot 149 Springbok St, Waterval, South Africa');
+  t('a C&I card with no client shows nothing rather than a blank separator',
+    metaFor('JC2026-0104'), '');
+  // A link returns record ids, and ids are strings. Printing the first string would have put
+  // "recCLIPE" on screen as a client name.
+  t('a Client Name that holds ids is resolved, not printed raw',
+    metaFor('JC2026-0108'), 'Port Elizabeth Solar \u00b7 Port Elizabeth');
+  t('an unresolvable client shows nothing rather than its id',
+    metaFor('JC2026-0096'), 'Middelburg Eastern Cape');
+  log('\nA CARD WITH NO ADDRESS FALLS BACK TO ITS SITE NAME');
+  t('the site name stands in for the address',
+    metaFor('JC2026-0021'), 'Easy Green \u00b7 H68 BOERDERYE');
+  t('a site record with no name leaves the client standing alone',
+    metaFor('JC2026-0033'), '');
+  // The address wins where there is one; this is a fallback, not a replacement.
+  t('a card with an address still shows the address',
+    metaFor('JC2026-0015'), 'Easy Green \u00b7 Plot 149 Springbok St, Waterval, South Africa');
+  t('and the O&M card keeps its address too',
+    metaFor('OM-2026-0067'), 'WILLEM SCOTT \u00b7 14 DRIVER AVENUE X24, CLUBVIEW, 0157');
+
+  t('and no row anywhere shows a record id',
+    /rec[A-Za-z0-9]{8}/.test(document.getElementById('batchCardList').textContent), false);
+  // O&M already worked. The fix must not have cost it anything.
+  t('the O&M lookup still gives the name straight',
+    metaFor('OM-2026-0146'), 'Brendan Venter \u00b7 327 Canyon Circle Blue Saddle Ranches, 1961');
+
+  log('\nSEARCH FINDS A CARD BY THE CLIENT IT NOW KNOWS ABOUT');
+  TX.sitebatch.setCardQuery('easy green');
+  await settle(10);
+  // Both of the Easy Green cards, including the one whose client is only knowable through
+  // the link. Before the fix, typing a client name found nothing in C&I at all.
+  t('typing the client name finds every card of theirs',
+    [...document.querySelectorAll('#batchCardList .si-cardrow')]
+      .map((e) => e.textContent.trim().slice(0, 13)).sort(),
+    ['JC2026-0015 I', 'JC2026-0021/I']);
+  TX.sitebatch.setCardQuery('');
+  await settle(10);
+
+  log(bad ? '\n' + bad + ' FAILED' : '\nall passed');
+  document.title = bad ? 'batch harness \u2014 FAIL' : 'batch harness \u2014 PASS';
+})();
+</script>
+</body>
+</html>

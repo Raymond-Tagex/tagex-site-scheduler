@@ -1,0 +1,2275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ticket intake — browser harness</title>
+<link rel="stylesheet" href="/css/scheduler.css">
+</head>
+<body style="padding:16px;background:#0e0f11;">
+<!--
+  Drives the REAL mod-scheduler.js ticket intake in a REAL browser, against a stubbed network.
+
+      node scripts/ui-harness.js   then   http://localhost:4321/test/ticket-harness.html
+
+  IT USES THE REAL MARKUP. The page fetches /index.html and lifts #schedApp out of it rather
+  than keeping its own copy of the form. A harness with a private copy of the markup passes
+  happily while the real page is broken — which is exactly what happened to the delivery app's
+  job card harness, where a field had been renamed in index.html and the harness never noticed.
+
+  What it proves is the part source-reading cannot: that a tap reaches the dispatcher, that the
+  fields actually sent to Airtable are the right ones under the right field ids, that the
+  reference is read back off the created record, and that a half-failed save says so.
+
+  The page title ends in PASS or FAIL; window.__result says the same.
+-->
+
+<pre id="out" style="padding:12px;font:12px/1.7 ui-monospace,monospace;white-space:pre-wrap;color:#e9ecef;"></pre>
+<div id="stage"></div>
+
+<script src="/js/core.js"></script>
+<script src="/js/pick.js"></script>
+<script>
+// ── field ids, written out so a typo in the app is a failure here ───────────
+const FID = {
+  ref:'fldbjeLNIHNPDF7kq', jc:'fldp7kgz6Dt9E9QUg', client:'fldBcFPZibnYFr3jk',
+  channel:'fld6cRgibIeM3XNEo', channelDetail:'fld0Hi9Vz0xnDfzWE',
+  reportedBy:'fldYNYydGzgSXYcIx', reportedAt:'fldy71i7KJKzKmM26',
+  category:'fld6LEgRNYBCI6Y9U', subject:'fldeOJhKpW4SsoSFD', desc:'fld0Q7seNAGeBrEPb',
+  asset:'fldgxoCSUUybNFczV', errCode:'fldgGw0Bg4I8kIyph',
+  priority:'fldYfWPp2iFUWsXjF', status:'fldmYRxOOgzKwRMy2', createdBy:'fld2DdtjAurZvtJT6',
+  visits:'fld8vQQgOFxSsv1yR', resolution:'fldhnFgGkhtQ6IsvG',
+  alNote:'fldcciRgQcM8gPwBR', alJc:'fldq3dlkkE6lRd9za', alType:'fld3Im7LzAcn6ckQe',
+  alTicket:'fldReqf27Knw3N1nk',
+  jcRef:'fld0epAfApDO5Cxyv', jcTitle:'fldaNMYaVBdw4rxho', jcClient:'fldd22cBqRMjzsPet',
+  jcClientName:'fldsgE29yrzxXwn4d', jcSite:'fldUhpNu8fh16J0Gb', jcStatus:'fldNoL4FzEHcT027I',
+  jcOver:'fldNMeufuo0dWXDDA',
+  vStatus:'fldEoAd9YkLfCIBDj', vStart:'fldDB3DUqHvADw0op', vId:'fldkpn9x6pM0wXXdz',
+};
+
+// A macrotask that browsers do NOT throttle. setTimeout(0) is clamped to about a second in a
+// background tab, which turned a three-second suite into a four-minute one and looked exactly
+// like a hang. MessageChannel is not subject to that clamp.
+const macro = () => new Promise((r) => {
+  const c = new MessageChannel();
+  c.port1.onmessage = () => r();
+  c.port2.postMessage(0);
+});
+const tick = async () => { await macro(); await macro(); };
+/** Let a chain of awaited work finish. n is turns of the event loop, not milliseconds. */
+const settle = async (n = 12) => { for (let i = 0; i < n; i++) await macro(); };
+
+// ── the stubbed world ───────────────────────────────────────────────────────
+window.SENT = [];          // every write the app attempts
+window.FAIL_ON = null;     // set to a table symbol+sub to make that write blow up
+// Set to make reading one ticket fail, which is what the modal's "do not write back without a
+// baseline" guard exists for.
+window.FAIL_GET = null;
+// Set to make every activity-log UPDATE fail the way the proxy does for a role without
+// activity_log:edit. Admin / Director is such a role, which is how the button came to be
+// offered to somebody who could not use it.
+window.FAIL_ACT_UPDATE = null;
+// A spare that has been attached to a visit stays attached. Without this the stub kept
+// handing back the same loose row, so every booking adopted it again -- and the suite proved
+// something that could not happen.
+window.SPARE_VISITS = {};
+let seq = 41;
+
+const JOBCARDS = [
+  { id:'recJC1', fields:{
+      [FID.jcRef]:'OM-2026-0157/INST/TE', [FID.jcTitle]:'Grootvlei - Site Commissioning',
+      [FID.jcClient]:['recCLI1'], [FID.jcClientName]:['Grootvlei'],
+      [FID.jcSite]:['Perseel H68, Loskop Noord'], [FID.jcStatus]:'New' } },
+  { id:'recJC2', fields:{
+      [FID.jcRef]:'OM-2026-0155/MAINT/TE', [FID.jcTitle]:'Victory Village',
+      [FID.jcClientName]:['Victory Village'], [FID.jcStatus]:'New' } },   // no Client link
+  // One card per state a dashboard figure counts, so each figure has a number of its own and
+  // a wrong filter cannot pass by landing on the same list as the right one.
+  { id:'recJC3', fields:{
+      [FID.jcRef]:'OM-2026-0150/MAINT/TE', [FID.jcTitle]:'Rooipoort pump house',
+      [FID.jcClientName]:['Rooipoort'], [FID.jcStatus]:'In Progress',
+      [FID.jcOver]:'OVERDUE' } },
+  { id:'recJC4', fields:{
+      [FID.jcRef]:'OM-2026-0148/INST/TE', [FID.jcTitle]:'Kroonstad array',
+      [FID.jcClientName]:['Kroonstad'], [FID.jcStatus]:'Completed' } },
+  { id:'recJC5', fields:{
+      [FID.jcRef]:'OM-2026-0141/INST/TE', [FID.jcTitle]:'Bethal carport',
+      [FID.jcClientName]:['Bethal'], [FID.jcStatus]:'Closed' } },
+  // The four the chip row used to leave out. All four can be chosen on the New Job Card form,
+  // so a card could be made in this app and then never filtered to again. COC Pending had a
+  // real job card sitting in it.
+  { id:'recJC6', fields:{
+      [FID.jcRef]:'OM-2026-0139/INST/TE', [FID.jcTitle]:'Delmas quote',
+      [FID.jcClientName]:['Delmas'], [FID.jcStatus]:'Quotation Pending' } },
+  { id:'recJC7', fields:{
+      [FID.jcRef]:'OM-2026-0137/INST/TE', [FID.jcTitle]:'Secunda COC',
+      [FID.jcClientName]:['Secunda'], [FID.jcStatus]:'COC Pending' } },
+  { id:'recJC8', fields:{
+      [FID.jcRef]:'OM-2026-0135/INST/TE', [FID.jcTitle]:'Ermelo signed off',
+      [FID.jcClientName]:['Ermelo'], [FID.jcStatus]:'Approved' } },
+  { id:'recJC9', fields:{
+      [FID.jcRef]:'OM-2026-0133/INST/TE', [FID.jcTitle]:'Standerton, called off',
+      [FID.jcClientName]:['Standerton'], [FID.jcStatus]:'Cancelled' } },
+];
+
+const TICKETS = [
+  { id:'recTKTa', createdTime:'2026-09-20T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0007', [FID.jc]:['recJC1'], [FID.subject]:'Inverter alarm 0x33',
+      [FID.status]:'In Progress', [FID.priority]:'High', [FID.channel]:'WhatsApp',
+      [FID.category]:'Inverter Fault', [FID.reportedAt]:'2026-09-20T05:30:00.000Z',
+      [FID.reportedBy]:'Oubaas', [FID.desc]:'Alarm since Tuesday.' } },
+  { id:'recTKTb', createdTime:'2026-09-19T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0006', [FID.jc]:['recJC2'], [FID.subject]:'Monitoring offline',
+      [FID.status]:'Resolved', [FID.priority]:'Low', [FID.channel]:'Email',
+      [FID.category]:'Monitoring Offline' } },
+  { id:'recTKTc', createdTime:'2026-09-21T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0009', [FID.jc]:['recJC1'], [FID.subject]:'Battery not charging',
+      [FID.status]:'Awaiting Spares', [FID.priority]:'Urgent', [FID.channel]:'Phone Call',
+      [FID.category]:'Battery Fault', [FID.visits]:['recV1'] } },
+  // Shaped like the migrated ones: raised through a form that never saved the job card.
+  { id:'recTKTd', createdTime:'2026-09-18T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0005', [FID.subject]:'broken',
+      [FID.status]:'New', [FID.priority]:'High', [FID.category]:'Inverter Fault' } },
+  { id:'recTKTe', createdTime:'2026-09-17T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0004', [FID.subject]:'Master inverter offline',
+      [FID.jc]:['recJC1'], [FID.status]:'New', [FID.priority]:'Normal',
+      [FID.category]:'Monitoring Offline' } },
+  // The two states the new option has to tell apart. A ticket that is waiting for a second
+  // visit must still get "Second Visit Scheduled" when that visit is booked, and a ticket that
+  // already says a visit is booked must not be moved again.
+  { id:'recTKTf', createdTime:'2026-09-16T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0003', [FID.subject]:'String 4 down again',
+      [FID.jc]:['recJC1'], [FID.status]:'Second Visit Required', [FID.priority]:'Normal',
+      [FID.category]:'Inverter Fault' } },
+  { id:'recTKTg', createdTime:'2026-09-15T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0002', [FID.subject]:'Earth leakage trip',
+      [FID.jc]:['recJC1'], [FID.status]:'Visit Scheduled', [FID.priority]:'Low',
+      [FID.category]:'Inverter Fault' } },
+  // The one the mutation run caught nothing on: re-booking a ticket that is already at
+  // SECOND Visit Scheduled. Testing only the plain one hid a downgrade, because the wrong
+  // answer and the right one are the same string there.
+  { id:'recTKTh', createdTime:'2026-09-14T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0001', [FID.subject]:'Combiner box corrosion',
+      [FID.jc]:['recJC1'], [FID.status]:'Second Visit Scheduled', [FID.priority]:'Normal',
+      [FID.category]:'Inverter Fault' } },
+  // Three that each finish a different way, so the calendar has to be settled three different
+  // ways. No job card on any of them: it keeps them out of the job card searches above, and
+  // the sync must work without one anyway.
+  { id:'recTKTi', createdTime:'2026-09-13T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0012', [FID.subject]:'Isolator burnt out',
+      [FID.status]:'Visit Scheduled', [FID.priority]:'High',
+      [FID.category]:'Inverter Fault', [FID.visits]:['recV4'],
+      // Filled in so the edit form has something to read back, and so a form that silently
+      // ignored the record would show blanks rather than agreeing with itself.
+      [FID.channel]:'Phone Call', 'fld0Hi9Vz0xnDfzWE':'Elmarie 083 111 2222',
+      [FID.reportedBy]:'Elmarie at the client',
+      [FID.reportedAt]:'2026-09-12T06:45:00.000Z',
+      'fldgxoCSUUybNFczV':'SOLAX X3-MIC-8K', 'fldgGw0Bg4I8kIyph':'E-0104' } },
+  { id:'recTKTj', createdTime:'2026-09-12T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0011', [FID.subject]:'Loose DC connector',
+      [FID.status]:'Visit Scheduled', [FID.priority]:'Normal',
+      [FID.category]:'Inverter Fault', [FID.visits]:['recV5'] } },
+  { id:'recTKTk', createdTime:'2026-09-11T06:00:00.000Z', fields:{
+      [FID.ref]:'TKT-2026-0010', [FID.subject]:'Reported in error',
+      [FID.status]:'Visit Scheduled', [FID.priority]:'Low',
+      [FID.category]:'Inverter Fault', [FID.visits]:['recV6','recV7'] } },
+];
+const SPARES = [
+  // Asked for before any visit existed: it carries a ticket and no visit.
+  { id:'recSPloose', fields:{ fldTNufFJIZd10lna:['recTKTc'], fldmu2QbdHiDlXiSk:'LOOSE-1',
+      fld0tFJKj13BegCqF:'Requested before a date was set', fldueqeUg4G4UZIUg:1,
+      fldVKfpzjnkmhc2aU:'Requested' } },
+  { id:'recSP1', fields:{ fldTNufFJIZd10lna:['recTKTc'], fldkd9aIylu0lRM6S:['recV1'], fldmu2QbdHiDlXiSk:'KC3E-110',
+      fld0tFJKj13BegCqF:'10A 1P 3KA MCB BREAKER', fldueqeUg4G4UZIUg:2,
+      fldEPJRO7xMblgpmZ:0, fldVKfpzjnkmhc2aU:'Requested' } },
+];
+const ACTS = [
+  { id:'recAL1', createdTime:'2026-09-20T05:35:00.000Z', fields:{
+      [FID.alType]:'Ticket Logged', [FID.alJc]:['recJC1'], [FID.alTicket]:['recTKTa'],
+      [FID.alNote]:'[TKT-2026-0007] [WhatsApp] [Inverter Fault] [High] Inverter alarm 0x33' } },
+  { id:'recAL2', createdTime:'2026-09-19T05:35:00.000Z', fields:{
+      [FID.alType]:'Ticket Logged', [FID.alJc]:['recJC2'], [FID.alTicket]:['recTKTb'],
+      [FID.alNote]:'belongs to a different ticket' } },
+];
+
+// The field names the live PALLADIUM STOCK table actually uses. The stub previously carried
+// the same wrong names as the code, so the two agreed with each other and disagreed with
+// Airtable -- the picker shipped showing bare codes and every assertion here still passed.
+const STOCK_ROWS = [
+  { id:'recST1', fields:{ 'Palladium Stock Code':'KC3E-110',
+      'Product Name':'10A 1P 3KA MCB BREAKER', 'Unit of Measure':'Each' } },
+  { id:'recST2', fields:{ 'Palladium Stock Code':'MATEBOX-X3',
+      'Product Name':'MATEBOX-X3 (SOLAX)', 'Unit of Measure':'Each' } },
+  { id:'recST3', fields:{ 'Palladium Stock Code':'ATW19.0WHITE',
+      'Product Name':'ATW19 / LF 20MM H/SHRINK WHITE', 'Unit of Measure':'Each' } },
+];
+const PEOPLE = [
+  { id:'recP1', fields:{ fldtNDc2YQVZHxS4Q:'Evan Mokoena' } },
+];
+// The shape the live base is in: most of a job card's history is written against the card
+// alone, and one entry belongs to a different fault on the same installation.
+ACTS.push(
+  { id:'recH1', createdTime:'2026-09-08T13:31:00.000Z', fields:{
+      [FID.alType]:'Visit Scheduled', [FID.alJc]:['recJC1'],
+      [FID.alNote]:'Site visit scheduled for 02/09/2026 09:00 by Maurice' } },
+  { id:'recH2', createdTime:'2026-09-08T13:36:00.000Z', fields:{
+      [FID.alType]:'Visit Rescheduled', [FID.alJc]:['recJC1'],
+      [FID.alNote]:'Site visit moved from 02/09/2026 09:00 to 08/09/2026 09:00' } },
+  { id:'recH3', createdTime:'2026-09-25T10:17:00.000Z', fields:{
+      [FID.alType]:'Comment', [FID.alJc]:['recJC1'],
+      [FID.alNote]:'PV therm removed, 4 panels re-stringed.' } },
+  // Another fault on the same installation. Taking this would put one fault's history on
+  // another fault's report.
+  { id:'recH4', createdTime:'2026-09-26T08:00:00.000Z', fields:{
+      [FID.alType]:'Comment', [FID.alJc]:['recJC1'], [FID.alTicket]:['recTKTa'],
+      [FID.alNote]:'BELONGS TO ANOTHER TICKET' } },
+  // A different job card entirely.
+  { id:'recH5', createdTime:'2026-09-26T09:00:00.000Z', fields:{
+      [FID.alType]:'Comment', [FID.alJc]:['recJC2'],
+      [FID.alNote]:'A DIFFERENT JOB CARD' } },
+);
+
+const VISITS = [
+  { id:'recV1', fields:{ fldl6AeZcPmO9gVj9:'OM-2026-0157 - first look',
+      fldgtKHwY1VcJHT0s:['recJC1'], fldDB3DUqHvADw0op:'2026-09-20T07:00:00.000Z',
+      fldaC9cFqOIpPKhDn:'2026-09-20T09:00:00.000Z', fld7pIfI0kICxP61v:['recP1'],
+      fldu5Aou8gQZoG38h:'Fault Investigation', fldEoAd9YkLfCIBDj:'Completed',
+      flddCyyVn6w0h5y0H:'Inverter would not restart.', fldXKl0jI6lbIvj4u:['recTKTc'] } },
+  // Another ticket's visit, and one with no ticket at all. Without these, filtering the
+  // history strip by ticket and not filtering it look identical.
+  { id:'recV2', fields:{ fldl6AeZcPmO9gVj9:'other',
+      fldgtKHwY1VcJHT0s:['recJC1'], fldDB3DUqHvADw0op:'2026-09-18T07:00:00.000Z',
+      fldaC9cFqOIpPKhDn:'2026-09-18T09:00:00.000Z',
+      fldu5Aou8gQZoG38h:'Maintenance', fldEoAd9YkLfCIBDj:'Completed',
+      flddCyyVn6w0h5y0H:'SOMEONE ELSES TICKET', fldXKl0jI6lbIvj4u:['recTKTa'] } },
+  // Dated relative to the run, not to a fixed calendar: a visit hard-coded to 2026 stops
+  // being "in the future" the moment the clock passes it, and the test would quietly invert.
+  { id:'recV4', fields:{ fldl6AeZcPmO9gVj9:'still to come', [FID.vId]:'SV-FUTURE',
+      fldgtKHwY1VcJHT0s:['recJC1'], fldu5Aou8gQZoG38h:'Maintenance',
+      [FID.vStart]:new Date(Date.now() + 14 * 864e5).toISOString(),
+      fldaC9cFqOIpPKhDn:new Date(Date.now() + 14 * 864e5 + 72e5).toISOString(),
+      [FID.vStatus]:'Scheduled', fldXKl0jI6lbIvj4u:['recTKTi'] } },
+  { id:'recV5', fields:{ fldl6AeZcPmO9gVj9:'already been', [FID.vId]:'SV-PAST',
+      fldgtKHwY1VcJHT0s:['recJC1'], fldu5Aou8gQZoG38h:'Maintenance',
+      [FID.vStart]:new Date(Date.now() - 14 * 864e5).toISOString(),
+      fldaC9cFqOIpPKhDn:new Date(Date.now() - 14 * 864e5 + 72e5).toISOString(),
+      [FID.vStatus]:'Scheduled', fldXKl0jI6lbIvj4u:['recTKTj'] } },
+  { id:'recV6', fields:{ fldl6AeZcPmO9gVj9:'never happened', [FID.vId]:'SV-NEVER',
+      fldgtKHwY1VcJHT0s:['recJC1'], fldu5Aou8gQZoG38h:'Maintenance',
+      [FID.vStart]:new Date(Date.now() - 7 * 864e5).toISOString(),
+      fldaC9cFqOIpPKhDn:new Date(Date.now() - 7 * 864e5 + 72e5).toISOString(),
+      [FID.vStatus]:'Scheduled', fldXKl0jI6lbIvj4u:['recTKTk'] } },
+  { id:'recV7', fields:{ fldl6AeZcPmO9gVj9:'done long ago', [FID.vId]:'SV-DONE',
+      fldgtKHwY1VcJHT0s:['recJC1'], fldu5Aou8gQZoG38h:'Maintenance',
+      [FID.vStart]:new Date(Date.now() - 21 * 864e5).toISOString(),
+      fldaC9cFqOIpPKhDn:new Date(Date.now() - 21 * 864e5 + 72e5).toISOString(),
+      [FID.vStatus]:'Completed', fldXKl0jI6lbIvj4u:['recTKTk'] } },
+  { id:'recV3', fields:{ fldl6AeZcPmO9gVj9:'untied',
+      fldgtKHwY1VcJHT0s:['recJC1'], fldDB3DUqHvADw0op:'2026-09-17T07:00:00.000Z',
+      fldaC9cFqOIpPKhDn:'2026-09-17T09:00:00.000Z',
+      fldu5Aou8gQZoG38h:'Maintenance', fldEoAd9YkLfCIBDj:'Completed',
+      flddCyyVn6w0h5y0H:'A VISIT WITH NO TICKET' } },
+];
+
+function stubTX() {
+  TX.me = () => ({ user:{ email:'raymond@tagexenergy.co.za', fullName:'Raymond' },
+                   role:{ name:'Admin / Director' } });
+  TX.can = () => true;
+  TX.canField = () => true;
+  TX.userEmail = () => 'raymond@tagexenergy.co.za';
+
+  TX.api = async (q) => {
+    if (q.op === 'get' && q.table === 'tickets' && q.sub === 'ticket') {
+      // Before the read, not after: this is the reads-only branch, and the guard further down
+      // never saw a ticket get because this returned first.
+      if (window.FAIL_GET === q.recordId) throw new Error('the ticket could not be read');
+      return { records: TICKETS.filter((r) => r.id === q.recordId) };
+    }
+    if (q.op === 'list' || q.op === 'get') {
+      if (q.table === 'job_cards') return { records: JOBCARDS };
+      if (q.table === 'activity_log') return { records: ACTS };
+      if (q.table === 'tickets' && q.sub === 'ticket') return { records: TICKETS };
+      if (q.table === 'tickets' && q.sub === 'spares') {
+        if (window.FAIL_ON === 'tickets:spares:read') throw new Error('stubbed spares read failure');
+        return { records: SPARES.map((r) => (window.SPARE_VISITS[r.id]
+          ? { ...r, fields: { ...r.fields, fldkd9aIylu0lRM6S: window.SPARE_VISITS[r.id] } }
+          : r)) };
+      }
+      if (q.table === 'stock_items') {
+        if (window.FAIL_ON === 'stock:read') throw new Error('stubbed catalogue failure');
+        return { records: STOCK_ROWS };
+      }
+      if (q.table === 'people') return { records: PEOPLE };
+      if (q.table === 'site_visits') return { records: VISITS };
+      return { records: [] };
+    }
+    const key = q.table + (q.sub ? ':' + q.sub : '');
+    window.SENT.push({ op:q.op, table:key, fields:q.fields, recordId:q.recordId });
+    if (key === 'tickets:spares' && q.op === 'update' && q.fields
+        && q.fields.fldkd9aIylu0lRM6S) {
+      window.SPARE_VISITS[q.recordId] = q.fields.fldkd9aIylu0lRM6S;
+    }
+    if (window.FAIL_ON === key) throw new Error('stubbed failure on ' + key);
+    if (key === 'tickets:ticket' && q.op === 'create') {
+      seq += 1;
+      return { records:[{ id:'recTKT' + seq, createdTime:new Date().toISOString(),
+        fields: Object.assign({}, q.fields, { [FID.ref]:'TKT-2026-' + String(seq).padStart(4,'0') }) }] };
+    }
+    // Without this the app read back a stub record with the wrong id, and DATA.visits was
+    // left holding it -- so the next assertion measured the stub, not the app.
+    // Without this a second pull saw the same loose entries and linked them again, so the
+    // "and not twice" assertions passed against a stub rather than against the app.
+    if (q.table === 'activity_log' && q.op === 'update' && window.FAIL_ACT_UPDATE) {
+      throw new Error(window.FAIL_ACT_UPDATE);
+    }
+    if (q.table === 'activity_log' && q.op === 'update') {
+      const a = ACTS.find((r) => r.id === q.recordId);
+      if (a) {
+        Object.assign(a.fields, q.fields);
+        return { records:[{ id:a.id, fields:{ ...a.fields } }] };
+      }
+    }
+    if (q.table === 'site_visits' && q.op === 'update') {
+      const v = VISITS.find((r) => r.id === q.recordId);
+      if (v) {
+        Object.assign(v.fields, q.fields);
+        return { records:[{ id:v.id, fields:{ ...v.fields } }] };
+      }
+    }
+    if (q.table === 'site_visits' && q.op === 'get') {
+      const v = VISITS.find((r) => r.id === q.recordId);
+      if (v) return { records:[{ id:v.id, fields:{ ...v.fields } }] };
+    }
+    if (q.table === 'site_visits' && q.op === 'create') {
+      return { records:[{ id:'recNEWVISIT', fields:q.fields }] };
+    }
+    return { records:[{ id:'recNEW', fields:q.fields || {} }] };
+  };
+  TX.list = (base, table, params, extra = {}) => TX.api({ op:'list', base, table, params:params||{}, ...extra });
+  TX.get = (base, table, recordId, extra = {}) => TX.api({ op:'get', base, table, recordId, ...extra });
+}
+
+// ── boot: real markup, real module ──────────────────────────────────────────
+async function boot() {
+  const html = await fetch('/index.html', { cache:'no-store' }).then((r) => r.text());
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  // #modScheduler, not #schedApp. Every scheduler rule in the stylesheet is scoped under
+  // .mod-scheduler, and overlayHost() puts the visit modal inside #modScheduler -- so lifting
+  // the inner element alone gives an unstyled page and a modal parked outside the scope,
+  // which is how a 44px tap target measured zero here while being fine in the app.
+  const app = doc.getElementById('modScheduler');
+  if (!app) throw new Error('#modScheduler is not in index.html any more');
+  const host = document.importNode(app, true);
+  host.hidden = false;
+  host.style.display = 'block';
+  document.getElementById('stage').appendChild(host);
+  if (!document.getElementById('schedApp')) throw new Error('#schedApp is not inside #modScheduler');
+  // pick.js scans on DOMContentLoaded, which was over before this markup existed. The real
+  // page needs no equivalent: #om-jcsel is in index.html from the start.
+  TX.pick.scan();
+
+  stubTX();
+  // Evaluated rather than <script src>, so the driver can hand this frame a mutated copy.
+  // eslint-disable-next-line no-new-func
+  new Function(window.__SRC)();
+  await TX.scheduler.start();
+  TX.scheduler.stop();          // kill the auto-refresh timer; nothing here needs it
+  // switchTab('omtickets') is what runs omLoadAll(), which is what fills the job card
+  // dropdown. scheduler.start() only loads the calendar side.
+  const tab = document.querySelector('[data-tab="omtickets"]');
+  if (!tab) throw new Error('no O&M tab button in the markup');
+  tab.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  await tick(); await tick();
+  const nav = document.getElementById('ombn-new');
+  if (nav) nav.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  await tick();
+}
+
+// ── the suite ───────────────────────────────────────────────────────────────
+async function suite(log) {
+  let bad = 0;
+  const t = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (!ok) bad++;
+    log((ok ? '  ok    ' : '  FAIL  ') + name
+      + (ok ? '' : '\n          got ' + JSON.stringify(got) + '\n          want ' + JSON.stringify(want)));
+  };
+
+  // Already booted by the runner. Booting here too is what made every frame carry two
+  // copies of the form and fire every click twice.
+  const $ = (id) => document.getElementById(id);
+  const msg = () => $('om-newmsg').textContent.trim();
+  const chip = (cls, text) => [...document.querySelectorAll('.' + cls)]
+    .find((e) => e.textContent.trim() === text);
+  const tap = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  const submit = async () => {
+    document.querySelector('[data-act="omSubmit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await tick(); await tick();
+  };
+  const omCloseAnyModal = () => { const m = document.getElementById('modalBg'); if (m) m.remove(); };
+  // Declared here, with the other helpers, because it is used from the first section onwards.
+  // As a const further down it was in the temporal dead zone for everything above it.
+  const backToTkt = async (ref) => {
+    document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(10);
+    tap([...document.querySelectorAll('#om-tktchips .om-chip')]
+      .find((e) => e.textContent.trim().startsWith('All')));
+    await tick();
+    openCard(ref);
+    await settle(8);
+  };
+  const lastCreate = (key) => [...window.SENT].reverse().find((s) => s.table === key && s.op === 'create');
+
+  const fill = (o) => {
+    $('om-cat').value = o.cat || '';
+    $('om-subj').value = o.subj || '';
+    $('om-desc').value = o.desc || '';
+    $('om-rep').value = o.rep || '';
+    $('om-asset').value = o.asset || '';
+    $('om-err').value = o.err || '';
+    $('om-chandetail').value = o.detail || '';
+    if (o.reportedAt !== undefined) $('om-reportedat').value = o.reportedAt;
+    $('om-jcsel').value = o.jc || '';
+    if (o.chan) tap(chip('om-chanopt', o.chan));
+    if (o.pri) tap(chip('om-priopt', o.pri));
+  };
+
+  log('THE FORM IS THE ONE THE APP SHIPS');
+  t('the real #schedApp was lifted out of index.html', !!$('om-view-new'), true);
+  t('six ways a fault can reach us', document.querySelectorAll('.om-chanopt').length, 6);
+  t('four priorities', [...document.querySelectorAll('.om-priopt')].map((e) => e.textContent.trim()),
+    ['Low', 'Normal', 'High', 'Urgent']);
+  t('High is the one already chosen',
+    [...document.querySelectorAll('.om-priopt.sel')].map((e) => e.textContent.trim()), ['High']);
+  t('the job card picker is searchable', !!$('om-jcsel').__txPick, true);
+  t('the job cards actually loaded into it',
+    [...$('om-jcsel').options].map((o) => o.value).includes('recJC1'), true);
+
+  log('\nTHE SOURCE CHANNEL IS NOT OPTIONAL');
+  // Deliberately first: omChannel is module state that no amount of DOM poking resets, so the
+  // only honest way to test "nothing chosen" is before anything has been chosen.
+  window.SENT = [];
+  fill({ cat:'Inverter Fault', subj:'No channel chosen', jc:'recJC1' });
+  await submit();
+  t('a missing source channel refuses', /how this was reported/i.test(msg()), true);
+  t('and writes nothing at all', window.SENT.length, 0);
+
+  log('\nA TAP REACHES THE DISPATCHER');
+  tap(chip('om-chanopt', 'Phone Call'));
+  await tick();
+  t('the tapped channel is the selected one',
+    [...document.querySelectorAll('.om-chanopt.sel')].map((e) => e.textContent.trim()), ['Phone Call']);
+  tap(chip('om-chanopt', 'WhatsApp'));
+  await tick();
+  t('choosing another replaces it rather than adding',
+    [...document.querySelectorAll('.om-chanopt.sel')].map((e) => e.textContent.trim()), ['WhatsApp']);
+  tap(chip('om-priopt', 'Low'));
+  await tick();
+  t('Low is selectable',
+    [...document.querySelectorAll('.om-priopt.sel')].map((e) => e.textContent.trim()), ['Low']);
+
+  log('\nNOTHING IS SAVED WITH A HOLE IN IT');
+  window.SENT = [];
+  fill({ subj:'No category', jc:'recJC1', chan:'Email' });
+  await submit();
+  t('a missing category refuses', /Category and Subject/.test(msg()), true);
+  t('and writes nothing', window.SENT.length, 0);
+
+  fill({ cat:'Inverter Fault', jc:'recJC1', chan:'Email' });
+  await submit();
+  t('a missing subject refuses', /Category and Subject/.test(msg()), true);
+
+  fill({ cat:'Inverter Fault', subj:'No job card', chan:'Email' });
+  await submit();
+  t('a missing job card refuses', /Select a Job Card/.test(msg()), true);
+
+  log('\nA GOOD TICKET');
+  window.SENT = [];
+  fill({ cat:'Inverter Fault', subj:'Inverter offline since Tuesday',
+         desc:'Error 0x33 on the display.', rep:'Oubaas', asset:'INV-2',
+         err:'0x33', detail:'082 555 1234', chan:'WhatsApp', pri:'Urgent',
+         jc:'recJC1', reportedAt:'2026-09-24T08:00' });
+  await submit();
+
+  const tk = lastCreate('tickets:ticket');
+  t('a Ticket record was created', !!tk, true);
+  t('under the tickets module, sub "ticket"', tk && tk.table, 'tickets:ticket');
+  t('linked to the job card', tk.fields[FID.jc], ['recJC1']);
+  t('the client came across from the job card', tk.fields[FID.client], ['recCLI1']);
+  t('the channel is the one tapped', tk.fields[FID.channel], 'WhatsApp');
+  t('the category is the one chosen', tk.fields[FID.category], 'Inverter Fault');
+  t('the priority is the one tapped', tk.fields[FID.priority], 'Urgent');
+  t('a new ticket starts at New', tk.fields[FID.status], 'New');
+  t('the subject is carried', tk.fields[FID.subject], 'Inverter offline since Tuesday');
+  t('so is the description', tk.fields[FID.desc], 'Error 0x33 on the display.');
+  t('so is who reported it', tk.fields[FID.reportedBy], 'Oubaas');
+  t('so is the asset', tk.fields[FID.asset], 'INV-2');
+  t('so is the error code', tk.fields[FID.errCode], '0x33');
+  t('so is how to reach them', tk.fields[FID.channelDetail], '082 555 1234');
+  // Created By comes from the session, never from anything the browser could be told to say.
+  t('created-by is the signed-in account', tk.fields[FID.createdBy], 'raymond@tagexenergy.co.za');
+  // 08:00 SAST is 06:00 UTC. A browser in another timezone must not change that.
+  t('reported-at is the SAST wall clock, stored as UTC',
+    tk.fields[FID.reportedAt], '2026-09-24T06:00:00.000Z');
+
+  const al = lastCreate('activity_log');
+  t('one activity entry was written', window.SENT.filter((s) => s.table === 'activity_log').length, 1);
+  t('typed as Ticket Logged', al.fields[FID.alType], 'Ticket Logged');
+  t('linked to the job card', al.fields[FID.alJc], ['recJC1']);
+  t('AND to the ticket, so it cannot be confused with another fault on the same install',
+    al.fields[FID.alTicket], ['recTKT42']);
+  t('the note carries the reference', /TKT-2026-0042/.test(al.fields[FID.alNote]), true);
+
+  t('the reference is read back off the created record', /TKT-2026-0042/.test(msg()), true);
+  t('and the form is cleared for the next call', [$('om-subj').value, $('om-desc').value,
+    $('om-rep').value, $('om-chandetail').value], ['', '', '', '']);
+  t('including the channel, which must be answered again',
+    document.querySelectorAll('.om-chanopt.sel').length, 0);
+  t('priority goes back to High', [...document.querySelectorAll('.om-priopt.sel')]
+    .map((e) => e.textContent.trim()), ['High']);
+
+  log('\nA JOB CARD WITH NO CLIENT STILL WORKS');
+  window.SENT = [];
+  fill({ cat:'Battery Fault', subj:'No client link on this job card', chan:'Internal', jc:'recJC2' });
+  await submit();
+  const tk2 = lastCreate('tickets:ticket');
+  t('the ticket is still created', !!tk2, true);
+  t('with no client link rather than an empty one', FID.client in tk2.fields, false);
+
+  log('\nA HALF-FAILED SAVE SAYS SO');
+  window.SENT = [];
+  window.FAIL_ON = 'activity_log';
+  fill({ cat:'Grid / Eskom Fault', subj:'Log write will fail', chan:'Email', jc:'recJC1' });
+  await submit();
+  window.FAIL_ON = null;
+  t('the ticket itself was created', !!lastCreate('tickets:ticket'), true);
+  t('and the user is told it was logged', /Ticket TKT-/.test(msg()), true);
+  t('but also told the activity entry was not written', /activity-log entry could not/.test(msg()), true);
+
+  log('\nA FAILED TICKET IS NOT REPORTED AS A SUCCESS');
+  window.SENT = [];
+  window.FAIL_ON = 'tickets:ticket';
+  fill({ cat:'Warranty Claim', subj:'Ticket write will fail', chan:'Email', jc:'recJC1' });
+  await submit();
+  window.FAIL_ON = null;
+  t('no success is claimed', /Ticket TKT-/.test(msg()), false);
+  t('the failure is named', /stubbed failure/.test(msg()), true);
+  t('and no activity entry was written for a ticket that does not exist',
+    window.SENT.filter((s) => s.table === 'activity_log').length, 0);
+
+  log('\nTHE TICKETS LIST');
+  document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick(); await tick();
+  const cards = () => [...document.querySelectorAll('#om-tktlist .om-jc')]
+    .map((e) => e.querySelector('.om-jcref').textContent.trim());
+  t('the list opens on the open tickets', cards(),
+    ['TKT-2026-0012', 'TKT-2026-0011', 'TKT-2026-0010', 'TKT-2026-0009', 'TKT-2026-0007',
+     'TKT-2026-0005', 'TKT-2026-0004', 'TKT-2026-0003', 'TKT-2026-0002', 'TKT-2026-0001']);
+  // A booked visit is not a finished ticket. If Visit Scheduled ever falls out of the open
+  // list, TKT-2026-0002 disappears from the desk the moment somebody books for it.
+  t('a ticket whose visit is booked is still open', cards().includes('TKT-2026-0002'), true);
+  t('newest reference first', cards()[0], 'TKT-2026-0012');
+  t('a resolved ticket is not among them', cards().includes('TKT-2026-0006'), false);
+  // Every ticket status used to map to the job card palette, where seven of the ten fell
+  // through to the same blue -- so "waiting on parts" and "resolved" looked identical.
+  tap([...document.querySelectorAll('#om-tktchips .om-chip')]
+    .find((e) => e.textContent.trim().startsWith('All')));
+  await tick();
+  const badgeClass = (ref) => {
+    const card = [...document.querySelectorAll('#om-tktlist .om-jc')]
+      .find((e) => e.textContent.includes(ref));
+    const b = card.querySelector('.om-sb');
+    return (b.className.split(/\s+/).find((c) => /^s-/.test(c)) || '');
+  };
+  t('waiting on parts does not look like in progress',
+    badgeClass('TKT-2026-0009') !== badgeClass('TKT-2026-0007'), true);
+  t('and neither looks like resolved',
+    new Set(['TKT-2026-0009', 'TKT-2026-0007', 'TKT-2026-0006'].map(badgeClass)).size, 3);
+
+  const chipFor = (label) => [...document.querySelectorAll('#om-tktchips .om-chip')]
+    .find((e) => e.textContent.trim().startsWith(label));
+  t('the Open chip counts only open ones', chipFor('Open').textContent.replace(/\D/g, ''), '10');
+  t('the All chip counts every one', chipFor('All').textContent.replace(/\D/g, ''), '11');
+
+  tap(chipFor('All')); await tick();
+  t('All shows the resolved one too', cards().length, 11);
+  tap(chipFor('Resolved')); await tick();
+  t('a status chip narrows to that status', cards(), ['TKT-2026-0006']);
+  tap(chipFor('All')); await tick();
+
+  log('\nSEARCH COVERS WHAT PEOPLE ACTUALLY REMEMBER');
+  const search = (q) => { const e = $('om-tktsearch'); e.value = q;
+    e.dispatchEvent(new Event('input', { bubbles:true })); };
+  search('0009'); await tick();
+  t('the reference', cards(), ['TKT-2026-0009']);
+  search('battery'); await tick();
+  t('the subject', cards(), ['TKT-2026-0009']);
+  search('Grootvlei'); await tick();
+  t('the client, which lives on the job card', cards(),
+    ['TKT-2026-0009', 'TKT-2026-0007', 'TKT-2026-0004', 'TKT-2026-0003', 'TKT-2026-0002',
+     'TKT-2026-0001']);
+  search('OM-2026-0155'); await tick();
+  t('the job card reference', cards(), ['TKT-2026-0006']);
+  search('oubaas'); await tick();
+  t('who reported it', cards(), ['TKT-2026-0007']);
+  search(''); await tick();
+
+  log('\nTHE TICKET DETAIL');
+  const d = () => document.getElementById('om-view-tktdetail');
+  // The ticket screen asks for the stock catalogue as it draws, and caches it, so this is the
+  // only moment its failure path can be reached.
+  window.FAIL_ON = 'stock:read';
+  const openCard = (ref) => [...document.querySelectorAll('#om-tktlist .om-jc')]
+    .find((e) => e.textContent.includes(ref))
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  openCard('TKT-2026-0007');
+  await tick(); await tick(); await tick();
+  t('the detail opened', d().classList.contains('active'), true);
+  t('with its reference', d().querySelector('.om-dref').textContent.trim(), 'TKT-2026-0007');
+  t('and its subject', d().querySelector('.om-dtitle').textContent.trim(), 'Inverter alarm 0x33');
+  const facts = [...d().querySelectorAll('.om-fact')].map((e) => e.textContent.replace(/\s+/g, ' ').trim());
+  t('the job card is shown', facts.some((x) => x.includes('OM-2026-0157')), true);
+  t('the client is shown', facts.some((x) => x.includes('Grootvlei')), true);
+  t('how it reached us is shown', facts.some((x) => x.includes('WhatsApp')), true);
+  t('a field with nothing in it is left out, not shown blank',
+    facts.some((x) => /Error code/.test(x)), false);
+  t('only this ticket\u2019s activity is listed',
+    d().textContent.includes('belongs to a different ticket'), false);
+  t('and its own entry is there', d().textContent.includes('[TKT-2026-0007]'), true);
+  t('a ticket that HAS a job card is not asked to attach one',
+    !!document.getElementById('om-tktjcsel'), false);
+  await settle(8);
+  const smsg = () => (document.getElementById('om-tktsparemsg') || {}).textContent || '';
+  t('a stock catalogue that will not load says so', /could not be read/.test(smsg()), true);
+  t('rather than showing a picker that reads as an empty catalogue',
+    /items \u00b7 type/.test(smsg()), false);
+  window.FAIL_ON = null;
+
+  log('\nTHE FIRST VISIT IS NOT A RETURN VISIT');
+  await backToTkt('TKT-2026-0007');
+  t('a ticket with no visits is offered a first one, plainly named',
+    /Schedule site visit/.test(d().querySelector('[data-act="omBookVisit"]').textContent), true);
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(10);
+  t('and it is not typed as a return trip',
+    document.getElementById('modalBg').querySelector('#mType').value, 'Fault Investigation');
+  t('it still carries the ticket, so it will show on the ticket afterwards',
+    !!document.getElementById('modalBg').querySelector('#mSpareSel'), true);
+  omCloseAnyModal();
+  await backToTkt('TKT-2026-0007');
+
+  log('\nTHE STATUS A TICKET IS IN');
+  const statusCard = () => [...d().querySelectorAll('.om-fcard')]
+    .find((c) => /^Status/.test((c.querySelector('.om-fttl') || {}).textContent || ''));
+  const statusBtns = () => [...statusCard().querySelectorAll('button')]
+    .map((b) => b.textContent.trim());
+  t('every status is on screen, including the one it is in', statusBtns().length, 11);
+  const now = [...statusCard().querySelectorAll('.om-now')];
+  t('the current one is marked', now.length, 1);
+  t('and it is the right one', now[0].textContent.replace(/[^A-Za-z ]/g, '').trim(), 'In Progress');
+  t('it cannot be clicked', now[0].disabled, true);
+  // Amber is what every primary button in this app is. A current status painted amber reads
+  // as "press me", which is the opposite of what it means.
+  const statusClassOf = (el) => (el.className.split(/\s+/).find((c) => /^s-/.test(c)) || '');
+  t('it wears a status colour of its own', !!statusClassOf(now[0]), true);
+  t('the same one the badge at the top wears',
+    statusClassOf(now[0]),
+    statusClassOf([...d().querySelectorAll('.om-dhead .om-sb')][0]));
+  t('and it is not also offered as somewhere to move to',
+    !!d().querySelector('[data-act="omTktStatus"][data-a2="In Progress"]'), false);
+  t('the heading says which one it is', /Status .* now In Progress/.test(d().textContent), true);
+
+  log('\nA TICKET CANNOT BE CLOSED WITHOUT SAYING WHAT WAS DONE');
+  window.SENT = [];
+  const resolve = () => [...d().querySelectorAll('[data-act="omTktStatus"]')]
+    .find((b) => b.textContent.trim() === 'Resolved')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  resolve();
+  await settle(12);
+  t('resolving with nothing written is refused',
+    /Write what was done/.test(d().textContent), true);
+  t('and nothing is saved', window.SENT.length, 0);
+
+  document.getElementById('om-tktres').value = 'ok';
+  resolve();
+  await settle(12);
+  t('and a word that says nothing is refused too', window.SENT.length, 0);
+
+  log('\nMOVING A TICKET ON');
+  document.getElementById('om-tktres').value =
+    'Replaced the DC isolator and restarted the inverter. Production back to 4.2kW.';
+  window.SENT = [];
+  resolve();
+  await settle(20);
+  const resWrite = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('the resolution is saved in the same write as the status',
+    /Replaced the DC isolator/.test(resWrite.fields[FID.resolution]), true);
+  const upd = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('the ticket was updated', !!upd, true);
+  t('to the status clicked', upd.fields[FID.status], 'Resolved');
+  t('and Closed At was stamped', typeof upd.fields['fldeAsdC8J55Xy18Q'], 'string');
+  const slog = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('a status-change entry was written', slog.fields[FID.alType], 'Ticket Status Change');
+  t('naming the old status and the new, not just "changed"',
+    /In Progress .* Resolved/.test(slog.fields[FID.alNote]), true);
+  t('and saying it was a person, not a side effect',
+    /changed by hand/.test(slog.fields[FID.alNote]), true);
+  t('linked to the ticket', slog.fields[FID.alTicket], ['recTKTa']);
+  t('and to its job card', slog.fields[FID.alJc], ['recJC1']);
+
+  log('\nA NOTE AGAINST THE TICKET');
+  await backToTkt('TKT-2026-0009');
+  const noteBox = () => document.getElementById('om-tktnote');
+  t('there is somewhere to write what was done', !!noteBox(), true);
+  window.SENT = [];
+  noteBox().value = 'ok';
+  d().querySelector('[data-act="omTktAddNote"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  t('a note that says nothing is refused', window.SENT.length, 0);
+  t('and it says why', /Write a line or two/.test(d().textContent), true);
+
+  noteBox().value = 'Replaced the MC4 connectors on string 2 and re-torqued the DC isolator.';
+  d().querySelector('[data-act="omTktAddNote"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(20);
+  const note = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('a real note is written to the activity log', !!note, true);
+  t('as a comment, not as something the app did', note.fields[FID.alType], 'Comment');
+  t('carrying what was typed, unchanged',
+    note.fields[FID.alNote], 'Replaced the MC4 connectors on string 2 and re-torqued the DC isolator.');
+  t('linked to the ticket', note.fields[FID.alTicket], ['recTKTc']);
+  t('and to its job card', note.fields[FID.alJc], ['recJC1']);
+
+  log('\nA READ THAT FAILS SAYS SO RATHER THAN SHOWING NOTHING');
+  // The ticket list caches, so by now its own failure path cannot be reached from here. The
+  // detail re-reads spares and activity every time it opens, and those are the reads someone
+  // acts on.
+  window.FAIL_ON = 'tickets:spares:read';
+  document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick(); await tick();
+  openCard('TKT-2026-0009');
+  await tick(); await tick(); await tick();
+  t('a spares read that failed is reported', /Spares could not be read/.test(d().textContent), true);
+  t('and is not passed off as nothing being needed',
+    /No spares requested/.test(d().textContent), false);
+  window.FAIL_ON = null;
+
+  log('\nBOOKING THE SECOND VISIT');
+  document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick(); await tick();
+  tap([...document.querySelectorAll('#om-tktchips .om-chip')]
+    .find((e) => e.textContent.trim().startsWith('All')));
+  await tick();
+  // TKT-2026-0007 was moved to Resolved a few assertions ago, and a resolved ticket is not
+  // given more visits. That is the behaviour, so check it rather than work around it.
+  openCard('TKT-2026-0007');
+  await tick(); await tick(); await tick();
+  t('a resolved ticket offers no second visit',
+    !!d().querySelector('[data-act="omBookVisit"]'), false);
+  t('but its report can still be downloaded',
+    !!d().querySelector('[data-act="omTktReport"]'), true);
+
+  openCard('TKT-2026-0009');
+  await tick(); await tick(); await tick();
+  t('an open ticket does offer one',
+    !!d().querySelector('[data-act="omBookVisit"]'), true);
+  t('and since it already has a visit, it offers another',
+    /Schedule another visit/.test(d().querySelector('[data-act="omBookVisit"]').textContent), true);
+  // textContent reads hidden nodes too, so it proved the words existed, not that anyone
+  // would see them.
+  const visitHint = () => [...d().querySelectorAll('.om-hint')]
+    .find((e) => /booked from this ticket/.test(e.textContent));
+  t('it says when a visit will appear in this list, and when it will not',
+    !!visitHint() && getComputedStyle(visitHint()).display !== 'none', true);
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick(); await tick();
+  const modal = () => document.getElementById('modalBg');
+  t('the visit modal opened', !!modal(), true);
+  t('booked as a Return Visit', modal().querySelector('#mType').value, 'Return Visit');
+  t('at the ticket\u2019s own priority', modal().querySelector('#mPrio').value, 'Urgent');
+  t('against the ticket\u2019s job card', modal().querySelector('#mJC').value, 'recJC1');
+  t('Low is offered on a visit too',
+    [...modal().querySelectorAll('#mPrio option')].map((o) => o.value), ['Low', 'Normal', 'High', 'Urgent']);
+
+  t('the earlier visit on this ticket is shown',
+    /first look|Inverter would not restart/.test(modal().querySelector('.om-hist').textContent), true);
+  t('and only that ticket\u2019s',
+    /SOMEONE ELSES TICKET/.test(modal().querySelector('.om-hist').textContent), false);
+  t('and not one with no ticket at all',
+    /A VISIT WITH NO TICKET/.test(modal().querySelector('.om-hist').textContent), false);
+  t('and it says whose visits are not listed',
+    /may not be listed/.test(modal().textContent), true);
+
+  log('\nTHE SPARES PICKER');
+  await settle(8);
+  const spareSel = modal().querySelector('#mSpareSel');
+  // recTKTc has a spare requested against it with no visit yet. An empty list here is how a
+  // technician ends up asking for the same part twice.
+  const already = () => [...modal().querySelectorAll('#mSpareLines .om-spare-have')]
+    .map((e) => e.querySelector('.om-sparetxt b').textContent.trim());
+  t('a part already asked for on the ticket is listed', already(), ['LOOSE-1']);
+  t('and is marked as already requested',
+    /already requested/.test(modal().querySelector('#mSpareLines').textContent), true);
+  t('it has no stepper, because it is changed on the ticket, not here',
+    modal().querySelector('.om-spare-have [data-spare]'), null);
+  t('and the list does not claim to be empty',
+    /Nothing listed yet/.test(modal().querySelector('#mSpareLines').textContent), false);
+
+  t('the catalogue loaded', [...spareSel.options].length > 1, true);
+  t('and it is searchable, not a scroll', !!spareSel.__txPick, true);
+  t('it says how many items there are', /3 items/.test(modal().querySelector('#mSpareMsg').textContent), true);
+  // The whole point of the picker: a code nobody remembers, found by the words they do.
+  t('each item shows its description beside the code',
+    [...spareSel.options].map((o) => o.textContent).filter((x) => /10A 1P 3KA MCB BREAKER/.test(x)).length, 1);
+  t('so the catalogue can be searched by description, not only by code',
+    TX.pick.match.hit(TX.pick.match.norm([...spareSel.options]
+      .find((o) => o.value === 'recST1').textContent), TX.pick.match.terms('breaker')), true);
+
+  const pickStock = (id) => { spareSel.value = id;
+    spareSel.dispatchEvent(new Event('change', { bubbles:true })); };
+  // Only what is being added now. The already-requested rows are listed above them and are
+  // not part of what this form will create.
+  const lines = () => [...modal().querySelectorAll('.om-spare:not(.om-spare-have)')]
+    .map((e) => e.querySelector('.om-sparetxt b').textContent.trim()
+      + ' x' + e.querySelector('.om-qty').textContent.trim());
+
+  pickStock('recST1'); await tick();
+  t('choosing a part lists it', lines(), ['KC3E-110 x1']);
+  pickStock('recST1'); await tick();
+  t('choosing it again means two of it, not two lines', lines(), ['KC3E-110 x2']);
+  pickStock('recST2'); await tick();
+  t('a second part is its own line', lines(), ['KC3E-110 x2', 'MATEBOX-X3 x1']);
+
+  const step = (i, what) => modal()
+    .querySelectorAll('.om-spare:not(.om-spare-have)')[i].querySelector('[data-spare="' + what + '"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  step(1, 'inc'); await tick();
+  t('the stepper adds one', lines()[1], 'MATEBOX-X3 x2');
+  step(1, 'dec'); step(1, 'dec'); step(1, 'dec'); await tick();
+  t('and never goes below one', lines()[1], 'MATEBOX-X3 x1');
+  t('the steppers are big enough to hit in a van',
+    modal().querySelector('.om-step').getBoundingClientRect().height >= 44, true);
+  step(1, 'rm'); await tick();
+  t('a part can be taken off again', lines(), ['KC3E-110 x2']);
+  pickStock('recST3'); await tick();
+
+  log('\nSAVING IT');
+  window.SENT = [];
+  modal().querySelector('#mTech').value = 'recP1';
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+
+  const visit = window.SENT.find((x) => x.op === 'create' && x.table === 'site_visits');
+  t('the visit was created', !!visit, true);
+  t('carrying the ticket', visit.fields['fldXKl0jI6lbIvj4u'], ['recTKTc']);
+  t('typed as a Return Visit', visit.fields['fldu5Aou8gQZoG38h'], 'Return Visit');
+
+  const spareWrites = window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:spares');
+  t('one spares row per part', spareWrites.length, 2);
+  t('each linked to the ticket', spareWrites.every((x) => x.fields['fldTNufFJIZd10lna'][0] === 'recTKTc'), true);
+  // The new visit's id, not the ticket's other visits: a picker needs to know which trip.
+  t('and to the NEW visit',
+    spareWrites.every((x) => x.fields['fldkd9aIylu0lRM6S'][0] === 'recNEWVISIT'), true);
+  t('the unit is carried from the catalogue',
+    spareWrites.every((x) => x.fields['fld6qXvekCu3D12DS'] === 'Each'), true);
+  t('with the quantity that was set',
+    spareWrites.map((x) => x.fields['fldmu2QbdHiDlXiSk'] + ':' + x.fields['fldueqeUg4G4UZIUg']),
+    ['KC3E-110:2', 'ATW19.0WHITE:1']);
+  t('and start life as Requested',
+    spareWrites.every((x) => x.fields['fldVKfpzjnkmhc2aU'] === 'Requested'), true);
+
+  const adopted = window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:spares');
+  t('a part asked for before the date was set is attached to this visit', adopted.length, 1);
+  t('to this visit specifically',
+    adopted[0].fields['fldkd9aIylu0lRM6S'], ['recNEWVISIT']);
+  t('and it is the loose one, not one already on a visit', adopted[0].recordId, 'recSPloose');
+  // It is already Awaiting Spares, and booking a visit no longer rewrites a status that is
+  // not one of the "nothing booked yet" ones. Leaving it alone IS the fix.
+  t('a ticket already waiting on parts is left where it is',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket').length, 0);
+
+  const sreq = window.SENT.filter((x) => x.op === 'create' && x.table === 'activity_log'
+    && x.fields[FID.alType] === 'Spares Requested');
+  t('one spares entry was logged', sreq.length, 1);
+  t('naming the parts and the counts',
+    /2 \u00d7 KC3E-110/.test(sreq[0].fields[FID.alNote]) && /1 \u00d7 ATW19/.test(sreq[0].fields[FID.alNote]), true);
+  t('linked to the ticket', sreq[0].fields[FID.alTicket], ['recTKTc']);
+  const scheduled = window.SENT.filter((x) => x.op === 'create' && x.table === 'activity_log'
+    && /Visit Scheduled/.test(JSON.stringify(x.fields)));
+  t('and exactly one Visit Scheduled entry, not two', scheduled.length, 1);
+
+  log('\nA PART THAT WILL NOT SAVE IS NAMED');
+  omCloseAnyModal();
+  await backToTkt('TKT-2026-0009');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(10);
+  modal().querySelector('#mSpareSel').value = 'recST1';
+  modal().querySelector('#mSpareSel').dispatchEvent(new Event('change', { bubbles:true }));
+  await tick();
+  window.FAIL_ON = 'tickets:spares';
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  window.FAIL_ON = null;
+  const toastText = (document.getElementById('schedToast') || {}).textContent || '';
+  t('the visit is still reported as saved', /Visit (scheduled|saved)/i.test(toastText), true);
+  t('and the part that did not save is named', /KC3E-110/.test(toastText), true);
+  omCloseAnyModal();
+
+  log('\nA SECOND VISIT WITH NO SPARES');
+  omCloseAnyModal();
+  // Saving a visit reloads everything and re-renders, so the card that was on screen a moment
+  // ago is not the one in the DOM now. Go back through the list rather than reaching for it.
+  await backToTkt('TKT-2026-0009');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(10);
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  t('no new spares rows are written',
+    window.SENT.filter((x) => x.table === 'tickets:spares' && x.op === 'create').length, 0);
+  t('and there is nothing loose left to adopt',
+    window.SENT.filter((x) => x.table === 'tickets:spares' && x.op === 'update').length, 0);
+  t('and its status is still not rewritten by the booking',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket').length, 0);
+  t('no spares entry is logged when there are none',
+    window.SENT.filter((x) => x.fields && x.fields[FID.alType] === 'Spares Requested').length, 0);
+
+  log('\nA TICKET THAT LOST ITS JOB CARD');
+  await backToTkt('TKT-2026-0005');
+  t('it says the job card is missing, and what that costs',
+    /No job card is linked/.test(d().textContent), true);
+  const jcPick = () => document.getElementById('om-tktjcsel');
+  t('a picker is offered', !!jcPick(), true);
+  t('and it is searchable, not a scroll of 111', !!jcPick().__txPick, true);
+  t('every job card is in it', [...jcPick().options].map((o) => o.value).includes('recJC1'), true);
+  t('no visit can be booked from it',
+    !!d().querySelector('[data-act="omBookVisit"]'), true);
+
+  window.SENT = [];
+  d().querySelector('[data-act="omTktAttachJc"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(8);
+  t('attaching nothing refuses', /Choose a job card first/.test(d().textContent), true);
+  t('and writes nothing', window.SENT.length, 0);
+
+  jcPick().value = 'recJC1';
+  d().querySelector('[data-act="omTktAttachJc"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(14);
+  const att = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('the job card is attached', att.fields[FID.jc], ['recJC1']);
+  t('and its client comes with it', att.fields[FID.client], ['recCLI1']);
+  const attLog = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('it is written down, with the reason', /was not recorded when the ticket was raised/
+    .test(attLog.fields[FID.alNote]), true);
+  t('linked to the ticket', attLog.fields[FID.alTicket], ['recTKTd']);
+
+  log('\nSPARES WITHOUT A VISIT');
+  await backToTkt('TKT-2026-0009');
+  await settle(10);
+  const tsel = () => document.getElementById('om-tktsparesel');
+  t('the ticket screen has its own spares picker', !!tsel(), true);
+  t('which is searchable too', !!tsel().__txPick, true);
+  t('nothing is offered to save until something is chosen',
+    document.getElementById('om-tktspareadd').hidden, true);
+
+  const tstage = () => [...d().querySelectorAll('#om-tktstage .om-spare')]
+    .map((e) => e.querySelector('.om-sparetxt b').textContent.trim()
+      + ' x' + e.querySelector('.om-qty').textContent.trim());
+  const pickT = (id) => { tsel().value = id; tsel().dispatchEvent(new Event('change', { bubbles:true })); };
+
+  pickT('recST1'); await tick();
+  t('a chosen part is staged', tstage(), ['KC3E-110 x1']);
+  pickT('recST1'); await tick();
+  t('twice means two of it', tstage(), ['KC3E-110 x2']);
+  pickT('recST2'); await tick();
+  t('a second part is its own line', tstage().length, 2);
+  d().querySelector('#om-tktstage [data-act="omTktSpareStep"][data-a2="rm"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick();
+  t('and can be taken off again', tstage(), ['MATEBOX-X3 x1']);
+  const tstep = (what) => d().querySelector('#om-tktstage [data-act="omTktSpareStep"][data-a2="' + what + '"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  tstep('inc'); await tick();
+  t('the stepper adds one', tstage(), ['MATEBOX-X3 x2']);
+  tstep('dec'); tstep('dec'); tstep('dec'); await tick();
+  t('and never reaches zero', tstage(), ['MATEBOX-X3 x1']);
+  t('now there is something to save', document.getElementById('om-tktspareadd').hidden, false);
+
+  window.SENT = [];
+  document.getElementById('om-tktspareadd').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(30);
+  const rows = window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:spares');
+  t('the spare is written against the ticket', rows.length, 1);
+  t('linked to it', rows[0].fields['fldTNufFJIZd10lna'], ['recTKTc']);
+  // No visit exists yet. The row must not invent one.
+  t('and to no visit, because there is not one yet',
+    'fldkd9aIylu0lRM6S' in rows[0].fields, false);
+  const sl = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('it is logged as a spares request', sl.fields[FID.alType], 'Spares Requested');
+  t('saying plainly that no visit is booked', /no visit booked yet/i.test(sl.fields[FID.alNote]), true);
+  // This one is already Awaiting Spares, so there is nothing to move it to. The positive
+  // case -- a live ticket being moved on and the move being logged -- is further down.
+  t('a ticket already waiting on parts needs no status write',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket').length, 0);
+  t('and the part is recorded all the same',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:spares').length, 1);
+
+  log('\nBOOKING A VISIT DOES NOT UNDO A STATUS SOMEBODY CHOSE');
+  // TKT-2026-0008 on the live base: two changes at 16:05 were silently undone by a visit
+  // booked at 16:07, and the activity log explained neither. That is the shape of it.
+  await backToTkt('TKT-2026-0009');
+  window.SENT = [];
+  [...d().querySelectorAll('[data-act="omTktStatus"]')]
+    .find((b) => b.textContent.trim() === 'Awaiting Client')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(20);
+  t('the chosen status is saved',
+    ((window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket') || {}).fields
+      || {})[FID.status],
+    'Awaiting Client');
+
+  await backToTkt('TKT-2026-0009');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  const moved = window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('booking a visit leaves that status alone', moved.length, 0);
+  t('and says nothing about a change it did not make',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'activity_log'
+      && x.fields[FID.alType] === 'Ticket Status Change').length, 0);
+  omCloseAnyModal();
+
+  log('\nWHEN IT DOES MOVE A TICKET, IT SAYS SO');
+  await backToTkt('TKT-2026-0005');
+  // recTKTd is New, which does mean "nothing booked", so booking one moves it on. It was
+  // given its job card a few sections ago, so there is nothing to attach here.
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  const up2 = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('a ticket with nothing booked is moved on', up2.fields[FID.status], 'Visit Scheduled');
+  const log2 = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log'
+    && x.fields[FID.alType] === 'Ticket Status Change');
+  t('and the change is written down', !!log2, true);
+  t('naming what it was and what it became',
+    /New \u2192 Visit Scheduled/.test(log2.fields[FID.alNote]), true);
+  t('and not the second-visit wording, on a ticket whose first visit this is',
+    /Second Visit/.test(log2.fields[FID.alNote]), false);
+  t('and why, so nobody has to guess',
+    /a visit was booked/.test(log2.fields[FID.alNote]), true);
+  omCloseAnyModal();
+
+  log('\nA SECOND VISIT IS STILL CALLED THE SECOND VISIT');
+  // recTKTf is at Second Visit Required, so here the old wording is the true one and dropping
+  // it in favour of the new option would throw away which visit this is.
+  await backToTkt('TKT-2026-0003');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  const upSec = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('it is moved to the second-visit status', upSec.fields[FID.status], 'Second Visit Scheduled');
+  const logSec = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log'
+    && x.fields[FID.alType] === 'Ticket Status Change');
+  t('and the entry names that state',
+    /Second Visit Required \u2192 Second Visit Scheduled/.test(logSec.fields[FID.alNote]), true);
+  omCloseAnyModal();
+
+  log('\nRE-BOOKING A TICKET THAT ALREADY HAS A VISIT CHANGES NOTHING');
+  // recTKTg is already Visit Scheduled. Nothing new has happened, so nothing is written --
+  // and in particular Second Visit Scheduled must never be quietly downgraded to it.
+  await backToTkt('TKT-2026-0002');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  t('no status is written', window.SENT.filter((x) => x.op === 'update'
+    && x.table === 'tickets:ticket').length, 0);
+  t('and nothing is said about a change that did not happen',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'activity_log'
+      && x.fields[FID.alType] === 'Ticket Status Change').length, 0);
+  t('but the visit itself is still booked',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'site_visits').length, 1);
+  omCloseAnyModal();
+
+  // recTKTh is at SECOND Visit Scheduled. This is the case where "leave it alone" and "call
+  // it a plain visit" differ, and where a downgrade would quietly lose which visit it is.
+  await backToTkt('TKT-2026-0001');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  t('a second visit is not demoted to a plain one by re-booking it',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket')
+      .map((x) => x.fields[FID.status]), []);
+  t('and nothing is written down about it either',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'activity_log'
+      && x.fields[FID.alType] === 'Ticket Status Change').length, 0);
+  omCloseAnyModal();
+
+  log('\nTHE NEW STATUS IS OFFERED BY HAND TOO');
+  await backToTkt('TKT-2026-0007');
+  t('Visit Scheduled is one of the buttons a person can press',
+    [...d().querySelectorAll('[data-act="omTktStatus"]')]
+      .some((b) => b.textContent.trim() === 'Visit Scheduled'), true);
+
+  log('\nA VISIT BOOKED WITH PARTS SAYS IT IS WAITING FOR THEM');
+  await backToTkt('TKT-2026-0004');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  modal().querySelector('#mSpareSel').value = 'recST2';
+  modal().querySelector('#mSpareSel').dispatchEvent(new Event('change', { bubbles:true }));
+  await tick();
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  const up3 = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('a booking with parts leaves the ticket waiting for them',
+    up3.fields[FID.status], 'Awaiting Spares');
+  const log3 = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log'
+    && x.fields[FID.alType] === 'Ticket Status Change');
+  t('and says the parts are why', /parts are on order/.test(log3.fields[FID.alNote]), true);
+  omCloseAnyModal();
+
+  log('\nA CLOSED TICKET IS NOT REOPENED BY ASKING FOR A PART');
+  await backToTkt('TKT-2026-0006');
+  t('a closed ticket is not offered a spares picker',
+    !!document.getElementById('om-tktsparesel'), false);
+  // Reached the way a stray data-act would reach it: the guard inside the action is the last
+  // line, and it has to hold on its own.
+  {
+    const b = document.createElement('button');
+    b.setAttribute('data-act', 'omTktRequestSpares');
+    b.setAttribute('data-a1', 'recTKTb');
+    d().appendChild(b);
+    window.SENT = [];
+    // Stage a part on it by hand, since the screen offers no way to.
+    const sel = document.createElement('select');
+    sel.id = 'om-tktsparesel';
+    d().appendChild(sel);
+    const pickBtn = document.createElement('button');
+    pickBtn.setAttribute('data-act', 'omTktPickSpare');
+    pickBtn.setAttribute('data-a1', 'recST1');
+    d().appendChild(pickBtn);
+    pickBtn.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await tick();
+    b.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(30);
+    t('the spare is still recorded',
+      window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:spares').length, 1);
+    t('but the closed ticket is left closed',
+      window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket').length, 0);
+  }
+
+  log('\nA VISIT BOOKED FROM THE CALENDAR RAISES ITS TICKET');
+  // Nothing on screen names a ticket here: this is the plain "+ Schedule Site Visit" path.
+  omCloseAnyModal();
+  document.getElementById('newVisitTop').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  t('the plain visit form has no ticket attached to it',
+    !!modal().querySelector('#mSpareSel'), false);
+  modal().querySelector('#mJC').value = 'recJC1';
+  modal().querySelector('#mTech').value = 'recP1';
+  // A slot nothing else in this suite uses. Every modal opens at 09:00 by default, so leaving
+  // it there means the technician-conflict check refuses the save -- correctly, but this is
+  // about the ticket that gets raised, not the clash.
+  modal().querySelector('#mStart').value = '2026-11-03T07:00';
+  modal().querySelector('#mEnd').value = '2026-11-03T09:00';
+  modal().querySelector('#mType').value = 'Maintenance';
+  modal().querySelector('#mNotes').value = 'Six-monthly service.';
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(45);
+
+  const visitC = window.SENT.find((x) => x.op === 'create' && x.table === 'site_visits');
+  t('the visit is created', !!visitC, true);
+  const tktC = window.SENT.find((x) => x.op === 'create' && x.table === 'tickets:ticket');
+  t('and a ticket is raised for it', !!tktC, true);
+  t('pointing at that visit, which links the visit back',
+    tktC.fields['fld8vQQgOFxSsv1yR'], ['recNEWVISIT']);
+  t('on the same job card', tktC.fields[FID.jc], ['recJC1']);
+  t('carrying the client as a LINK, not the looked-up name',
+    tktC.fields[FID.client], ['recCLI1']);
+  // Nobody phoned this in. Internal is what that means.
+  t('reported as Internal, because nobody reported it', tktC.fields[FID.channel], 'Internal');
+  t('taking the visit subject', /OM-2026-0157|Grootvlei/.test(tktC.fields[FID.subject]), true);
+  t('and the visit notes as its description', tktC.fields[FID.desc], 'Six-monthly service.');
+  // Maintenance and Preventative Maintenance mean the same thing; most types do not map.
+  t('a visit type that matches a category is mapped',
+    tktC.fields[FID.category], 'Preventative Maintenance');
+  // The visit is already on the calendar. That is the fact, whether or not a name is on it.
+  t('it says the visit is scheduled, which is the one thing that has happened',
+    tktC.fields[FID.status], 'Visit Scheduled');
+  const raised = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log'
+    && x.fields[FID.alType] === 'Ticket Logged');
+  t('it is logged as a ticket being raised', !!raised, true);
+  t('saying it came from a booked visit', /Raised for the visit booked/.test(raised.fields[FID.alNote]), true);
+  omCloseAnyModal();
+
+  log('\nA VISIT RAISED FROM A TICKET DOES NOT RAISE A SECOND ONE');
+  await backToTkt('TKT-2026-0009');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  t('no second ticket is created',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:ticket').length, 0);
+  omCloseAnyModal();
+
+  log('\nA DASHBOARD FIGURE OPENS THE JOB CARDS IT COUNTED');
+  omCloseAnyModal();
+  const jcCards = () => [...document.querySelectorAll('#om-jclist .om-jc')]
+    .map((e) => e.querySelector('.om-jcref').textContent.trim());
+  const figure = (id) => document.getElementById(id);
+  const litChips = () => [...document.querySelectorAll('#om-view-jc .om-chip.on')]
+    .map((e) => e.textContent.trim()).sort();
+  const drill = async (id) => {
+    document.getElementById('ombn-dash').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    figure(id).dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+  };
+
+  document.getElementById('ombn-dash').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(8);
+  t('the figures count the fixtures', ['om-s-total', 'om-s-over', 'om-s-prog', 'om-s-done']
+    .map((id) => figure(id).textContent.trim()), ['9', '1', '1', '2']);
+
+  // The invariant the whole feature rests on: whatever a figure says, that many cards open.
+  // Counting one set and filtering another is the failure that makes a dashboard useless.
+  for (const id of ['om-s-total', 'om-s-over', 'om-s-prog', 'om-s-done']) {
+    const said = figure(id).textContent.trim();
+    await drill(id);
+    // The id sits on the number; the label is beside it, inside the button.
+    const label = figure(id).closest('.om-stat').querySelector('.om-sl').textContent.trim();
+    t('clicking ' + said + ' on ' + label + ' opens exactly that many',
+      String(jcCards().length), said);
+  }
+
+  await drill('om-s-over');
+  t('and the overdue one is the overdue card', jcCards(), ['OM-2026-0150/MAINT/TE']);
+  t('with the Overdue chip lit, so the list says why it is short', litChips(), ['Overdue']);
+
+  await drill('om-s-prog');
+  t('in progress opens the one in progress', jcCards(), ['OM-2026-0150/MAINT/TE']);
+  t('under the In Progress chip', litChips(), ['In Progress']);
+
+  await drill('om-s-done');
+  t('completed opens the completed AND the closed one',
+    jcCards().sort(), ['OM-2026-0141/INST/TE', 'OM-2026-0148/INST/TE']);
+  // There is no single chip for that pair, so both are lit rather than neither.
+  t('with both chips lit, because that figure is two statuses',
+    litChips(), ['Closed', 'Completed']);
+
+  await drill('om-s-total');
+  t('total opens every one', jcCards().length, 9);
+  t('under All', litChips(), ['All']);
+
+  log('\nA FILTER LEFT ON DOES NOT MAKE A FIGURE LOOK WRONG');
+  // 113 opening onto forty reads as a wrong number, not as a search nobody remembered.
+  document.getElementById('om-search').value = 'Bethal';
+  document.getElementById('om-search').dispatchEvent(new Event('input', { bubbles:true }));
+  await settle(8);
+  t('the search does filter the list', jcCards(), ['OM-2026-0141/INST/TE']);
+  await drill('om-s-total');
+  t('but a figure clears it and opens its full count', jcCards().length, 9);
+  t('and empties the box, so the list matches what is typed in it',
+    document.getElementById('om-search').value, '');
+
+  const own = document.getElementById('om-owner');
+  own.value = [...own.options].map((o) => o.value).find((v) => v && v !== 'ALL') || 'ALL';
+  own.dispatchEvent(new Event('change', { bubbles:true }));
+  await settle(8);
+  await drill('om-s-total');
+  t('an owner filter is cleared the same way', jcCards().length, 9);
+  t('and the control shows that it was', own.value, 'ALL');
+
+  log('\nA FINISHED TICKET SETTLES THE VISITS BOOKED FOR IT');
+  // TKT-2026-0009 on the live base: closed on 27 September while the visit it had been raised
+  // for still read Scheduled on 30 September. Outstanding work on the calendar for a ticket
+  // nobody was going to work on, and a technician's slot still blocked by it.
+  omCloseAnyModal();
+  const vStat = (id) => (VISITS.find((r) => r.id === id).fields[FID.vStatus]);
+  const pressStatus = async (label) => {
+    [...d().querySelectorAll('[data-act="omTktStatus"]')]
+      .find((b) => b.textContent.trim() === label)
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(45);
+  };
+  const writeResolution = (text) => { d().querySelector('#om-tktres').value = text; };
+  const visitWrites = () => window.SENT.filter((x) => x.op === 'update' && x.table === 'site_visits');
+  const visitLogs = (type) => window.SENT.filter((x) => x.op === 'create'
+    && x.table === 'activity_log' && x.fields[FID.alType] === type);
+
+  await backToTkt('TKT-2026-0012');
+  window.SENT = [];
+  await pressStatus('In Progress');
+  t('a ticket that is still open leaves the calendar alone', visitWrites().length, 0);
+
+  await backToTkt('TKT-2026-0012');
+  window.SENT = [];
+  writeResolution('Replaced the isolator and re-torqued the DC side.');
+  await pressStatus('Closed');
+  t('closing it does touch the visit', visitWrites().length, 1);
+  t('the right one', visitWrites()[0].recordId, 'recV4');
+  // Still a fortnight away. Nobody is going to make it, so it is not "done".
+  t('and cancels it, because it is still to come', vStat('recV4'), 'Cancelled');
+  t('written down as a cancellation', visitLogs('Visit Cancelled').length, 1);
+  t('naming the visit and why',
+    /SV-FUTURE .* Cancelled because the ticket was closed/
+      .test(visitLogs('Visit Cancelled')[0].fields[FID.alNote]), true);
+  t('and tied to the ticket that caused it',
+    visitLogs('Visit Cancelled')[0].fields[FID.alTicket], ['recTKTi']);
+
+  await backToTkt('TKT-2026-0011');
+  window.SENT = [];
+  writeResolution('Remade the connector and tested under load.');
+  await pressStatus('Resolved');
+  // A fortnight ago. The ticket being resolved is the work having been done.
+  t('a visit already in the past is completed, not cancelled', vStat('recV5'), 'Completed');
+  t('and written down as a completion', visitLogs('Visit Completed').length, 1);
+  t('with no cancellation claimed', visitLogs('Visit Cancelled').length, 0);
+
+  await backToTkt('TKT-2026-0010');
+  window.SENT = [];
+  await pressStatus('Cancelled');
+  // Cancelled means it never happened, whatever the date says. Completing it would be a lie.
+  t('a cancelled ticket cancels its past visit rather than completing it',
+    vStat('recV6'), 'Cancelled');
+  t('and claims no completion', visitLogs('Visit Completed').length, 0);
+  // recV7 was Completed before any of this. Touching it would rewrite history.
+  t('a visit already dealt with is left exactly as it was', vStat('recV7'), 'Completed');
+  t('so only the unsettled one is written', visitWrites().length, 1);
+  t('which is the unsettled one', visitWrites()[0].recordId, 'recV6');
+
+  log('\nEVERY STATUS A JOB CARD CAN BE IN HAS A CHIP');
+  // The row used to offer five statuses while the New Job Card form offered nine, so a card
+  // could be created in this app and then never filtered to. This is the check that would
+  // have said so.
+  const chipVals = () => [...document.querySelectorAll('#om-view-jc .om-chip')]
+    .map((e) => e.getAttribute('data-a2'));
+  // The module is evaluated with new Function(), so NJC_STATS is not a global. Reading it out
+  // of the shipped source is what scripts/verify-selects.js does against Airtable, and it has
+  // the same virtue: it checks what actually ships, not a copy of it kept in the test.
+  const njcStats = (() => {
+    const m = /const\s+NJC_STATS\s*=\s*\[([^\]]*)\]/.exec(window.__SRC || '');
+    return m ? m[1].split(',').map((x) => x.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean) : [];
+  })();
+  t('the New Job Card status list was found in the source', njcStats.length > 0, true);
+  t('nothing the New Job Card form can create is missing from the chip row',
+    njcStats.filter((x) => chipVals().indexOf(x) < 0), []);
+  t('and the two that are not statuses are still there',
+    ['ALL', 'OVERDUE'].filter((x) => chipVals().indexOf(x) < 0), []);
+
+  // Each one has exactly one card in the fixtures, so a chip wired to the wrong status shows
+  // the wrong reference rather than merely the wrong number.
+  const byStatus = {
+    'Quotation Pending':'OM-2026-0139/INST/TE', 'COC Pending':'OM-2026-0137/INST/TE',
+    'Approved':'OM-2026-0135/INST/TE', 'Cancelled':'OM-2026-0133/INST/TE',
+  };
+  for (const st of Object.keys(byStatus)) {
+    [...document.querySelectorAll('#om-view-jc .om-chip')]
+      .find((e) => e.getAttribute('data-a2') === st)
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    t('the ' + st + ' chip opens the ' + st + ' card', jcCards(), [byStatus[st]]);
+  }
+
+  log('\nTHE VISIT FORM CAPTURES THE TICKET IT RAISES');
+  omCloseAnyModal();
+  document.getElementById('newVisitTop').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  const tbox = () => modal().querySelector('#mTktBox');
+  t('a plain visit is asked for the ticket details', !!tbox(), true);
+  t('with every field the New Ticket form has',
+    ['#mCat', '#mChanBox', '#mChanDetail', '#mReportedAt', '#mReportedBy', '#mAsset', '#mErr']
+      .filter((sel) => !modal().querySelector(sel)), []);
+
+  // The two lists live in two files. This is the check that stops one gaining a category the
+  // other never hears about.
+  // An <option> with no value attribute reports its text as its value, so both placeholders
+  // come back as "— Select category —" rather than empty. Drop them by the em dash.
+  const realCats = (sel) => [...document.querySelectorAll(sel)]
+    .map((o) => o.value).filter((x) => x && x.indexOf('—') < 0);
+  const catsInModal = [...modal().querySelectorAll('#mCat option')]
+    .map((o) => o.value).filter((x) => x && x.indexOf('—') < 0);
+  const catsInForm = realCats('#om-cat option');
+  t('the categories match the New Ticket form exactly', catsInModal, catsInForm);
+  const chansInModal = [...modal().querySelectorAll('#mChanBox .om-chanopt')]
+    .map((e) => e.dataset.v);
+  const chansInForm = [...document.querySelectorAll('#om-view-new .om-chanopt')]
+    .map((e) => e.getAttribute('data-a2'));
+  t('and so do the source channels', chansInModal, chansInForm);
+
+  t('Internal is chosen to begin with, because we booked it',
+    modal().querySelector('#mChanBox').dataset.v, 'Internal');
+  t('and it is the lit chip', [...modal().querySelectorAll('#mChanBox .om-chanopt.sel')]
+    .map((e) => e.dataset.v), ['Internal']);
+
+  // Maintenance means Preventative Maintenance. The map was applied silently before; now it
+  // is on screen where it can be corrected.
+  modal().querySelector('#mType').value = 'Maintenance';
+  modal().querySelector('#mType').dispatchEvent(new Event('change', { bubbles:true }));
+  await settle(6);
+  t('the category follows the visit type', modal().querySelector('#mCat').value,
+    'Preventative Maintenance');
+  modal().querySelector('#mType').value = 'Site Inspection';
+  modal().querySelector('#mType').dispatchEvent(new Event('change', { bubbles:true }));
+  await settle(6);
+  t('and clears again for a type that is not a fault', modal().querySelector('#mCat').value, '');
+
+  // Reported by follows the technician until somebody types over it.
+  modal().querySelector('#mTech').value = 'recP1';
+  modal().querySelector('#mTech').dispatchEvent(new Event('change', { bubbles:true }));
+  await settle(6);
+  t('reported by follows the technician', modal().querySelector('#mReportedBy').value,
+    'Evan Mokoena');
+
+  log('\nAND EVERY ANSWER REACHES THE TICKET');
+  modal().querySelector('#mJC').value = 'recJC1';
+  modal().querySelector('#mStart').value = '2026-11-05T07:00';
+  modal().querySelector('#mEnd').value = '2026-11-05T09:00';
+  modal().querySelector('#mSubject').value = 'Geyser timer tripping the earth leakage';
+  modal().querySelector('#mNotes').value = 'Client reports it trips at 06:00 every day.';
+  modal().querySelector('#mCat').value = 'Grid / Eskom Fault';
+  modal().querySelector('#mCat').dispatchEvent(new Event('change', { bubbles:true }));
+  // Changing the type now must NOT take the chosen category back. Maintenance maps to
+  // Preventative Maintenance, so an unguarded pre-fill would overwrite it here.
+  modal().querySelector('#mType').value = 'Maintenance';
+  modal().querySelector('#mType').dispatchEvent(new Event('change', { bubbles:true }));
+  await settle(6);
+  t('a category somebody chose survives a change of visit type',
+    modal().querySelector('#mCat').value, 'Grid / Eskom Fault');
+  [...modal().querySelectorAll('#mChanBox .om-chanopt')]
+    .find((e) => e.dataset.v === 'WhatsApp')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  t('tapping a channel lights that one and only that one',
+    [...modal().querySelectorAll('#mChanBox .om-chanopt.sel')].map((e) => e.dataset.v),
+    ['WhatsApp']);
+  modal().querySelector('#mChanDetail').value = 'Oubaas 082 555 1234';
+  modal().querySelector('#mReportedAt').value = '2026-11-01T14:30';
+  const repBox = modal().querySelector('#mReportedBy');
+  repBox.value = 'Johan at the client';
+  repBox.dispatchEvent(new Event('input', { bubbles:true }));
+  modal().querySelector('#mAsset').value = 'SOLAX X1-HYBRID-7.5kW';
+  modal().querySelector('#mErr').value = 'E-0033';
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(45);
+
+  const rtkt = window.SENT.find((x) => x.op === 'create' && x.table === 'tickets:ticket');
+  t('a ticket is raised', !!rtkt, true);
+  t('carrying the category that was chosen, not the one the type implied',
+    rtkt.fields[FID.category], 'Grid / Eskom Fault');
+  t('the channel that was tapped, not the Internal default',
+    rtkt.fields[FID.channel], 'WhatsApp');
+  t('who reported it and how to reach them',
+    [rtkt.fields[FID.reportedBy], rtkt.fields['fld0Hi9Vz0xnDfzWE']],
+    ['Johan at the client', 'Oubaas 082 555 1234']);
+  // 14:30 SAST is 12:30 UTC. Storing the wall clock would put it two hours out.
+  t('when it was reported, as SAST stored in UTC',
+    rtkt.fields[FID.reportedAt], '2026-11-01T12:30:00.000Z');
+  t('the asset and the error code',
+    [rtkt.fields['fldgxoCSUUybNFczV'], rtkt.fields['fldgGw0Bg4I8kIyph']],
+    ['SOLAX X1-HYBRID-7.5kW', 'E-0033']);
+  t('the subject and notes still become the subject and description',
+    [rtkt.fields[FID.subject], rtkt.fields[FID.desc]],
+    ['Geyser timer tripping the earth leakage', 'Client reports it trips at 06:00 every day.']);
+  omCloseAnyModal();
+
+  log('\nA VISIT THAT RAISES NO TICKET IS NOT ASKED ANY OF IT');
+  await backToTkt('TKT-2026-0009');
+  d().querySelector('[data-act="omBookVisit"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  // It used to be hidden here. That left no way to fill in the details of a ticket raised
+  // from the calendar without going and finding it on the tickets screen.
+  t('a visit booked from a ticket is asked too, to edit it',
+    modal().querySelector('#mTktBox').dataset.mode, 'edit');
+  t('naming the ticket it will write to',
+    modal().querySelector('#mTktBox').dataset.tkt, 'recTKTc');
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(40);
+  t('and still raises no second ticket',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:ticket').length, 0);
+  omCloseAnyModal();
+
+  log('\nEDITING A VISIT EDITS THE TICKET BEHIND IT');
+  omCloseAnyModal();
+  // The way the calendar does it: openDetail is in the action registry, and the detail modal's
+  // Edit button is what opens the edit form.
+  const openVisit = async (id) => {
+    omCloseAnyModal();
+    const b = document.createElement('button');
+    b.setAttribute('data-act', 'openDetail');
+    b.setAttribute('data-a1', id);
+    document.getElementById('schedApp').appendChild(b);
+    b.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(14);
+    modal().querySelector('#dEdit').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(25);
+    b.remove();
+  };
+
+  await openVisit('recV4');
+  t('the edit form asks about the ticket', !!modal().querySelector('#mTktBox'), true);
+  t('in edit mode, not as something new',
+    modal().querySelector('#mTktBox').dataset.mode, 'edit');
+  t('pointing at the ticket the VISIT is linked to, which no preset supplied',
+    modal().querySelector('#mTktBox').dataset.tkt, 'recTKTi');
+  t('the heading names it', /TKT-2026-0012/.test(modal().querySelector('#mTktWhat').textContent), true);
+
+  t('every field is filled from the ticket', [
+    modal().querySelector('#mCat').value,
+    modal().querySelector('#mChanBox').dataset.v,
+    modal().querySelector('#mChanDetail').value,
+    modal().querySelector('#mReportedBy').value,
+    modal().querySelector('#mAsset').value,
+    modal().querySelector('#mErr').value,
+  ], ['Inverter Fault', 'Phone Call', 'Elmarie 083 111 2222', 'Elmarie at the client',
+      'SOLAX X3-MIC-8K', 'E-0104']);
+  // 06:45 UTC is 08:45 SAST. Showing the stored time would be two hours out.
+  t('and the reported time is shown in SAST',
+    modal().querySelector('#mReportedAt').value, '2026-09-12T08:45');
+  t('the chip the ticket holds is the lit one',
+    [...modal().querySelectorAll('#mChanBox .om-chanopt.sel')].map((e) => e.dataset.v),
+    ['Phone Call']);
+  // recV4 is a Maintenance visit, which maps to Preventative Maintenance. The ticket's own
+  // category must not be guessed over.
+  t('the visit type does not overwrite the category the ticket holds',
+    modal().querySelector('#mCat').value, 'Inverter Fault');
+  // And still does not once the form is up: the pre-fill alone masked this, because it lands
+  // after the type is first read.
+  modal().querySelector('#mType').value = 'Emergency Callout';
+  modal().querySelector('#mType').dispatchEvent(new Event('change', { bubbles:true }));
+  await settle(8);
+  t('nor does changing the visit type afterwards',
+    modal().querySelector('#mCat').value, 'Inverter Fault');
+
+  log('\nAND ONLY WHAT CHANGED IS WRITTEN BACK');
+  modal().querySelector('#mErr').value = 'E-0210';
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(45);
+  const tup = window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('the ticket is updated once', tup.length, 1);
+  // Sending every field would rewrite whatever a colleague changed on the tickets screen while
+  // this modal sat open.
+  t('with only the field that changed', Object.keys(tup[0].fields), ['fldgGw0Bg4I8kIyph']);
+  t('to the new value', tup[0].fields['fldgGw0Bg4I8kIyph'], 'E-0210');
+  t('and the change is written down',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'activity_log'
+      && /Ticket details changed/.test(x.fields[FID.alNote])).length, 1);
+
+  log('\nA VISIT SAVED WITH NOTHING CHANGED WRITES NOTHING TO ITS TICKET');
+  await openVisit('recV4');
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(45);
+  t('no ticket update is sent',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket').length, 0);
+  t('and nothing is claimed in the log',
+    window.SENT.filter((x) => x.op === 'create' && x.table === 'activity_log'
+      && /Ticket details changed/.test(x.fields[FID.alNote])).length, 0);
+
+  log('\nA TICKET THAT COULD NOT BE READ IS NOT WRITTEN OVER');
+  window.FAIL_GET = 'recTKTi';
+  await openVisit('recV4');
+  t('the form says so rather than showing blanks as if they were the record',
+    /could not be read/.test(modal().querySelector('#mTktWhat').textContent), true);
+  modal().querySelector('#mErr').value = 'SHOULD NOT REACH AIRTABLE';
+  window.SENT = [];
+  modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(45);
+  t('nothing is written to the ticket',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket').length, 0);
+  t('and the visit still saves, saying what did not',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'site_visits').length >= 0, true);
+  window.FAIL_GET = null;
+  omCloseAnyModal();
+
+  log('\nTRIAGE IS OFF THE NAV');
+  t('the button is gone', !!document.getElementById('ombn-triage'), false);
+
+  log('\nCHOOSING WHICH JOB CARD HISTORY BELONGS TO THIS TICKET');
+  omCloseAnyModal();
+  // recJC1 carries three loose entries, one that belongs to another ticket, and the entries
+  // TKT-2026-0009 already has. OM-2026-0138 on the live base has two tickets on one column of
+  // history, which is why taking the lot is the wrong answer.
+  await backToTkt('TKT-2026-0009');
+  const pullBtn = () => d().querySelector('[data-act="omTktPullHistory"]');
+  t('the ticket offers to pull its job card history', !!pullBtn(), true);
+
+  window.SENT = [];
+  pullBtn().dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(30);
+
+  const boxes = () => [...d().querySelectorAll('#om-pulllist input[type="checkbox"]')];
+  t('it offers the loose entries rather than taking them',
+    boxes().map((b) => b.value).sort(), ['recH1', 'recH2', 'recH3']);
+  t('and writes nothing on opening',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'activity_log').length, 0);
+  t('nothing is ticked to begin with', boxes().some((b) => b.checked), false);
+  t('an entry belonging to another ticket is not offered',
+    boxes().some((b) => b.value === 'recH4'), false);
+  t('nor is one from a different job card',
+    boxes().some((b) => b.value === 'recH5'), false);
+  // The dates and the notes are what tell one entry from another.
+  t('each row says when it was and what it said',
+    /PV therm removed/.test(d().querySelector('#om-pulllist').textContent), true);
+  // recH4 is on another ticket. Saying so is how somebody knows the list is short on purpose
+  // rather than short because something went wrong.
+  t('and says that one belongs to another ticket and cannot be picked',
+    /\d+ belongs? to another ticket and cannot be picked/.test(d().querySelector('#om-pullbox').textContent), true);
+
+  log('\nNOTHING HAPPENS UNTIL SOMETHING IS CHOSEN');
+  d().querySelector('[data-act="omPullApply"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(20);
+  t('pressing it with nothing ticked writes nothing',
+    window.SENT.filter((x) => x.op === 'update' && x.table === 'activity_log').length, 0);
+  t('and says so rather than going quiet',
+    /nothing chosen yet/.test(d().querySelector('#om-pullcount').textContent), true);
+
+  log('\nONLY WHAT WAS TICKED IS LINKED');
+  // tickBox, not tick: the harness already has a tick() that pumps the event loop.
+  const tickBox = (v) => {
+    const b = boxes().find((x) => x.value === v);
+    b.checked = true;
+    b.dispatchEvent(new Event('change', { bubbles:true }));
+  };
+  tickBox('recH1');
+  tickBox('recH3');
+  t('the count follows what is ticked',
+    /2 of 3 chosen/.test(d().querySelector('#om-pullcount').textContent), true);
+
+  window.SENT = [];
+  d().querySelector('[data-act="omPullApply"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(60);
+
+  const linked = window.SENT.filter((x) => x.op === 'update' && x.table === 'activity_log');
+  t('the two chosen entries are linked', linked.map((x) => x.recordId).sort(), ['recH1', 'recH3']);
+  t('and the one left unticked is not', linked.some((x) => x.recordId === 'recH2'), false);
+  t('each onto this ticket',
+    linked.every((x) => JSON.stringify(x.fields[FID.alTicket]) === '["recTKTc"]'), true);
+  // The entry belongs to the job card as well; the card's own history must not lose it.
+  t('and none of them has its job card taken away',
+    linked.some((x) => Object.prototype.hasOwnProperty.call(x.fields, FID.alJc)), false);
+
+  const said = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('the pull itself is written down', !!said, true);
+  t('saying how many, and that a person chose them',
+    /2 earlier job card entries pulled onto this ticket, chosen by hand/.test(said.fields[FID.alNote]), true);
+  t('linked to the ticket and its job card',
+    [said.fields[FID.alTicket], said.fields[FID.alJc]], [['recTKTc'], ['recJC1']]);
+
+  log('\nWHAT IS LEFT IS STILL ON OFFER');
+  pullBtn().dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(30);
+  t('the entry that was not chosen can still be picked later',
+    boxes().map((b) => b.value), ['recH2']);
+  // Select all and Clear are the only shortcuts; neither writes anything on its own.
+  window.SENT = [];
+  d().querySelector('[data-act="omPullAll"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  t('select all ticks everything on offer', boxes().every((b) => b.checked), true);
+  d().querySelector('[data-act="omPullNone"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  t('and clear unticks it again', boxes().some((b) => b.checked), false);
+  t('neither writes anything by itself', window.SENT.length, 0);
+  d().querySelector('[data-act="omPullCancel"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  t('cancel puts the picker away', !!d().querySelector('#om-pullbox'), false);
+
+  log('\nWHEN THERE IS NOTHING LEFT AT ALL');
+  // recH2 is the last loose one; take it and the offer becomes a sentence, not a list.
+  pullBtn().dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(30);
+  boxes().forEach((b) => { b.checked = true; });
+  d().querySelector('[data-act="omPullApply"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(60);
+  window.SENT = [];
+  pullBtn().dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(30);
+  t('no picker is offered', !!d().querySelector('#om-pullbox'), false);
+  t('and nothing is written', window.SENT.length, 0);
+  // Writing nothing is also what a button that silently gave up would do. The message is the
+  // only thing that tells the two apart -- and an earlier version of this did give up, because
+  // its own first run had emptied the ticket cache.
+  t('it says why instead',
+    /already on this ticket/.test(d().querySelector('#om-tktmsg').textContent), true);
+  t('and does not claim it could not read the ticket',
+    /could not be read/.test(d().querySelector('#om-tktmsg').textContent), false);
+
+  log('\nA REFUSAL SAYS WHAT REFUSED IT');
+  // Admin / Director has activity_log edit = false on the live base, so every entry came back
+  // refused and the screen said "3 did not link. Try again." -- which named nothing and asked
+  // for the one thing that could not work.
+  // TKT-2026-0006, not 0007: 0007 is on recJC1, whose loose entries the section above has
+  // already taken, so the picker there is a sentence rather than a list and every assertion
+  // below it skipped without saying so. recJC2 still has one.
+  await backToTkt('TKT-2026-0006');
+  const pull6 = d().querySelector('[data-act="omTktPullHistory"]');
+  t('the button is there to press', !!pull6, true);
+  window.FAIL_ACT_UPDATE = 'Your role may not edit the activity log.';
+  pull6.dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(30);
+  const offered = [...d().querySelectorAll('#om-pulllist input[type="checkbox"]')];
+  t('with something to offer', offered.length > 0, true);
+  offered[0].checked = true;
+  d().querySelector('[data-act="omPullApply"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(50);
+  const txt = d().querySelector('#om-tktmsg').textContent;
+  t('the refusal is quoted rather than swallowed',
+    /may not edit the activity log/.test(txt), true);
+  t('and it does not tell anybody to try again', /Try again/.test(txt), false);
+  t('it says where the permission has to come from',
+    /ask an administrator to grant it/.test(txt), true);
+  t('and claims nothing was pulled in', /entries pulled in/.test(txt), false);
+  window.FAIL_ACT_UPDATE = null;
+
+  log('\nTHE BUTTON ASKS FOR THE PERMISSION IT ACTUALLY NEEDS');
+  // It asked for job_cards:edit, which has nothing to do with writing an activity entry.
+  t('the gate is activity_log:edit, which is what the write needs',
+    /TX\.can\('activity_log','edit'\)\?`<button class="btn ghost sm" data-act="omTktPullHistory"/
+      .test(window.__SRC), true);
+  t('and not job_cards:edit, which it used to ask for',
+    /TX\.can\('job_cards','edit'\)\?`<button class="btn ghost sm" data-act="omTktPullHistory"/
+      .test(window.__SRC), false);
+
+  log('\nA TICKET WITH NO JOB CARD HAS NOTHING TO PULL');
+  // Not TKT-2026-0005: a job card was attached to it a few sections ago, so it has one by now.
+  await backToTkt('TKT-2026-0012');
+  t('so it is not offered', !!d().querySelector('[data-act="omTktPullHistory"]'), false);
+
+  return bad;
+}
+
+// ── runner: booted by the driver, in its own iframe ─────────────────────────
+const IS_RUNNER = /[?&]run=1/.test(location.search);
+if (IS_RUNNER) {
+  window.addEventListener('message', async (e) => {
+    if (!e.data || e.data.kind !== 'run') return;
+    window.__SRC = e.data.src;
+    let failures;
+    let text = '';
+    try {
+      await boot();
+      failures = await suite((line) => { text += line + '\n'; });
+    } catch (err) {
+      // A module that throws on the way up has not passed anything.
+      failures = 1;
+      text += 'THREW: ' + err.message + '\n';
+    }
+    parent.postMessage({ kind: 'done', failures, text }, '*');
+  });
+  parent.postMessage({ kind: 'ready' }, '*');
+}
+
+// ── mutants: each one a bug this file is supposed to catch ──────────────────
+const MUTANTS = [
+  ['the source channel goes back to being optional',
+   "if(!omChannel) return fail('Choose how this was reported');", '// MUTANT: not required'],
+
+  ['the activity entry is linked to the job card but not the ticket',
+   '        [OM_F.AL_JC]:[jcId],\n        [OM_F.AL_TICKET]:[rec.id],\n        [OM_F.AL_TYPE]:\'Ticket Logged\',',
+   '        [OM_F.AL_JC]:[jcId],\n        [OM_F.AL_TYPE]:\'Ticket Logged\','],
+
+  ['created-by is whatever the browser says, not who is signed in',
+   '      [TK.status]:\'New\',\n      [TK.createdBy]:(TX.me()&&TX.me().user&&TX.me().user.email)||\'\',',
+   '      [TK.status]:\'New\',\n      [TK.createdBy]:document.getElementById(\'om-rep\').value||\'\','],
+
+  ['reported-at is stored as the wall clock, so 08:00 SAST reads as 08:00 UTC',
+   '[TK.reportedAt]:atRaw?sastFieldsToUtcISO(atRaw):new Date().toISOString(),',
+   '[TK.reportedAt]:atRaw?atRaw:new Date().toISOString(),'],
+
+  ['the client is not carried across from the job card',
+   '    if(cli.length) f[TK.client]=cli;\n    if(desc)   f[TK.desc]=desc;',
+   '    if(desc)   f[TK.desc]=desc;'],
+
+  ['a new ticket does not start at New',
+   "[TK.status]:'New',", "[TK.status]:'Resolved',"],
+
+  ['the priority saved is always High, whatever was tapped',
+   '[TK.priority]:omPriVal,', "[TK.priority]:'High',"],
+
+  ['the reference is read from the wrong field, so the message is blank',
+   '    // no window in which a ticket has no reference.\n    const ref=(rec&&rec.fields&&rec.fields[TK.ref])||\'\';',
+   '    // no window in which a ticket has no reference.\n    const ref=(rec&&rec.fields&&rec.fields[TK.subject])||\'\';'],
+
+  ['a failed activity-log write is swallowed and reported as a clean save',
+   "+'<div class=\"om-err\">\\u26a0 Its activity-log entry could not be written: '+esc(logErr.message)+'</div>';",
+   "+'';"],
+
+  ['the form is not cleared, so the next call inherits the last one',
+   'omResetTicketForm();', '// MUTANT: no reset'],
+
+
+  ['the open filter lets resolved tickets through',
+   'if(omTktFilter===\'OPEN\') list=list.filter(r=>OM_TKT_OPEN.includes(omFstr(r.fields,TK.status)||\'New\'));',
+   'if(omTktFilter===\'OPEN\') list=list;'],
+
+  ['the list runs oldest first',
+   'omTktData.sort((a,b)=>String(b.fields[TK.ref]||\'\').localeCompare(String(a.fields[TK.ref]||\'\')));',
+   'omTktData.sort((a,b)=>String(a.fields[TK.ref]||\'\').localeCompare(String(b.fields[TK.ref]||\'\')));'],
+
+  ['search stops covering the job card and its client',
+   'jc?omFstr(jc.fields,OM_F.JC_REF):\'\', jc?omCli(jc.fields):\'\'].join(\' \').toLowerCase();',
+   '\'\'].join(\' \').toLowerCase();'],
+
+  ['the detail shows every ticket’s activity, not just this one’s',
+   'acts=all.filter(r=>[].concat(r.fields[OM_F.AL_TICKET]||[]).includes(id));',
+   'acts=all;'],
+
+  ['a status change is not written to the activity log',
+   '      [OM_F.AL_TYPE]:\'Ticket Status Change\',',
+   '      [OM_F.AL_TYPE]:\'Comment\','],
+
+  ['the log entry no longer says what the status was before',
+   '      [OM_F.AL_NOTE]:\'[\'+(omFstr(rec.fields,TK.ref)||\'\')+\'] Status \'+was+\' \\u2192 \'+next\n        +(because?\' (\'+because+\')\':\'\'),',
+   '      [OM_F.AL_NOTE]:\'[\'+(omFstr(rec.fields,TK.ref)||\'\')+\'] Status changed\','],
+
+  ['Resolved no longer stamps Closed At',
+   '    patch[TK.closedAt]=new Date().toISOString();',
+   '    // MUTANT: not stamped'],
+
+  ['the status entry is not linked to the ticket',
+   '      [OM_F.AL_JC]:[].concat(rec.fields[TK.jc]||[]),\n      [OM_F.AL_TICKET]:[rec.id],',
+   '      [OM_F.AL_JC]:[].concat(rec.fields[TK.jc]||[]),'],
+
+  ['a spares read that failed renders as “none requested”',
+   '    ? \'<div class="om-err">Spares could not be read.</div>\'',
+   '    ? \'<div class="om-empty">No spares requested.</div>\''],
+
+  ['empty facts are drawn as blank rows',
+   '  ].filter(([,v])=>v).map(([k,v])=>',
+   '  ].map(([k,v])=>'],
+
+
+  ['the visit is saved without its ticket',
+   '  if(modalTicketId && !editingId) fields[F.ticket]=[modalTicketId];',
+   '  // MUTANT: no ticket on the visit'],
+
+  ['the spares are not tied to the visit they are for',
+   '            [TKS.ticket]:[modalTicketId], [TKS.visit]:[rec.id],',
+   '            [TKS.ticket]:[modalTicketId],'],
+
+  ['every spare is requested as one, whatever was set',
+   '            [TKS.srcId]:line.id, [TKS.qtyReq]:line.qty, [TKS.status]:\'Requested\',',
+   '            [TKS.srcId]:line.id, [TKS.qtyReq]:1, [TKS.status]:\'Requested\','],
+
+
+  ['a ticket waiting on parts does not say so',
+   '          const next=(saved.length||adopted) ? \'Awaiting Spares\'\n            : booked ? cur\n            : cur===\'Second Visit Required\' ? \'Second Visit Scheduled\'\n            : \'Visit Scheduled\';',
+   '          const next=\'Visit Scheduled\';'],
+
+  ['every booked visit is called a second visit, even the first',
+   '          const next=(saved.length||adopted) ? \'Awaiting Spares\'\n            : booked ? cur\n            : cur===\'Second Visit Required\' ? \'Second Visit Scheduled\'\n            : \'Visit Scheduled\';',
+   '          const next=(saved.length||adopted) ? \'Awaiting Spares\'\n            : \'Second Visit Scheduled\';'],
+
+  ['a second visit is recorded as if it were the first',
+   '          const next=(saved.length||adopted) ? \'Awaiting Spares\'\n            : booked ? cur\n            : cur===\'Second Visit Required\' ? \'Second Visit Scheduled\'\n            : \'Visit Scheduled\';',
+   '          const next=(saved.length||adopted) ? \'Awaiting Spares\'\n            : booked ? cur\n            : \'Visit Scheduled\';'],
+
+  ['re-booking downgrades a second visit to a plain one',
+   '          const next=(saved.length||adopted) ? \'Awaiting Spares\'\n            : booked ? cur\n            : cur===\'Second Visit Required\' ? \'Second Visit Scheduled\'\n            : \'Visit Scheduled\';',
+   '          const next=(saved.length||adopted) ? \'Awaiting Spares\'\n            : cur===\'Second Visit Required\' ? \'Second Visit Scheduled\'\n            : \'Visit Scheduled\';'],
+
+  ['a ticket whose visit is booked drops off the open list',
+   'const OM_TKT_OPEN = [\'New\',\'Assigned\',\'In Progress\',\'Awaiting Spares\',\'Awaiting Client\',\n  \'Visit Scheduled\',\'Second Visit Required\',\'Second Visit Scheduled\'];',
+   'const OM_TKT_OPEN = [\'New\',\'Assigned\',\'In Progress\',\'Awaiting Spares\',\'Awaiting Client\',\n  \'Second Visit Required\',\'Second Visit Scheduled\'];'],
+
+  ['the new status is not offered by hand',
+   '  \'Visit Scheduled\',\'Second Visit Required\',\'Second Visit Scheduled\',\'Resolved\',\'Closed\',\n  \'Cancelled\'];',
+   '  \'Second Visit Required\',\'Second Visit Scheduled\',\'Resolved\',\'Closed\',\n  \'Cancelled\'];'],
+
+  ['a ticket raised from the calendar hides that its visit is booked',
+   '      [TK.status]:\'Visit Scheduled\',',
+   '      [TK.status]: m.techId ? \'Assigned\' : \'New\','],
+
+  ['the overdue figure opens every job card',
+   '  if(omFilter===\'OVERDUE\')   list=list.filter(r=>omOver(r));',
+   '  if(omFilter===\'OVERDUE\')   list=list.filter(r=>true);'],
+
+  ['the completed figure leaves out the closed ones',
+   '  else if(omFilter===\'DONE\') list=list.filter(r=>[\'Completed\',\'Closed\'].includes(omFstr(r.fields,OM_F.JC_STAT)));',
+   '  else if(omFilter===\'DONE\') list=list.filter(r=>[\'Completed\'].includes(omFstr(r.fields,OM_F.JC_STAT)));'],
+
+  ['a search left in the box still cuts down what a figure opens',
+   '  omSearchQ=\'\'; const box=document.getElementById(\'om-search\'); if(box) box.value=\'\';',
+   '  const box=document.getElementById(\'om-search\');'],
+
+  ['an owner left selected still cuts down what a figure opens',
+   '  omOwnerFilter=\'ALL\'; const own=document.getElementById(\'om-owner\'); if(own) own.value=\'ALL\';',
+   '  const own=document.getElementById(\'om-owner\');'],
+
+  ['the completed figure lights only one of the two chips it covers',
+   '  const want = omFilter===\'DONE\' ? [\'Completed\',\'Closed\'] : [omFilter];',
+   '  const want = [omFilter];'],
+
+  ['a figure filters the list but never shows it',
+   '  omSyncChips();\n  omGoView(\'jc\');',
+   '  omSyncChips();'],
+
+  ['a ticket that is still open drags its visits off the calendar',
+   '  if(!TKT_TERMINAL.includes(next)) return out;',
+   '  if(false) return out;'],
+
+  ['a visit still to come is marked done instead of dropped',
+   '      const future=!isNaN(startMs)&&startMs>now;',
+   '      const future=!isNaN(startMs)&&startMs<now;'],
+
+  ['a cancelled ticket claims its visit was completed',
+   '      const to=(next===\'Cancelled\'||future)?\'Cancelled\':\'Completed\';',
+   '      const to=future?\'Cancelled\':\'Completed\';'],
+
+  ['a visit that was already settled is written over again',
+   '      if(VISIT_DONE.indexOf(was)>=0) continue;',
+   '      if(false) continue;'],
+
+  ['the calendar change is filed under the wrong kind of entry',
+   '          [OM_F.AL_TYPE]:to===\'Cancelled\'?\'Visit Cancelled\':\'Visit Completed\',',
+   '          [OM_F.AL_TYPE]:\'Visit Cancelled\','],
+
+  ['the calendar change is not tied to the ticket that caused it',
+   '          [OM_F.AL_TICKET]:[rec.id],\n          [OM_F.AL_TYPE]:to===\'Cancelled\'?\'Visit Cancelled\':\'Visit Completed\',',
+   '          [OM_F.AL_TYPE]:to===\'Cancelled\'?\'Visit Cancelled\':\'Visit Completed\','],
+
+  ['the reason the visit moved is left out of the entry',
+   '            +\' because the ticket was \'+next.toLowerCase()',
+   '            +\'\''],
+
+  ['what was typed in the category box is thrown away',
+   '    const category=t.category||omCategoryForVisit(m.type);',
+   '    const category=omCategoryForVisit(m.type);'],
+
+  ['every ticket is recorded as Internal whatever was tapped',
+   '      [TK.channel]:t.channel||\'Internal\',',
+   '      [TK.channel]:\'Internal\','],
+
+  ['the reported-at time is stored as a wall clock, two hours out',
+   '      [TK.reportedAt]:(t.reportedAt?sastFieldsToUtcISO(t.reportedAt):null)||new Date().toISOString(),',
+   '      [TK.reportedAt]:t.reportedAt||new Date().toISOString(),'],
+
+  ['the asset and error code never reach the ticket',
+   '    if(t.asset)         f[TK.asset]=t.asset;\n    if(t.errCode)       f[TK.errCode]=t.errCode;',
+   ''],
+
+  ['who reported it is overwritten by whoever is going',
+   '    const who=t.reportedBy||(m.techId?peopleById[m.techId]:\'\')||\'\';',
+   '    const who=(m.techId?peopleById[m.techId]:\'\')||\'\';'],
+
+  ['how to reach them is dropped',
+   '    if(t.channelDetail) f[TK.channelDetail]=t.channelDetail;',
+   ''],
+
+  ['the category box stops following the visit type',
+   '      cat.value=omCategoryForVisit(typeSel.value)||"";',
+   '      cat.value="";'],
+
+  ['a category somebody chose is overwritten the moment the type changes',
+   '      if(cat.dataset.touched==="1") return;\n      cat.value=omCategoryForVisit(typeSel.value)||"";',
+   '      cat.value=omCategoryForVisit(typeSel.value)||"";'],
+
+  ['tapping one channel chip does not unlight the others',
+   '      chanBox.querySelectorAll(".om-chanopt").forEach(o=>o.classList.remove("sel"));',
+   ''],
+
+  ['a visit\'s own ticket is ignored, so editing one starts a second',
+   '  const linkedTicketId = preset.ticketId || (v && v.ticketIds && v.ticketIds[0]) || null;',
+   '  const linkedTicketId = preset.ticketId || null;'],
+
+  ['every ticket field is rewritten, not just the ones that changed',
+   '  for(const [,key,fid] of mtktFields()){\n    if((was[key]||\'\')!==(now[key]||\'\')){ patch[fid]=now[key]||\'\'; changed.push(key); }\n  }',
+   '  for(const [,key,fid] of mtktFields()){ patch[fid]=now[key]||\'\'; changed.push(key); }'],
+
+  ['a ticket that could not be read is written over anyway',
+   '      if(!was){\n        ticketProblems.push(\'the ticket details, because the ticket could not be read\');\n      }else{\n        const r=await omSaveTicketFields(m.tkt.ticketId,m.tkt,was);',
+   '      if(false){\n        ticketProblems.push(\'the ticket details, because the ticket could not be read\');\n      }else{\n        const r=await omSaveTicketFields(m.tkt.ticketId,m.tkt,was||{});'],
+
+  ['the visit type guesses over an existing ticket\'s category',
+   '    if(tktMode===\'edit\') cat.dataset.touched="1";',
+   '    if(false) cat.dataset.touched="1";'],
+
+  ['the reported time is read back as UTC, two hours out',
+   '    if(ra && f[TK.reportedAt]) ra.value=isoToLocalInput(f[TK.reportedAt]);',
+   '    if(ra && f[TK.reportedAt]) ra.value=String(f[TK.reportedAt]).slice(0,16);'],
+
+  ['the channel the ticket holds is not shown as chosen',
+   '      chanBox.querySelectorAll(".om-chanopt").forEach(o=>\n        o.classList.toggle("sel",o.dataset.v===chan));',
+   ''],
+
+  ['another ticket\'s history is taken too',
+   '      if(on.length) { others++; continue; }   // another fault\'s history: not ours to take',
+   '      others++;'],
+
+  ['every loose entry is linked, whatever was ticked',
+   '  const picked=omPullBoxes().filter(b=>b.checked).map(b=>b.value);',
+   '  const picked=omPullBoxes().map(b=>b.value);'],
+
+  ['the picker opens with everything already ticked',
+   '      +\'<input type="checkbox" value="\'+esc(a.id)+\'">\'',
+   '      +\'<input type="checkbox" checked value="\'+esc(a.id)+\'">\''],
+
+  ['another ticket\'s history is offered too',
+   '      if(on.length) { others++; continue; }   // another fault\'s history: not ours to take',
+   '      others++;'],
+
+  ['entries on other job cards are offered as well',
+   '      if(!([].concat(a.fields[OM_F.AL_JC]||[]).includes(jcId))) continue;',
+   ''],
+
+  ['the job card link is replaced rather than the ticket added',
+   '      await omPatch(OM_T.ACT,aid,{ [OM_F.AL_TICKET]:[id] });',
+   '      await omPatch(OM_T.ACT,aid,{ [OM_F.AL_TICKET]:[id], [OM_F.AL_JC]:[] });'],
+
+  ['pressing link with nothing chosen goes quiet',
+   '  if(!picked.length){\n    const c=document.getElementById(\'om-pullcount\');',
+   '  if(false){\n    const c=document.getElementById(\'om-pullcount\');'],
+
+  ['the pull leaves no record of itself',
+   '  if(done){\n    try{\n      await omPost(OM_T.ACT,{',
+   '  if(false){\n    try{\n      await omPost(OM_T.ACT,{'],
+
+  ['it offers a picker when there is nothing left to pull',
+   '  if(!loose.length){',
+   '  if(false){'],
+
+  ['clear ticks everything instead of unticking it',
+   'function omPullNone(){ omPullBoxes().forEach(b=>{ b.checked=false; }); omPullCount(); }',
+   'function omPullNone(){ omPullBoxes().forEach(b=>{ b.checked=true; }); omPullCount(); }'],
+
+  ['select all does nothing',
+   'function omPullAll(){ omPullBoxes().forEach(b=>{ b.checked=true; }); omPullCount(); }',
+   'function omPullAll(){ omPullCount(); }'],
+
+  ['a refusal is swallowed and reported as a number',
+   '    }catch(e){ failed.push(aid); if(!why) why=TX.errorText(e)||\'\'; }',
+   '    }catch(e){ failed.push(aid); }'],
+
+  ['a refusal still claims entries were pulled in',
+   '    m2.innerHTML=(done?\'<div class="om-ok">\\u2713 \'+done+\' entr\'+(done===1?\'y\':\'ies\')+\' pulled in.</div>\':\'\')',
+   '    m2.innerHTML=\'<div class="om-ok">\\u2713 \'+done+\' entr\'+(done===1?\'y\':\'ies\')+\' pulled in.</div>\''],
+
+  ['the button is offered to a role that cannot use it',
+   '${jc&&TX.can(\'activity_log\',\'edit\')?`<button class="btn ghost sm" data-act="omTktPullHistory"',
+   '${jc&&TX.can(\'job_cards\',\'edit\')?`<button class="btn ghost sm" data-act="omTktPullHistory"'],
+
+  ['a spares entry is logged even when no parts were asked for',
+   '      if(saved.length){',
+   '      if(true){'],
+
+  ['picking the same part twice makes a second line saying the same thing',
+   '    if(have) have.qty+=1;\n    else modalSpares.push(',
+   '    if(false) have.qty+=1;\n    else modalSpares.push('],
+
+  ['the stepper can take a quantity down to zero',
+   '    else if(b.dataset.spare===\'dec\') line.qty=Math.max(1,line.qty-1);',
+   '    else if(b.dataset.spare===\'dec\') line.qty=line.qty-1;'],
+
+  ['the visit type asked for is ignored',
+   '  const wantType=v?v.type:(preset.type||"");',
+   '  const wantType=v?v.type:"";'],
+
+  ['the ticket’s priority does not carry to its visit',
+   '  const wantPrio=v?v.priority:(preset.prio||"Normal");',
+   '  const wantPrio="Normal";'],
+
+  ['the history strip shows every visit, not this ticket’s',
+   '    .filter(v=>v.ticketIds.includes(ticketId))',
+   '    .filter(v=>true)'],
+
+  ['a catalogue that will not load looks like an empty catalogue',
+   '    TX.pick.scan(document.getElementById(\'om-view-tktdetail\'));\n    msg.textContent=rows.length+\' item\'+(rows.length===1?\'\':\'s\')+\' \\u00b7 type a code or a description\';\n  }).catch((e)=>{\n    msg.innerHTML=\'<span class="om-err">The stock catalogue could not be read: \'+esc(TX.errorText(e))+\'</span>\';',
+   '    TX.pick.scan(document.getElementById(\'om-view-tktdetail\'));\n    msg.textContent=rows.length+\' item\'+(rows.length===1?\'\':\'s\')+\' \\u00b7 type a code or a description\';\n  }).catch((e)=>{\n    msg.textContent=\'0 items \\u00b7 type a code or a description\';'],
+
+  ['a part that failed to save is not mentioned',
+   '      toast(\'Visit saved, but these did not: \'+ticketProblems.join(\'; \'),\'bad\');',
+   '      toast("Visit scheduled \\u2014 syncing\\u2026","ok");'],
+
+
+  ['a spare requested from the ticket screen invents a visit for itself',
+   '        [TKS.ticket]:[id],\n        [TKS.code]:line.code, [TKS.desc]:line.desc, [TKS.unit]:line.unit,',
+   '        [TKS.ticket]:[id], [TKS.visit]:[id],\n        [TKS.code]:line.code, [TKS.desc]:line.desc, [TKS.unit]:line.unit,'],
+
+  ['parts asked for before a date was set are never attached to the visit',
+   '        for(const sp of loose){\n          await TX.api({ op:\'update\', base:\'OM\', table:\'tickets\', sub:\'spares\',\n            recordId:sp.id, fields:{ [TKS.visit]:[rec.id] } });\n          adopted++;\n        }',
+   '        for(const sp of loose){ adopted++; }'],
+
+  ['a part already on a visit is dragged onto the new one as well',
+   '          && !([].concat(sp.fields[TKS.visit]||[]).length));',
+   '          );'],
+
+  ['attaching a job card does not bring its client',
+   '    if(cli.length && !(rec.fields[TK.client]||[]).length) patch[TK.client]=cli;',
+   '    // MUTANT: no client'],
+
+  ['a job card can be attached without choosing one',
+   '  if(!jcId){ if(msg) msg.innerHTML=\'<div class="om-err">\\u26a0 Choose a job card first</div>\'; return; }',
+   '  if(!jcId){ /* MUTANT: carry on */ }'],
+
+  ['attaching a job card is not written down',
+   '          +\' \\u2014 it was not recorded when the ticket was raised.\',',
+   '          +\'.\','],
+
+  ['the ticket screen offers no way to ask for spares',
+   '        ${canEdit&&!closed?`',
+   '        ${false?`'],
+
+  ['the attach control is shown even when a job card is already linked',
+   '        ${canEdit&&!jc?`',
+   '        ${canEdit?`'],
+
+  ['the quantity stepper on the ticket screen can reach zero',
+   '  else if(what===\'dec\') line.qty=Math.max(1,line.qty-1);\n  else omTktSpares.splice(+i,1);',
+   '  else if(what===\'dec\') line.qty=line.qty-1;\n  else omTktSpares.splice(+i,1);'],
+
+  ['asking for a part reopens a closed ticket',
+   '    if(!TKT_TERMINAL.includes(omFstr(rec.fields,TK.status)||\'New\')){',
+   '    if(true){'],
+
+
+  ['the status a ticket is in is left out of the row again',
+   '  const statusBtns=TICKET_STATUSES.map(x=>x===st',
+   '  const statusBtns=TICKET_STATUSES.filter(x=>x!==st).map(x=>x===st'],
+
+  ['the current status is offered as somewhere to move to',
+   '    ? `<button class="btn om-now ${omTktStCls(x)}" disabled aria-current="true">\\u2713 ${esc(x)}</button>`',
+   '    ? `<button class="btn ghost sm" data-act="omTktStatus" data-a1="${esc(rec.id)}" data-a2="${esc(x)}">${esc(x)}</button>`'],
+
+  ['the heading stops saying which status it is in',
+   '      <div class="om-fcard"><div class="om-fttl">Status \\u2014 now ${esc(st)}</div>',
+   '      <div class="om-fcard"><div class="om-fttl">Move to</div>'],
+
+  ['the first visit on a ticket is typed as a return trip',
+   '    type: already?\'Return Visit\':\'Fault Investigation\',',
+   '    type: \'Return Visit\','],
+
+  ['a ticket with no visits is still offered a "second" one',
+   '\\ud83d\\udcc5 ${visits.length?\'Schedule another visit\':\'Schedule site visit\'}',
+   '\\ud83d\\udcc5 Schedule second visit'],
+
+  ['the modal hides the spares the ticket has already asked for',
+   '    modalExisting=rows\n      .filter(sp=>[].concat(sp.fields[TKS.ticket]||[]).includes(modalTicketId)\n        && !([].concat(sp.fields[TKS.visit]||[]).length))',
+   '    modalExisting=[].filter(sp=>false || rows.length'],
+
+  ['the list claims to be empty even with parts already on it',
+   '  host.innerHTML=(already+staged)\n    ||\'<div class="om-empty" style="padding:10px">Nothing listed yet.</div>\';',
+   '  host.innerHTML=staged\n    ||\'<div class="om-empty" style="padding:10px">Nothing listed yet.</div>\';'],
+
+  ['nothing says when a visit will show on the ticket and when it will not',
+   '  const visitNote=\'<div class="om-hint">A visit appears here when it is booked from this \'',
+   '  const visitNote=\'\'||\'<div class="om-hint" hidden>A visit appears here when it is booked from this \''],
+
+  ['the current status is painted like every other button',
+   '    ? `<button class="btn om-now ${omTktStCls(x)}" disabled aria-current="true">\\u2713 ${esc(x)}</button>`',
+   '    ? `<button class="btn sm om-now" disabled aria-current="true">\\u2713 ${esc(x)}</button>`'],
+
+  ['every ticket status falls back to the job card palette again',
+   'function omTktStCls(s){', 'function omTktStCls(s){ return omStCls(s); } function omTktStClsUnused(s){'],
+
+  ['the reason a status moved is no longer recorded',
+   '        +(because?\' (\'+because+\')\':\'\'),',
+   '        +\'\','],
+
+  ['booking a visit overwrites a status somebody chose',
+   '        if(tkt && [\'New\',\'Assigned\',\'In Progress\',\'Second Visit Required\',\n                   \'Visit Scheduled\',\'Second Visit Scheduled\'].includes(cur)){',
+   '        if(tkt){'],
+
+
+  ['a ticket can be closed without saying what was done',
+   '    if(!omUsableText(typed)&&!omUsableText(saved)){',
+   '    if(false){'],
+
+  ['anything at all counts as an account of the work',
+   '  return t.length>=6 && (t.match(/[A-Za-z]/g)||[]).length>=3;',
+   '  return t.length>=0;'],
+
+  ['the resolution is not saved with the status that depends on it',
+   '    if(omUsableText(typed)&&typed!==saved) extra={[TK.resolution]:typed};',
+   '    // MUTANT: not carried'],
+
+  ['extra fields are dropped, so the resolution never reaches Airtable',
+   '  const patch=Object.assign({[TK.status]:next}, extra||{});',
+   '  const patch={[TK.status]:next};'],
+
+  ['a note is filed as something the app did, not something a person wrote',
+   '      [OM_F.AL_TYPE]:\'Comment\',\n    });\n    if(el) el.value=\'\';',
+   '      [OM_F.AL_TYPE]:\'System\',\n    });\n    if(el) el.value=\'\';'],
+
+  ['a note is not linked to the ticket it is about',
+   '      [OM_F.AL_TICKET]:[id],\n      [OM_F.AL_TYPE]:\'Comment\',\n    });\n    if(el) el.value=\'\';',
+   '      [OM_F.AL_TYPE]:\'Comment\',\n    });\n    if(el) el.value=\'\';'],
+
+  ['an empty note is written anyway',
+   '  if(!omUsableText(text)){\n    if(msg) msg.innerHTML=\'<div class="om-err">\\u26a0 Write a line or two before adding it.</div>\';',
+   '  if(false){\n    if(msg) msg.innerHTML=\'<div class="om-err">\\u26a0 Write a line or two before adding it.</div>\';'],
+
+  ['the note box is not offered at all',
+   '      ${canEdit?`\n      <div class="om-fcard"><div class="om-fttl">Add a note</div>',
+   '      ${false?`\n      <div class="om-fcard"><div class="om-fttl">Add a note</div>'],
+
+  ['a category is no longer required',
+   "if(!cat||!subj) return fail('Category and Subject are required');",
+   'if(!subj) return fail(\'Subject is required\');'],
+];
+
+// ── driver ──────────────────────────────────────────────────────────────────
+if (!IS_RUNNER) {
+  (async function () {
+    const out = document.getElementById('out');
+    const log = (s) => { out.textContent += s + '\n'; };
+    let problems = 0;
+
+    const src = await fetch('/js/mod-scheduler.js', { cache: 'no-store' })
+      .then((r) => r.text()).then((x) => x.replace(/\r\n/g, '\n'));
+
+    /** One run, in its own frame. Returns {failures, text}. */
+    const run = (code) => new Promise((resolve) => {
+      const f = document.createElement('iframe');
+      f.style.cssText = 'width:900px;height:300px;border:0;opacity:.01;position:absolute;left:-9999px;';
+      f.src = 'ticket-harness.html?run=1';
+      const onMsg = (e) => {
+        if (e.source !== f.contentWindow || !e.data) return;
+        if (e.data.kind === 'ready') { f.contentWindow.postMessage({ kind:'run', src:code }, '*'); return; }
+        if (e.data.kind === 'done') {
+          window.removeEventListener('message', onMsg);
+          f.remove();
+          resolve(e.data);
+        }
+      };
+      window.addEventListener('message', onMsg);
+      document.getElementById('stage').appendChild(f);
+      // A frame that never answers is a failure, not a hang.
+      setTimeout(() => { try { f.remove(); } catch (x) {} resolve({ failures:1, text:'TIMED OUT\n' }); }, 60000);
+    });
+
+    log('=== THE REAL mod-scheduler.js ===\n');
+    const base = await run(src);
+    log(base.text);
+    problems += base.failures;
+    log(base.failures ? base.failures + ' FAILED' : 'all passed');
+
+    log('\n\n=== MUTATION: every bug put back, one at a time ===\n');
+    for (const [name, from, to] of MUTANTS) {
+      const n = src.split(from).length - 1;
+      if (n !== 1) {
+        problems++;
+        log('  ??        ' + name + '  (anchor matched ' + n + ' — the mutant never ran)');
+        continue;
+      }
+      const r = await run(src.replace(from, to));
+      if (!r.failures) problems++;
+      log((r.failures ? '  caught    ' : '  SURVIVED  ') + name);
+    }
+
+    log('\n' + (problems ? problems + ' PROBLEM(S)' : 'baseline green, every mutant caught'));
+    document.title = problems ? 'ticket harness — FAIL' : 'ticket harness — PASS';
+    window.__result = problems ? 'FAIL' : 'PASS';
+  })();
+}
+</script>
+</body>
+</html>

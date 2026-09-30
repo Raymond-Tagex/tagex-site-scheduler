@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0e0f11">
+
+<!-- Installable to a phone home screen. iOS ignores the manifest icons and uses
+     apple-touch-icon, so both are declared. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<meta name="apple-mobile-web-app-title" content="TAGEX O&amp;M">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>TAGEX O&amp;M — Site Visit Scheduler</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Barlow+Semi+Condensed:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/scheduler.css">
+<link rel="stylesheet" href="/css/siteinfo.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     LOGIN GATE
+     Identical to the delivery app's, and backed by the same identity base —
+     the same email and password works on both. Nothing here mentions Airtable.
+     ══════════════════════════════════════════════════════════════════ -->
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <div class="gate-logo">TX</div>
+    <div class="gate-title">TAGEX <span>ENERGY</span></div>
+
+    <!-- sign in -->
+    <section class="gate-view" id="viewLogin">
+      <div class="gate-sub">Operations Platform</div>
+      <div class="gate-note" hidden></div>
+      <div class="gate-err" hidden></div>
+      <div class="gate-field">
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" type="email" autocomplete="username" inputmode="email"
+               spellcheck="false" autocapitalize="none" placeholder="you@tagexenergy.co.za">
+      </div>
+      <div class="gate-field">
+        <label for="loginPassword">Password</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" spellcheck="false">
+      </div>
+      <label class="gate-persist">
+        <input type="checkbox" id="loginRemember">
+        <span>Remember this device (trusted devices only)</span>
+      </label>
+      <button class="gate-btn" id="loginSubmit" type="button">SIGN IN</button>
+      <div class="gate-links">
+        <a href="#" id="forgotLink">Forgot password?</a>
+        <span></span>
+      </div>
+    </section>
+
+    <!-- MFA step -->
+    <section class="gate-view" id="viewMfa" hidden>
+      <div class="gate-sub">Authentication code</div>
+      <div class="gate-sub-small">Enter the 6-digit code from your authenticator app.</div>
+      <div class="gate-err" hidden></div>
+      <div class="gate-field">
+        <label for="mfaCode">Code</label>
+        <input id="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code"
+               maxlength="6" placeholder="000000">
+      </div>
+      <button class="gate-btn" id="mfaSubmit" type="button">VERIFY</button>
+      <div class="gate-links">
+        <button class="gate-link-btn" id="mfaBack" type="button">← Back</button>
+        <span></span>
+      </div>
+    </section>
+
+    <!-- MFA enrolment (mandatory for Admin) -->
+    <section class="gate-view" id="viewEnrol" hidden>
+      <div class="gate-sub">Set up two-factor authentication</div>
+      <div class="gate-sub-small">Required for administrator accounts.</div>
+      <div class="gate-err" hidden></div>
+      <ol class="gate-steps">
+        <li>Open your authenticator app (Google Authenticator, 1Password, Authy).</li>
+        <li>Add an account and enter this key:</li>
+      </ol>
+      <div class="gate-secret" id="enrolSecret"></div>
+      <div class="gate-links" style="margin-bottom:12px;">
+        <a href="#" id="enrolLink">Open in authenticator app</a>
+        <span></span>
+      </div>
+      <div class="gate-field">
+        <label for="enrolCode">Enter the code it shows</label>
+        <input id="enrolCode" type="text" inputmode="numeric" autocomplete="one-time-code"
+               maxlength="6" placeholder="000000">
+      </div>
+      <button class="gate-btn" id="enrolSubmit" type="button">CONFIRM</button>
+    </section>
+
+    <!-- forgot password -->
+    <section class="gate-view" id="viewForgot" hidden>
+      <div class="gate-sub">Reset your password</div>
+      <div class="gate-sub-small">We will email you a link to choose a new one.</div>
+      <div class="gate-note" hidden></div>
+      <div class="gate-err" hidden></div>
+      <div class="gate-field">
+        <label for="forgotEmail">Email</label>
+        <input id="forgotEmail" type="email" autocomplete="username" inputmode="email"
+               spellcheck="false" autocapitalize="none">
+      </div>
+      <button class="gate-btn" id="forgotSubmit" type="button">SEND RESET LINK</button>
+      <div class="gate-links">
+        <button class="gate-link-btn" id="forgotBack" type="button">← Back to sign in</button>
+        <span></span>
+      </div>
+    </section>
+
+    <!-- set password: invite acceptance and reset share this view -->
+    <section class="gate-view" id="viewSet" hidden>
+      <div class="gate-sub" id="setHeading">Set your password</div>
+      <div class="gate-sub-small">At least 12 characters, with an uppercase letter, a lowercase letter and a digit.</div>
+      <div class="gate-err" hidden></div>
+      <input type="hidden" id="setToken">
+      <input type="hidden" id="setMode">
+      <div class="gate-field">
+        <label for="setPassword">New password</label>
+        <input id="setPassword" type="password" autocomplete="new-password">
+      </div>
+      <div class="gate-field">
+        <label for="setPassword2">Confirm password</label>
+        <input id="setPassword2" type="password" autocomplete="new-password">
+      </div>
+      <button class="gate-btn" id="setSubmit" type="button">SAVE PASSWORD</button>
+    </section>
+
+    <!-- forced change -->
+    <section class="gate-view" id="viewChange" hidden>
+      <div class="gate-sub">Change your password</div>
+      <div class="gate-note" hidden></div>
+      <div class="gate-err" hidden></div>
+      <div class="gate-field">
+        <label for="changeCurrent">Current password</label>
+        <input id="changeCurrent" type="password" autocomplete="current-password">
+      </div>
+      <div class="gate-field">
+        <label for="changeNew">New password</label>
+        <input id="changeNew" type="password" autocomplete="new-password">
+      </div>
+      <div class="gate-field">
+        <label for="changeNew2">Confirm new password</label>
+        <input id="changeNew2" type="password" autocomplete="new-password">
+      </div>
+      <button class="gate-btn" id="changeSubmit" type="button">SAVE AND CONTINUE</button>
+    </section>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-brand">
+    <div class="hdr-logo">TX</div>
+    <div class="hdr-text">
+      <div class="t">Site Visit Scheduler</div>
+      <div class="s">TAGEX Energy &middot; O&amp;M</div>
+    </div>
+  </div>
+
+  <!-- Top-level module switch, in the header beside the TAGEX mark because that is where
+       application-level navigation is expected. It sat below the header before and was being
+       mistaken for the scheduler's own Calendar / Workload / Tickets row. Hidden when only
+       one module is reachable. Populated by js/shell.js. -->
+  <nav class="shell-tabs" id="shellTabs" role="tablist" hidden></nav>
+
+  <div class="hdr-right">
+    <div class="hdr-user">
+      <span class="n" id="hdrName"></span>
+      <span class="hdr-role" id="hdrRole" hidden></span>
+    </div>
+    <button class="hdr-disconnect" id="btnLogout" type="button">Log out</button>
+  </div>
+</div>
+
+
+<!-- Shown when the signed-in role has no access to site visits (e.g. Warehouse). -->
+<div class="no-access" id="noAccess" hidden>
+  <strong>No access to this application</strong>
+  Your role includes neither site visits nor site information. If you believe this is wrong, ask an administrator
+  to check your access level.
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     O&M SCHEDULER + TICKETS
+     Ported from the standalone tagex-merged-om-scheduler page. Its CSS is scoped
+     to .mod-scheduler so the two apps cannot restyle each other, and every former
+     inline on*= handler is now a data-act attribute (see js/mod-scheduler.js).
+     ══════════════════════════════════════════════════════════════════ -->
+<section class="module mod-scheduler" id="modScheduler" hidden>
+  <div id="schedApp">
+    <header class="topbar">
+      <nav class="tabs">
+        <button data-tab="calendar" class="active">Calendar</button>
+        <button data-tab="dashboard">Workload</button>
+        <button data-tab="omtickets">O&amp;M Tickets</button>
+      </nav>
+      <div class="grow"></div>
+      <button class="btn sm" id="newVisitTop" type="button" data-requires="site_visits:create">+ Schedule Site Visit</button>
+      <button class="btn ghost sm" id="refreshBtn" type="button" title="Reload from the server">&#8635; Refresh</button>
+      <div class="status"><span class="pulse" id="connPulse"></span><span id="connTxt">Loading&#8230;</span></div>
+    </header>
+<main>
+    <!-- CALENDAR -->
+    <section class="view" id="view-calendar">
+      <div class="cal-toolbar">
+        <div class="navg">
+          <button id="prevBtn">‹</button>
+          <button id="todayBtn" class="btn ghost sm" style="height:34px">Today</button>
+          <button id="nextBtn">›</button>
+        </div>
+        <div class="period" id="periodLabel">—</div>
+        <div class="grow"></div>
+        <div class="seg" id="viewSeg">
+          <button data-v="month" class="active">Month</button>
+          <button data-v="week">Week</button>
+          <button data-v="day">Day</button>
+        </div>
+        <div class="filters">
+          <select class="f" id="filterTech"><option value="">All technicians</option></select>
+          <select class="f" id="filterStatus"><option value="">All statuses</option></select>
+          <select class="f" id="filterOwner"><option value="">All owner categories</option><option>PPA</option><option>SUB-RES</option><option>SUB-C&I</option><option>DIRECT-PURC</option></select>
+          <input class="f" id="filterSearch" placeholder="Search JC / site / client…" style="min-width:170px" />
+        </div>
+      </div>
+      <div id="calHost"><div class="loading"><span class="spin"></span>Loading schedule…</div></div>
+    </section>
+
+    <!-- DASHBOARD -->
+    <section class="view hidden" id="view-dashboard">
+      <div id="dashHost"><div class="loading"><span class="spin"></span>Loading workload…</div></div>
+    </section>
+
+  <!-- O&M TICKETS PANEL -->
+  <section id="view-omtickets" class="view hidden" style="height:100%;padding:0;overflow:hidden;display:flex;flex-direction:column;">
+    <div style="background:var(--surface);border-bottom:1px solid var(--line);padding:8px 16px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <button class="btn sm" id="ombn-dash"   data-act="omGoView" data-a1="dash"   style="background:#f0a500;color:#0a0a0b;">Dashboard</button>
+      <button class="btn ghost sm" id="ombn-jc"     data-act="omGoView" data-a1="jc">Job Cards <span id="om-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:3px;"></span></button>
+      <button class="btn ghost sm" id="ombn-triage" data-act="omGoView" data-a1="triage">Triage</button>
+      <button class="btn ghost sm" id="ombn-new"    data-act="omGoView" data-a1="new">+ New Ticket</button>
+      <button class="btn ghost sm" id="ombn-newjc"  data-act="omGoView" data-a1="newjc">+ New Job Card</button>
+      <button class="btn ghost sm" id="ombn-cli"    data-act="omGoView" data-a1="cli">Clients</button>
+      <div style="flex:1"></div>
+      <div id="om-dot" style="width:7px;height:7px;border-radius:50%;background:#464e62;flex-shrink:0;"></div>
+      <span id="om-pill" style="font-family:monospace;font-size:9px;color:#8b92a8;">—</span>
+    </div>
+    <div style="flex:1;overflow:hidden;position:relative;" id="om-views">
+
+      <div class="om-view active" id="om-view-dash" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;">
+        <div id="om-dash-status"></div>
+        <div class="om-slbl">Live Stats</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
+          <div class="om-stat"><div class="om-sv" id="om-s-total" style="color:#f0a500">—</div><div class="om-sl">Total JCs</div></div>
+          <div class="om-stat"><div class="om-sv" id="om-s-over"  style="color:#ef4444">—</div><div class="om-sl">Overdue</div></div>
+          <div class="om-stat"><div class="om-sv" id="om-s-prog"  style="color:#4aa3ff">—</div><div class="om-sl">In Progress</div></div>
+          <div class="om-stat"><div class="om-sv" id="om-s-done"  style="color:#3ecf8e">—</div><div class="om-sl">Completed</div></div>
+        </div>
+        <div class="om-slbl">Critical &amp; Overdue</div><div id="om-dash-crit"></div>
+        <div class="om-slbl" style="margin-top:12px;">Recently Issued</div><div id="om-dash-recent"></div>
+      </div>
+
+      <div class="om-view" id="om-view-jc" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;">
+        <div style="position:relative;margin-bottom:8px;">
+          <input type="text" id="om-search" placeholder="Search ref, title, client, status…" data-on="input" data-act="omFilterJCs" data-a1="@val"
+            style="width:100%;background:var(--card);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:13px;padding:9px 12px;outline:none;">
+        </div>
+        <div style="display:flex;gap:5px;margin-bottom:10px;overflow-x:auto;padding-bottom:2px;">
+          <button class="om-chip on" data-act="omSetFilter" data-a1="@el" data-a2="ALL">All</button>
+          <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="New">New</button>
+          <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="In Progress">In Progress</button>
+          <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="Monitoring">Monitoring</button>
+          <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="Completed">Completed</button>
+          <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="Closed">Closed</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <select id="om-owner" data-on="change" data-act="omSetOwner" data-a1="@val" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:12px;padding:8px 10px;">
+            <option value="ALL">All owner categories</option>
+            <option value="PPA">PPA</option><option value="SUB-RES">SUB-RES</option>
+            <option value="SUB-C&amp;I">SUB-C&amp;I</option><option value="DIRECT-PURC">DIRECT-PURC</option>
+          </select>
+          <select id="om-sort" data-on="change" data-act="omSetSort" data-a1="@val" style="flex:1;min-width:150px;background:var(--card);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:12px;padding:8px 10px;">
+            <option value="ref">Sort: Reference</option>
+            <option value="owner">Sort: Owner category</option>
+            <option value="status">Sort: Status</option>
+            <option value="due">Sort: Due date</option>
+          </select>
+        </div>
+        <div id="om-jclist"></div>
+      </div>
+
+      <div class="om-view" id="om-view-triage" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;">
+        <div id="om-triage"></div>
+      </div>
+
+      <div class="om-view" id="om-view-new" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;max-width:680px;">
+        <div class="om-ibox">Creates a new entry in the O&amp;M Activity Log linked to the selected Job Card.</div>
+        <div class="om-fcard">
+          <div class="om-fttl">Ticket Details</div>
+          <div class="om-fld"><label>Category *</label>
+            <select id="om-cat"><option value="">— Select category —</option>
+              <option>Inverter Fault</option><option>Battery Fault</option><option>Grid / Eskom Fault</option>
+              <option>Solar Production Issue</option><option>Communication Failure</option><option>Monitoring Offline</option>
+              <option>Preventative Maintenance</option><option>Emergency Callout</option><option>Warranty Claim</option><option>General Support</option>
+            </select></div>
+          <div class="om-fld"><label>Subject *</label><input type="text" id="om-subj" placeholder="Brief description"></div>
+          <div class="om-fld"><label>Description</label><textarea id="om-desc" rows="3" placeholder="Detail — error codes, observations…"></textarea></div>
+        </div>
+        <div class="om-fcard">
+          <div class="om-fttl">Priority</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+            <div class="om-priopt pnorm" data-act="omSelPri" data-a1="@el" data-a2="Normal">Normal</div>
+            <div class="om-priopt phigh sel" data-act="omSelPri" data-a1="@el" data-a2="High">High</div>
+            <div class="om-priopt purg"  data-act="omSelPri" data-a1="@el" data-a2="Urgent">Urgent</div>
+          </div>
+        </div>
+        <div class="om-fcard">
+          <div class="om-fttl">Link to Job Card</div>
+          <div class="om-fld"><label>Job Card *</label><select id="om-jcsel" data-search="job cards" data-on="change" data-act="omJCPick" data-a1="@el"><option value="">— Select —</option></select></div>
+          <div id="om-jcprev" class="om-jcprev"></div>
+          <div class="om-fld" style="margin-top:8px"><label>Reported By</label><input type="text" id="om-rep" placeholder="Technician / client"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="om-fld"><label>Asset / Inverter</label><input type="text" id="om-asset"></div>
+            <div class="om-fld"><label>Error Code</label><input type="text" id="om-err"></div>
+          </div>
+        </div>
+        <div id="om-newmsg"></div>
+        <button data-act="omSubmit" style="width:100%;background:#f0a500;color:#0a0a0b;font-weight:700;padding:14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;">
+          <span id="om-subtxt">📤 Submit Ticket to Airtable</span>
+        </button>
+      </div>
+
+      <div class="om-view" id="om-view-newjc" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;max-width:680px;">
+        <div class="om-ibox">Creates a new <strong>Job Card</strong> in the O&amp;M base. The reference auto-increments from existing cards; you can add a new client inline.</div>
+        <div class="om-fcard">
+          <div class="om-fttl">Job Card Reference</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="om-fld"><label>Type code</label><input list="njc-typelist" id="njc-rtype" data-on="input" data-act="omRefBuild" placeholder="MAINT"><datalist id="njc-typelist"></datalist></div>
+            <div class="om-fld"><label>Entity code</label><input list="njc-entlist" id="njc-rent" data-on="input" data-act="omRefBuild" placeholder="TE"><datalist id="njc-entlist"></datalist></div>
+          </div>
+          <div class="om-fld"><label>Reference <span id="njc-seqnote" style="color:var(--muted2);font-size:10px;"></span></label><input type="text" id="njc-ref" placeholder="OM-2026-0001/MAINT/TE"></div>
+        </div>
+        <div class="om-fcard">
+          <div class="om-fttl">Details</div>
+          <div class="om-fld"><label>Title *</label><input type="text" id="njc-title" placeholder="Short description of the job"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="om-fld"><label>Work Type</label><select id="njc-type"></select></div>
+            <div class="om-fld"><label>Priority</label><select id="njc-pri"></select></div>
+          </div>
+          <div class="om-fld"><label>Status</label><select id="njc-stat"></select></div>
+          <div class="om-fld"><label>Owner category</label><select id="njc-owner"></select></div>
+        </div>
+        <div class="om-fcard">
+          <div class="om-fttl">Schedule</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div class="om-fld"><label>Issued</label><input type="date" id="njc-iss"></div>
+            <div class="om-fld"><label>Due</label><input type="date" id="njc-due"></div>
+            <div class="om-fld"><label>Progress %</label><input type="number" id="njc-prog" min="0" max="100" value="0"></div>
+          </div>
+        </div>
+        <div class="om-fcard">
+          <div class="om-fttl">Client</div>
+          <div class="om-fld"><label>Client *</label><select id="njc-cli" data-search="clients" data-on="change" data-act="omCliPick"></select></div>
+          <div id="njc-newcli" style="display:none;border-left:2px solid var(--accent);padding-left:10px;margin-top:6px;">
+            <div class="om-fld"><label>New client name *</label><input type="text" id="njc-clinew-name" placeholder="Company / client name"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div class="om-fld"><label>Contact person</label><input type="text" id="njc-clinew-cont"></div>
+              <div class="om-fld"><label>Email</label><input type="email" id="njc-clinew-email"></div>
+            </div>
+            <div class="om-fld"><label>Site / Address</label><textarea id="njc-clinew-site" rows="2" placeholder="Physical site / address"></textarea></div>
+          </div>
+        </div>
+        <div id="njc-msg"></div>
+        <button data-act="omSubmitNewJC" style="width:100%;background:#f0a500;color:#0a0a0b;font-weight:700;padding:14px;border:none;border-radius:8px;cursor:pointer;font-size:13px;">
+          <span id="njc-subtxt">➕ Create Job Card in Airtable</span>
+        </button>
+      </div>
+
+      <div class="om-view" id="om-view-cli" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;">
+        <div style="display:flex;background:var(--card);border-radius:8px;padding:3px;gap:2px;margin-bottom:10px;">
+          <div class="om-tab on" data-act="omCliTab" data-a1="@el" data-a2="clients">Clients</div>
+          <div class="om-tab" data-act="omCliTab" data-a1="@el" data-a2="people">People</div>
+          <div class="om-tab" data-act="omCliTab" data-a1="@el" data-a2="log">Activity Log</div>
+        </div>
+        <div id="om-cli"></div>
+      </div>
+
+      <div class="om-view" id="om-view-detail" style="position:absolute;inset:0;overflow-y:auto;">
+        <div style="background:var(--surface);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10;">
+          <button data-act="omCloseDetail" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;">←</button>
+          <div><div id="om-d-ref" style="font-family:monospace;font-size:10px;color:var(--muted2);"></div>
+               <div id="om-d-title" style="font-size:13px;font-weight:600;color:var(--text);"></div></div>
+        </div>
+        <div id="om-d-body" style="padding:14px 18px 40px;"></div>
+      </div>
+
+    </div>
+  </section>
+  </main>
+</div>
+  <div id="schedToast"></div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     SITE INFORMATION
+     The persistent profile of a site and its system, as distinct from a job card,
+     which is one piece of work. Operational and technical data only: the table
+     carries no financial or FICA fields and the upload path refuses documents that
+     look like they do. See js/mod-siteinfo.js and api/siteinfo-upload.js.
+     ══════════════════════════════════════════════════════════════════ -->
+<section class="module mod-siteinfo" id="modSiteInfo" data-requires="site_information:view" hidden>
+
+  <!-- LIST -->
+  <div id="siListView">
+    <header class="si-topbar">
+      <h2>Site Information</h2>
+      <div class="grow"></div>
+      <input type="search" id="siSearch" placeholder="Client, site, job card, SUB/SOL, monitoring ref…"
+             autocomplete="off" spellcheck="false">
+      <select id="siFilterCat" aria-label="Filter by category"></select>
+      <select id="siFilterStatus" aria-label="Filter by system status"></select>
+      <span class="si-count" id="siCount"></span>
+      <button class="si-btn" data-act="siReload" type="button">&#8635;</button>
+      <button class="si-btn" data-act="siImport" type="button"
+              data-requires="site_information:create">Import CSV</button>
+      <button class="si-btn" data-act="siBatch" type="button"
+              data-requires="site_information:create">From Documents</button>
+      <button class="si-btn" data-act="siFromJobCard" type="button"
+              data-requires="site_information:create">From Job Card</button>
+      <button class="si-btn primary" data-act="siFolderReport" type="button"
+              data-requires="site_information:create">Folder &rarr; Site Report</button>
+      <button class="si-btn primary" data-act="siNew" type="button"
+              data-requires="site_information:create">+ New Site</button>
+    </header>
+    <div id="siList" class="si-list"></div>
+  </div>
+
+  <!-- DETAIL -->
+  <div id="siDetail" hidden>
+    <header class="si-topbar">
+      <button class="si-btn" data-act="siBack" type="button">&#8249; Sites</button>
+      <div class="si-detail-head">
+        <div class="si-detail-name" id="siDetailName"></div>
+        <div class="si-detail-sub" id="siDetailSub"></div>
+      </div>
+    </header>
+    <div id="siDetailBody"></div>
+  </div>
+
+  <!-- NEW -->
+  <div id="siNew" hidden>
+    <header class="si-topbar">
+      <button class="si-btn" data-act="siCancelNew" type="button">&#8249; Sites</button>
+      <h2>New site</h2>
+    </header>
+    <div class="si-form">
+      <div class="si-f"><label for="nsSiteName">Site name *</label>
+        <input id="nsSiteName" type="text" autocomplete="off"></div>
+      <div class="si-f"><label for="nsClientName">Client</label>
+        <input id="nsClientName" type="text" autocomplete="off"></div>
+      <div class="si-f"><label for="nsBase">Operation</label>
+        <select id="nsBase"><option value="CI">C&amp;I</option><option value="OM">O&amp;M</option></select></div>
+      <div class="si-f"><label for="nsCategory">Installation category</label>
+        <select id="nsCategory"></select></div>
+      <div class="si-f"><label for="nsJc">Job card number</label>
+        <input id="nsJc" type="text" autocomplete="off"></div>
+      <div class="si-f"><label for="nsSubSol">SUB / SOL number</label>
+        <input id="nsSubSol" type="text" autocomplete="off"></div>
+      <div class="si-f si-wide"><label for="nsAddress">Property address</label>
+        <textarea id="nsAddress" rows="2"></textarea></div>
+    </div>
+    <div id="nsDupes"></div>
+    <div id="siNewMsg"></div>
+    <div class="si-actions">
+      <button class="si-btn primary" data-act="siSaveNew" type="button">Create site</button>
+      <button class="si-btn" data-act="siCancelNew" type="button">Cancel</button>
+    </div>
+  </div>
+</section>
+
+<script src="/js/core.js"></script>
+<script src="/js/pick.js"></script>
+<script src="/js/login.js"></script>
+<script src="/js/mod-scheduler.js"></script>
+<script src="/js/mod-siteinfo.js"></script>
+<script src="/js/siteinfo-import.js"></script>
+<script src="/js/siteinfo-batch.js"></script>
+<script src="/js/mod-admin.js"></script>
+<script src="/js/shell.js"></script>
+<script src="/js/boot.js"></script>
+</body>
+</html>

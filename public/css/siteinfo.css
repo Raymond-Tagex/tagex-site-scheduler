@@ -1,0 +1,398 @@
+/* TAGEX — Site Information.
+ *
+ * Scoped to .mod-siteinfo (and the shell strip) so this module and the scheduler cannot restyle
+ * one another — the same rule scheduler.css follows. Colours, type and radii come from the
+ * platform tokens in app.css; nothing new is invented here.
+ */
+
+/* ── top-level module switch ──────────────────────────────────────────────
+ *
+ * Lives in the dark header bar beside the TAGEX mark. It used to sit in its own row below the
+ * header, where it was mistaken for the scheduler's Calendar / Workload / Tickets tabs — two
+ * stacked rows of tabs, the lower one louder than the upper. Application-level navigation
+ * belongs in the application bar.
+ *
+ * margin-right:auto keeps it clustered with the brand while the user block stays hard right.
+ */
+.shell-tabs {
+  display: flex; gap: 4px; align-items: center;
+  margin-left: 16px; margin-right: auto;
+  padding-left: 16px; border-left: 1px solid var(--border);
+}
+.shell-tabs[hidden] { display: none; }
+.shell-tabs button {
+  background: none; border: 1px solid transparent; border-radius: var(--rs);
+  color: var(--text-2); font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  letter-spacing: .04em; padding: 7px 13px; cursor: pointer; white-space: nowrap;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.shell-tabs button:hover { color: var(--text); border-color: var(--border); }
+.shell-tabs button.active {
+  color: var(--amber); background: var(--amber-dim); border-color: rgba(240, 165, 0, .35);
+}
+.shell-tabs button:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+
+/* On a narrow screen the header cannot hold the brand text and both tabs. The subtitle goes
+   first, then the title — the mark alone still identifies the app, and the tabs are the thing
+   someone actually needs to press. */
+@media (max-width: 700px) {
+  .shell-tabs { margin-left: 10px; padding-left: 10px; }
+  .shell-tabs button { padding: 7px 10px; font-size: 11px; }
+  .hdr-text .s { display: none; }
+}
+@media (max-width: 560px) {
+  .hdr-text { display: none; }
+  .shell-tabs { margin-left: 8px; padding-left: 8px; gap: 2px; }
+  .shell-tabs button { padding: 7px 9px; font-size: 10.5px; letter-spacing: 0; }
+  /* The mark, the module switch and Log out all have to fit across a phone. The signed-in
+     name and role badge are the least load-bearing of them: navigation is what a technician
+     needs to press, and who they are is not in doubt while they are holding the phone. */
+  .hdr-user { display: none; }
+}
+
+/* ── layout ──────────────────────────────────────────────────────────────── */
+.mod-siteinfo { padding: 16px; max-width: 1400px; margin: 0 auto; }
+
+.si-topbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.si-topbar h2 { margin: 0; font-size: 16px; letter-spacing: .02em; }
+.si-topbar .grow { flex: 1; }
+.si-topbar input[type="search"] { min-width: 220px; flex: 1 1 240px; }
+.si-count { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); }
+
+.si-detail-head { min-width: 0; }
+.si-detail-name { font-size: 17px; font-weight: 600; }
+.si-detail-sub { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+
+/* ── list ────────────────────────────────────────────────────────────────── */
+.si-list { display: flex; flex-direction: column; gap: 8px; }
+.si-row {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--rs);
+  padding: 12px 14px; color: var(--text);
+}
+.si-row:hover { border-color: var(--amber); }
+.si-row-main { flex: 1; min-width: 0; }
+.si-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.si-name { font-weight: 600; font-size: 14px; }
+.si-row-meta { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); margin-top: 4px; }
+.si-row-sys { display: flex; gap: 14px; font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
+.si-row-sys span { white-space: nowrap; }
+
+.si-badge {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 5px; border: 1px solid var(--border-hi); color: var(--text-2);
+}
+.si-badge.ok { color: var(--green); border-color: var(--green-border); background: var(--green-dim); }
+.si-badge.warn { color: var(--amber); border-color: rgba(240,165,0,.3); background: var(--amber-dim); }
+.si-badge.bad { color: var(--red); border-color: var(--red-border); background: var(--red-dim); }
+.si-chip {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;
+}
+
+.si-empty {
+  padding: 22px; text-align: center; color: var(--text-3); font-size: 13px;
+  border: 1px dashed var(--border); border-radius: var(--rs);
+}
+.si-empty.err { color: var(--red); border-color: var(--red-border); }
+
+/* ── detail tabs ─────────────────────────────────────────────────────────── */
+.si-tabs {
+  display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.si-tabs button {
+  background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer;
+  color: var(--text-2); font: 500 13px/1 inherit; padding: 10px 14px;
+}
+.si-tabs button:hover { color: var(--text); }
+.si-tabs button.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+/* ── cards ───────────────────────────────────────────────────────────────── */
+.si-grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.si-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--rs);
+  padding: 14px;
+}
+.si-card h3 {
+  margin: 0 0 10px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-2); font-weight: 500;
+}
+.si-span2 { grid-column: 1 / -1; }
+
+.si-facts { margin: 0; }
+.si-fact { display: grid; grid-template-columns: 130px 1fr; gap: 6px 12px; padding: 4px 0; }
+.si-fact dt {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-3);
+}
+.si-fact dd { margin: 0; font-size: 13px; word-break: break-word; }
+
+.si-docs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.si-doc {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  border: 1px solid var(--border); border-radius: var(--rs); padding: 8px 11px;
+  font-size: 12.5px; color: var(--text-2);
+}
+.si-doc b { font-size: 14px; }
+.si-doc.ok { color: var(--green); border-color: var(--green-border); }
+.si-doc.warn { color: var(--amber); border-color: rgba(240,165,0,.3); }
+.si-doc.bad { color: var(--red); border-color: var(--red-border); }
+
+/* ── forms ───────────────────────────────────────────────────────────────── */
+.si-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.si-f { min-width: 0; }
+.si-f label {
+  display: block; font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+  color: var(--text-2); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 5px;
+}
+.si-f input, .si-f select, .si-f textarea { width: 100%; min-height: 40px; }
+.si-f textarea { min-height: 68px; resize: vertical; }
+.si-f input:disabled, .si-f select:disabled, .si-f textarea:disabled {
+  opacity: .55; cursor: not-allowed;
+}
+.si-wide { grid-column: 1 / -1; }
+.si-sub {
+  grid-column: 1 / -1; margin: 8px 0 0; font-family: var(--mono); font-size: 11.5px;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--amber); font-weight: 500;
+}
+.si-note { font-size: 12.5px; color: var(--text-3); line-height: 1.6; margin: 14px 0 0; }
+
+.si-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.si-btn {
+  background: var(--surface); border: 1px solid var(--border-hi); color: var(--text);
+  border-radius: var(--rs); padding: 8px 14px; font-size: 13px; cursor: pointer; min-height: 40px;
+}
+.si-btn:hover { border-color: var(--amber); }
+.si-btn.primary { background: var(--amber); border-color: var(--amber); color: #101215; font-weight: 600; }
+.si-btn:disabled { opacity: .6; cursor: progress; }
+.si-x {
+  background: none; border: none; color: var(--text-3); font-size: 18px; cursor: pointer;
+  line-height: 1; padding: 4px 8px;
+}
+.si-x:hover { color: var(--red); }
+.si-link {
+  background: none; border: none; color: var(--amber); cursor: pointer; padding: 2px 0;
+  font: inherit; text-decoration: underline;
+}
+
+.si-msg { border-radius: var(--rs); padding: 10px 12px; font-size: 13px; margin-top: 12px; line-height: 1.5; }
+.si-msg.ok { background: var(--green-dim); border: 1px solid var(--green-border); color: var(--green); }
+.si-msg.err { background: var(--red-dim); border: 1px solid var(--red-border); color: var(--red); }
+.si-msg.warn { background: var(--amber-dim); border: 1px solid rgba(240,165,0,.3); color: var(--amber); }
+
+/* ── tables ──────────────────────────────────────────────────────────────── */
+.si-tablewrap { overflow-x: auto; }
+.si-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.si-table th {
+  text-align: left; font-family: var(--mono); font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-3); font-weight: 500;
+  padding: 8px 10px; border-bottom: 1px solid var(--border);
+}
+.si-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+.si-mono { font-family: var(--mono); font-size: 11.5px; }
+
+/* ── photos ──────────────────────────────────────────────────────────────── */
+.si-upload { margin-bottom: 18px; display: grid; gap: 12px; }
+.si-warn {
+  background: var(--amber-dim); border: 1px solid rgba(240,165,0,.3); color: var(--amber);
+  border-radius: var(--rs); padding: 10px 12px; font-size: 12.5px; line-height: 1.6;
+}
+.si-drop {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  border: 2px dashed var(--border-hi); border-radius: var(--r); padding: 26px 16px;
+  color: var(--text-2); font-size: 13px; cursor: pointer;
+}
+.si-drop.over { border-color: var(--amber); background: var(--amber-dim); }
+.si-verdict { font-family: var(--mono); font-size: 11.5px; }
+.si-verdict.allowed { color: var(--green); }
+.si-verdict.blocked { color: var(--red); }
+.si-verdict.review { color: var(--amber); }
+
+.si-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.si-photo {
+  margin: 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--rs); overflow: hidden; position: relative;
+}
+.si-photo img { display: block; width: 100%; height: 140px; object-fit: cover; }
+.si-photo-file {
+  height: 140px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 13px; color: var(--text-3); background: var(--card);
+}
+.si-photo figcaption {
+  padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.si-photo figcaption span { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+.si-photo-open {
+  position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,.6); color: #fff;
+  border-radius: 4px; padding: 3px 7px; font-size: 11px; text-decoration: none;
+}
+
+/* ── re-filing photos after a bulk upload ──────────────────────────────────
+   The tick box sits top-LEFT, opposite the Open link, so neither covers the other and a fast
+   hand does not open a file it meant to select. It stays visible rather than appearing on
+   hover: this is used on a tablet, where there is no hover. */
+.si-photo-pick {
+  position: absolute; top: 6px; left: 6px; z-index: 2;
+  background: rgba(0,0,0,.6); border-radius: 4px; padding: 4px 5px 2px; cursor: pointer;
+}
+.si-photo-pick input { width: 16px; height: 16px; accent-color: var(--amber); cursor: pointer; }
+.si-photo.is-picked { border-color: var(--amber); box-shadow: inset 0 0 0 1px var(--amber); }
+
+.si-photo-cat { color: var(--text-2); font-weight: 600; }
+.si-photo-cat.is-none { color: var(--text-3); font-weight: 400; font-style: italic; }
+
+.si-refile {
+  border: 1px solid var(--border); border-radius: var(--rs); background: var(--surface);
+  padding: 10px 12px; margin: 0 0 12px;
+}
+.si-refile-row { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+.si-refile-row + .si-refile-row { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.si-refile-row label {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-3);
+}
+.si-refile select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--rs); padding: 6px 9px; font-size: 13px; font-family: inherit;
+}
+.si-refile select:focus { outline: none; border-color: var(--amber); }
+.si-refile .si-note { margin: 0; align-self: center; }
+.si-refile-apply { /* the row that actually writes, set apart from the one that only looks */ }
+#siRefileMsg:not(:empty) { margin-top: 9px; }
+
+.si-history { margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.9; color: var(--text-2); }
+
+/* ── modal ───────────────────────────────────────────────────────────────── */
+.si-modal {
+  position: fixed; inset: 0; z-index: 300; background: rgba(10,11,13,.7);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.si-modal-card {
+  width: 100%; max-width: 620px; max-height: 90vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-hi); border-radius: var(--r);
+}
+.si-modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+}
+.si-modal-head h2 { margin: 0; font-size: 15px; }
+.si-modal-body { padding: 16px; }
+.si-modal-foot {
+  display: flex; justify-content: flex-end; gap: 8px; padding: 14px 16px;
+  border-top: 1px solid var(--border);
+}
+.si-jclist { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; }
+.si-jc { display: flex; gap: 10px; align-items: flex-start; padding: 8px; font-size: 12.5px; cursor: pointer; }
+.si-jc:hover { background: var(--card); border-radius: var(--rs); }
+
+/* ── mobile: technicians use this on a phone ─────────────────────────────── */
+@media (max-width: 720px) {
+  .mod-siteinfo { padding: 12px; }
+  .si-topbar { gap: 8px; }
+  .si-topbar input[type="search"] { flex-basis: 100%; }
+  .si-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .si-row-sys { gap: 10px; flex-wrap: wrap; }
+  .si-form { grid-template-columns: 1fr; }
+  .si-fact { grid-template-columns: 1fr; gap: 2px; }
+  .si-fact dd { margin-bottom: 4px; }
+  .si-btn { min-height: 44px; }          /* a gloved thumb on a tablet */
+  .si-tabs button { padding: 10px; font-size: 12.5px; }
+}
+
+/* The confirmation a person must tick for a file the server could not read. */
+.si-confirm { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px;
+  font-family: var(--mono); font-size: 11px; color: var(--text-2); cursor: pointer; }
+.si-confirm input { margin-top: 2px; accent-color: var(--amber); }
+
+/* ── CSV import ──────────────────────────────────────────────────────────── */
+.si-import { max-width: 860px; }
+.si-maprows { display: grid; gap: 6px; margin: 14px 0; max-height: 30vh; overflow-y: auto; }
+.si-maprow { display: grid; grid-template-columns: 1fr 1.2fr; gap: 10px; align-items: center; }
+.si-maprow > span { font-family: var(--mono); font-size: 11.5px; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-maprow select { min-height: 34px; font-size: 12.5px; }
+.si-maprow.blocked > span { color: var(--red); text-decoration: line-through; }
+.si-maprow.blocked em { font-family: var(--mono); font-size: 11px; color: var(--red); font-style: normal; }
+.si-impcount { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); margin: 10px 0; }
+.si-imp-duplicate td { opacity: .75; }
+.si-imp-invalid td { opacity: .75; }
+
+.si-drop.busy { border-color: var(--amber); opacity: .7; cursor: progress; }
+.si-drop b { color: var(--text); }
+
+/* ── build a site from its documents ─────────────────────────────────────── */
+.si-batch { max-width: 900px; }
+.si-h3 { margin: 18px 0 6px; font-size: 13px; color: var(--text); }
+.si-h3:first-child { margin-top: 0; }
+.si-hint { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 10px; }
+
+.si-drop-actions { display: block; margin-top: 10px; }
+
+.si-batch-files { display: flex; flex-direction: column; gap: 2px; max-height: 34vh; overflow-y: auto; }
+.si-batch-file {
+  display: flex; align-items: center; gap: 10px; padding: 7px 8px; cursor: pointer;
+  font-size: 12.5px; border-radius: var(--rs);
+}
+.si-batch-file:hover { background: var(--card); }
+.si-batch-file.muted { opacity: .5; cursor: default; }
+.si-batch-file input { accent-color: var(--amber); flex: none; }
+.si-batch-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-batch-size { font-family: var(--mono); font-size: 11px; color: var(--text-3); flex: none; }
+
+.si-batch-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.si-batch-table th {
+  text-align: left; font-weight: 500; color: var(--text-2); padding: 5px 10px 5px 0;
+  width: 38%; vertical-align: middle;
+}
+.si-batch-table td { padding: 3px 0; }
+.si-batch-table input[type="text"], .si-batch-table select { width: 100%; min-height: 32px; font-size: 12.5px; }
+.si-batch-src {
+  font-family: var(--mono); font-size: 10.5px; color: var(--text-3);
+  padding-left: 10px !important; white-space: nowrap; width: 1%;
+}
+/* A value the scan produced is the one that needs checking, so it is the one that is marked. */
+.si-batch-table tr.src-ocr th { color: var(--amber); }
+.si-batch-table tr.src-ocr .si-batch-src { color: var(--amber); }
+
+@media (max-width: 720px) {
+  .si-batch-table th { width: auto; display: block; padding-bottom: 2px; }
+  .si-batch-table td { display: block; }
+  .si-batch-src { padding-left: 0 !important; width: auto; padding-bottom: 8px !important; }
+  .si-batch-table tr { display: block; padding-bottom: 8px; }
+}
+
+/* The admin's own FICA judgement, offered per file on the upload queue. Amber because it
+   overrules an automatic control and should never look like an ordinary form field. */
+.si-classify {
+  margin-top: 4px; width: 100%; min-height: 30px; font-size: 11.5px;
+  font-family: var(--mono); border-color: rgba(240,165,0,.45);
+}
+.si-classify:focus { border-color: var(--amber); outline: none; }
+
+/* ── choosing a job card ─────────────────────────────────────────────────── */
+.si-cardsearch {
+  width: 100%; min-height: 38px; margin-bottom: 10px; font-size: 13px;
+}
+.si-cardrow {
+  width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+  align-items: flex-start;
+}
+.si-cardrow .si-batch-name { white-space: normal; line-height: 1.45; }
+.si-cardmeta { color: var(--text-3); font-size: 11.5px; }
+/* An inline "change" affordance inside a status line, not a button in its own right. */
+.si-linkbtn {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--amber); text-decoration: underline; font: inherit; font-size: 12px;
+}
+
+/* A required field that is still empty is what holds the save up — mark it, don't hide it. */
+.si-batch-table tr.si-needed th { color: var(--red); }
+.si-batch-table tr.si-needed .si-batch-src { color: var(--red); }
+.si-batch-table tr.si-needed input { border-color: var(--red); }
+.si-req {
+  font-family: var(--mono); font-size: 10px; color: var(--red);
+  text-transform: uppercase; letter-spacing: .04em;
+}

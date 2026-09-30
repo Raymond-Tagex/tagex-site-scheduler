@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Theme preview</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Barlow+Semi+Condensed:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/scheduler.css">
+</head>
+<body>
+<!--
+  Every surface the O&M scheduler paints, on one page, so the theme can be looked at rather
+  than reasoned about. It loads the REAL stylesheets and uses the REAL class names; nothing
+  here restyles anything.
+
+      node scripts/ui-harness.js   then   http://localhost:4321/test/theme-preview.html
+
+  It also reports, at the foot, any text on the page whose contrast against what it sits on
+  falls below the readable threshold — which is the thing that actually goes wrong when a
+  palette built for a black page is put on a white one.
+-->
+<div class="mod-scheduler" id="modScheduler" style="height:auto">
+  <div id="schedApp">
+
+    <header class="topbar">
+      <div><strong>Site Visit Scheduler</strong><div class="sub">TAGEX Energy · O&amp;M</div></div>
+      <nav class="tabs">
+        <button class="active">Calendar</button><button>Workload</button><button>O&amp;M Tickets</button>
+      </nav>
+      <button class="btn">+ Schedule Site Visit</button>
+      <button class="btn ghost">↻ Refresh</button>
+    </header>
+
+    <div style="padding:16px 18px">
+      <div class="om-chips">
+        <button class="om-chip on">All</button><button class="om-chip">Overdue</button>
+        <button class="om-chip">New</button><button class="om-chip">In Progress</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0">
+        <button type="button" class="om-stat"><div class="om-sv" style="color:#a16207">113</div><div class="om-sl">Total JCs</div></button>
+        <button type="button" class="om-stat"><div class="om-sv" style="color:#b91c1c">6</div><div class="om-sl">Overdue</div></button>
+        <button type="button" class="om-stat"><div class="om-sv" style="color:#1d4ed8">8</div><div class="om-sl">In Progress</div></button>
+        <button type="button" class="om-stat"><div class="om-sv" style="color:#15803d">87</div><div class="om-sl">Completed</div></button>
+      </div>
+
+      <div class="om-slbl">Status badges</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+        <span class="om-sb s-new">New</span><span class="om-sb s-prog">In Progress</span>
+        <span class="om-sb s-mon">Awaiting Spares</span><span class="om-sb s-other">Visit Scheduled</span>
+        <span class="om-sb s-done">Resolved</span><span class="om-sb s-closed">Closed</span>
+      </div>
+
+      <div class="om-slbl">A ticket</div>
+      <div class="om-dhead">
+        <button class="btn ghost sm">← Back</button>
+        <div style="flex:1;min-width:0">
+          <div class="om-dref">TKT-2026-0047</div>
+          <div class="om-dtitle">Haval Edenvale — system tripping in EPS</div>
+        </div>
+        <span class="om-sb s-other">Visit Scheduled</span><span class="om-pb phigh">High</span>
+      </div>
+
+      <div class="om-dbody">
+        <div class="om-acts">
+          <button class="btn sm">📅 Schedule site visit</button>
+          <button class="btn ghost sm">📄 Download report</button>
+          <button class="btn ghost sm">↙ Pull job card history</button>
+        </div>
+
+        <div class="om-fcard">
+          <div class="om-fttl">Ticket</div>
+          <div class="om-facts">
+            <div class="om-fact"><span>Job card</span><b>OM-2026-0138/MAINT/TE</b></div>
+            <div class="om-fact"><span>Client</span><b>Haval Edenvale</b></div>
+            <div class="om-fact"><span>Reported by</span><b>Maurice Kruger</b></div>
+            <div class="om-fact"><span>Source</span><b>Internal</b></div>
+          </div>
+          <div class="om-hint">The visit subject and notes become the ticket's subject and description.</div>
+          <textarea placeholder="Add a note…" rows="2"></textarea>
+        </div>
+
+        <div class="om-fcard">
+          <div class="om-fttl">Activity</div>
+          <div class="om-tli"><div class="om-tld g"></div>
+            <div class="om-tlt">25/09/2026 08:50 · <span style="color:var(--accent-ink)">Comment</span></div>
+            <div class="om-tltx">Ressolve Tz Fault.</div></div>
+          <div class="om-tli"><div class="om-tld"></div>
+            <div class="om-tlt">15/07/2026 14:32 · <span style="color:var(--accent-ink)">Comment</span></div>
+            <div class="om-tltx">System tripping in EPS. System in EPS (IND) - Independant mode. System not in parallel correctly.</div></div>
+        </div>
+
+        <div class="om-fcard">
+          <div class="om-fttl">The picker</div>
+          <div class="om-pull" id="om-pullbox">
+            <div class="om-fttl">Job card history — choose what belongs to this ticket</div>
+            <div class="om-hint">Whatever you pick stays on the job card as well. 2 belong to another ticket and cannot be picked.</div>
+            <div class="om-pull-bar">
+              <button class="btn ghost sm">Select all</button><button class="btn ghost sm">Clear</button>
+              <span class="om-pull-count">1 of 3 chosen</span>
+            </div>
+            <div class="om-pull-list">
+              <label class="om-pull-row"><input type="checkbox" checked>
+                <span class="om-pull-when">25/09/2026 08:05</span><span class="om-pull-type">Comment</span>
+                <span class="om-pull-note">Site visit 25-09-2026 to replace panels 1× 405W panel.</span></label>
+              <label class="om-pull-row"><input type="checkbox">
+                <span class="om-pull-when">08/09/2026 15:37</span><span class="om-pull-type">Visit Rescheduled</span>
+                <span class="om-pull-note">Site visit moved from 04/09/2026 09:00 to 03/09/2026 09:00</span></label>
+            </div>
+            <div class="om-pull-bar"><button class="btn sm">Link the chosen entries</button>
+              <button class="btn ghost sm">Cancel</button></div>
+          </div>
+        </div>
+
+        <div class="om-fcard">
+          <div class="om-fttl">Messages</div>
+          <div class="om-ok">✓ 2 entries pulled in.</div>
+          <div class="om-err">⚠ The activity log could not be read.</div>
+          <div class="om-empty">No spares requested.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2 style="font:600 14px system-ui;margin:24px 18px 8px">Contrast of every visible run of text</h2>
+<pre id="report" style="font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;padding:0 18px 40px"></pre>
+
+<script>
+// Relative luminance and contrast ratio, straight from the WCAG definition.
+function lum(c) {
+  const [r, g, b] = c.map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+const parse = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+function ratio(fg, bg) {
+  const a = lum(parse(fg)) + 0.05;
+  const b = lum(parse(bg)) + 0.05;
+  return Math.round((Math.max(a, b) / Math.min(a, b)) * 100) / 100;
+}
+/** The colour actually behind an element: the first ancestor that paints one. */
+function behind(el) {
+  let n = el;
+  while (n && n !== document.documentElement) {
+    const c = getComputedStyle(n).backgroundColor;
+    const p = parse(c);
+    const alpha = (c.match(/[\d.]+/g) || [])[3];
+    if (p.length === 3 && alpha !== '0' && c !== 'transparent') {
+      // A tinted badge sits on whatever is under IT, so blend rather than trust the tint.
+      if (alpha !== undefined && Number(alpha) < 1) {
+        const under = parse(behind(n.parentElement || document.body));
+        const a = Number(alpha);
+        return `rgb(${p.map((v, i) => Math.round(v * a + under[i] * (1 - a))).join(',')})`;
+      }
+      return c;
+    }
+    n = n.parentElement;
+  }
+  return 'rgb(255,255,255)';
+}
+
+const out = document.getElementById('report');
+const bad = [];
+document.querySelectorAll('#modScheduler *').forEach((el) => {
+  const text = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join(' ').trim();
+  if (!text) return;
+  const cs = getComputedStyle(el);
+  if (cs.display === 'none' || cs.visibility === 'hidden') return;
+  const size = parseFloat(cs.fontSize);
+  const heavy = Number(cs.fontWeight) >= 600 || size >= 18.66;
+  // WCAG AA: 4.5:1 for body text, 3:1 where it is large or bold.
+  const need = (size >= 24 || (heavy && size >= 18.66)) ? 3 : 4.5;
+  const r = ratio(cs.color, behind(el));
+  if (r < need) bad.push({ r, need, text: text.slice(0, 54), color: cs.color, on: behind(el) });
+});
+// A dark PANEL is invisible to a contrast check that only looks at text -- and a black
+// textarea on a white page sat there through a clean run, because it had no text in it.
+const darkBoxes = [];
+document.querySelectorAll('#modScheduler *').forEach((el) => {
+  const cs = getComputedStyle(el);
+  const p = parse(cs.backgroundColor);
+  const a = (cs.backgroundColor.match(/[\d.]+/g) || [])[3];
+  if (p.length !== 3 || a === '0') return;
+  if ((p[0] * 299 + p[1] * 587 + p[2] * 114) / 1000 < 90) {
+    darkBoxes.push({ what: el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : ''), bg: cs.backgroundColor });
+  }
+});
+bad.push(...darkBoxes.map((d) => ({ r: 0, need: 0, text: 'DARK PANEL ' + d.what, color: d.bg, on: 'the page' })));
+
+out.textContent = bad.length
+  ? bad.sort((a, b) => a.r - b.r)
+      .map((b) => `  ${String(b.r).padStart(5)} : 1   (needs ${b.need})   ${b.color} on ${b.on}\n            "${b.text}"`)
+      .join('\n')
+  : '  every run of text carries against what it sits on';
+document.title = bad.length ? 'theme — ' + bad.length + ' UNREADABLE' : 'theme — readable';
+window.__contrast = bad;
+</script>
+</body>
+</html>

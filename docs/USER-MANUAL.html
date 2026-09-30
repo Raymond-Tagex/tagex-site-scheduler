@@ -1,0 +1,1032 @@
+<title>O&M Scheduler Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* ── tokens ─────────────────────────────────────────────────────────────
+   Light is the bare :root. Dark redefines TOKENS ONLY, twice: once behind
+   prefers-color-scheme (guarded so an explicit light choice wins) and once
+   behind the data-theme stamp. No component rule lives inside either block. */
+:root {
+  --ground:   #F5F7F9;
+  --surface:  #FFFFFF;
+  --sunken:   #ECEFF3;
+  --ink:      #14171C;
+  --ink-2:    #3D454F;
+  --muted:    #6B7684;
+  --rule:     #DCE1E8;
+  --rule-2:   #C3CBD5;
+  --accent:   #A66A00;
+  --accent-b: #FBF0D8;
+  --accent-l: #7A4E00;
+  --yes:      #1C7A52;
+  --yes-bg:   #E3F3EB;
+  --no:       #8892A0;
+  --no-bg:    #EFF1F4;
+  --warn:     #9A5B00;
+  --warn-bg:  #FBEEDA;
+  --stop:     #A32118;
+  --stop-bg:  #F9E4E2;
+  --shadow:   0 1px 2px rgba(20,23,28,.06), 0 8px 24px rgba(20,23,28,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:   #0D0F12;
+    --surface:  #14171C;
+    --sunken:   #1A1E24;
+    --ink:      #E7EBF0;
+    --ink-2:    #BAC3CE;
+    --muted:    #8A94A2;
+    --rule:     #262B33;
+    --rule-2:   #363D47;
+    --accent:   #F0A500;
+    --accent-b: #2A2008;
+    --accent-l: #F5BC42;
+    --yes:      #4FBE8B;
+    --yes-bg:   #10281E;
+    --no:       #77818F;
+    --no-bg:    #1C2027;
+    --warn:     #DFA13C;
+    --warn-bg:  #2A2109;
+    --stop:     #E4776C;
+    --stop-bg:  #2C1512;
+    --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:   #0D0F12;
+  --surface:  #14171C;
+  --sunken:   #1A1E24;
+  --ink:      #E7EBF0;
+  --ink-2:    #BAC3CE;
+  --muted:    #8A94A2;
+  --rule:     #262B33;
+  --rule-2:   #363D47;
+  --accent:   #F0A500;
+  --accent-b: #2A2008;
+  --accent-l: #F5BC42;
+  --yes:      #4FBE8B;
+  --yes-bg:   #10281E;
+  --no:       #77818F;
+  --no-bg:    #1C2027;
+  --warn:     #DFA13C;
+  --warn-bg:  #2A2109;
+  --stop:     #E4776C;
+  --stop-bg:  #2C1512;
+  --shadow:   0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 24px 96px;
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
+}
+
+/* ── masthead ───────────────────────────────────────────────────────── */
+.masthead {
+  grid-column: 1 / -1;
+  border-bottom: 2px solid var(--ink);
+  padding: 56px 0 20px;
+  margin-bottom: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 20px 32px;
+}
+.mark {
+  width: 46px; height: 46px; flex: none;
+  border: 2px solid var(--accent);
+  border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 600; font-size: 15px;
+  color: var(--accent);
+}
+.masthead h1 {
+  font-family: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: clamp(34px, 5.2vw, 52px);
+  font-weight: 700;
+  letter-spacing: .3px;
+  line-height: 1;
+  margin: 0;
+  text-wrap: balance;
+}
+.masthead .sub {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.masthead .meta {
+  margin-left: auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: right;
+  line-height: 1.9;
+}
+
+/* ── section rail ───────────────────────────────────────────────────── */
+.rail { position: sticky; top: 28px; }
+.rail h2 {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted); font-weight: 500;
+  margin: 0 0 12px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail a {
+  display: flex; gap: 9px;
+  color: var(--ink-2); text-decoration: none;
+  font-size: 13.5px; line-height: 1.35;
+  padding: 5px 8px; margin-left: -8px; border-radius: 5px;
+}
+.rail a:hover { background: var(--sunken); color: var(--ink); }
+.rail a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rail .n {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px; color: var(--muted); flex: none; padding-top: 1px;
+}
+
+/* ── content ────────────────────────────────────────────────────────── */
+.doc { min-width: 0; display: flex; flex-direction: column; gap: 52px; }
+section { scroll-margin-top: 24px; }
+
+h2.sec {
+  font-family: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 30px; font-weight: 600; letter-spacing: .2px;
+  margin: 0 0 18px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+  display: flex; align-items: baseline; gap: 12px;
+  text-wrap: balance;
+}
+h2.sec .n {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 14px; font-weight: 500; color: var(--accent);
+}
+h3 {
+  font-family: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
+  font-size: 21px; font-weight: 600; letter-spacing: .2px;
+  margin: 30px 0 10px; text-wrap: balance;
+}
+h4 {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--muted); font-weight: 500;
+  margin: 24px 0 8px;
+}
+p { margin: 0 0 14px; max-width: 68ch; }
+.doc > section > p:last-child { margin-bottom: 0; }
+ul, ol.list { margin: 0 0 14px; padding-left: 20px; max-width: 68ch; }
+li { margin-bottom: 6px; }
+strong { font-weight: 600; }
+code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: .87em;
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--ink);
+}
+a.inline { color: var(--accent-l); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── tables ─────────────────────────────────────────────────────────── */
+.scroller {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  margin-bottom: 16px;
+}
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+thead th {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); font-weight: 500;
+  background: var(--sunken);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--rule-2);
+}
+tbody tr:last-child td { border-bottom: none; }
+td.role, th.role {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12.5px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.num { font-variant-numeric: tabular-nums; }
+
+/* permission chips */
+.chip {
+  display: inline-block;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; font-weight: 500;
+  letter-spacing: .04em;
+  padding: 2px 8px; border-radius: 4px;
+  white-space: nowrap;
+}
+.chip.y { background: var(--yes-bg);  color: var(--yes); }
+.chip.n { background: var(--no-bg);   color: var(--no); }
+.chip.p { background: var(--warn-bg); color: var(--warn); }
+.chip.x { background: var(--stop-bg); color: var(--stop); }
+
+/* ── callouts ───────────────────────────────────────────────────────── */
+.note {
+  border-left: 3px solid var(--rule-2);
+  background: var(--surface);
+  padding: 14px 18px;
+  border-radius: 0 8px 8px 0;
+  margin: 0 0 16px;
+  font-size: 14.5px;
+}
+.note p { margin: 0; max-width: none; }
+.note p + p { margin-top: 10px; }
+.note.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.note.stop { border-left-color: var(--stop); background: var(--stop-bg); }
+.note.key  { border-left-color: var(--accent); background: var(--accent-b); }
+.note .lbl {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
+  display: block; margin-bottom: 5px; font-weight: 500;
+}
+.note.warn .lbl { color: var(--warn); }
+.note.stop .lbl { color: var(--stop); }
+.note.key  .lbl { color: var(--accent-l); }
+.note:not(.warn):not(.stop):not(.key) .lbl { color: var(--muted); }
+
+/* ── role cards ─────────────────────────────────────────────────────── */
+.roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(255px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.rc {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+.rc .nm {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px; font-weight: 600;
+  margin-bottom: 3px;
+}
+.rc .who { font-size: 12.5px; color: var(--muted); margin-bottom: 12px; }
+.rc dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+.rc dt {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); padding-top: 3px;
+}
+.rc dd { margin: 0; }
+
+/* ── steps ──────────────────────────────────────────────────────────── */
+ol.steps { list-style: none; counter-reset: s; margin: 0 0 16px; padding: 0; max-width: 68ch; }
+ol.steps > li {
+  counter-increment: s;
+  position: relative;
+  padding-left: 34px;
+  margin-bottom: 12px;
+}
+ol.steps > li::before {
+  content: counter(s);
+  position: absolute; left: 0; top: 1px;
+  width: 22px; height: 22px;
+  border: 1px solid var(--rule-2);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; color: var(--accent-l);
+  background: var(--surface);
+}
+
+/* ── field lists ────────────────────────────────────────────────────── */
+.fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; max-width: none; }
+.fields li {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 3px 8px;
+  margin: 0;
+}
+
+footer {
+  grid-column: 1 / -1;
+  margin-top: 64px; padding-top: 20px;
+  border-top: 1px solid var(--rule);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px; color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 8px 28px;
+}
+
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .rail { position: static; margin-bottom: 40px; }
+  .rail ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0; }
+  .masthead .meta { margin-left: 0; text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="mark">TX</div>
+    <div>
+      <h1>O&amp;M Scheduler Handbook</h1>
+      <div class="sub">TAGEX Energy &middot; Site Visit Scheduler &middot; Staff &amp; Administrator Guide</div>
+    </div>
+    <div class="meta">
+      tagex-merged-om-scheduler.vercel.app<br>
+      Four roles &middot; Three screens<br>
+      Revised 1 September 2026
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Sections">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#s1"><span class="n">1</span><span>Before you start</span></a></li>
+      <li><a href="#s2"><span class="n">2</span><span>Signing in</span></a></li>
+      <li><a href="#s3"><span class="n">3</span><span>The three screens</span></a></li>
+      <li><a href="#s4"><span class="n">4</span><span>How access works</span></a></li>
+      <li><a href="#s5"><span class="n">5</span><span>What each role sees</span></a></li>
+      <li><a href="#s6"><span class="n">6</span><span>The permission matrix</span></a></li>
+      <li><a href="#s7"><span class="n">7</span><span>Hidden fields</span></a></li>
+      <li><a href="#s8"><span class="n">8</span><span>Administrator guide</span></a></li>
+      <li><a href="#s9"><span class="n">9</span><span>Rules that cannot be overridden</span></a></li>
+      <li><a href="#s10"><span class="n">10</span><span>Troubleshooting</span></a></li>
+    </ol>
+  </nav>
+
+  <main class="doc">
+
+    <!-- ═══════════════════════════════════════════════ 1 -->
+    <section id="s1">
+      <h2 class="sec"><span class="n">1</span> Before you start</h2>
+
+      <p>The Site Visit Scheduler is where O&amp;M work is planned: the calendar of technician
+      visits, the workload view, and the O&amp;M ticket board. It reads and writes live Airtable
+      data, so anything you change here is immediately real.</p>
+
+      <h3>You do not need an Airtable account</h3>
+      <p>Earlier versions asked each person to paste an Airtable token into the page. That is
+      gone. You sign in with an email address and a password, and the server holds the only
+      Airtable credential. Nothing about your Airtable access matters any more — only the role
+      an administrator gave you.</p>
+
+      <div class="note key">
+        <span class="lbl">One account, two applications</span>
+        <p>The scheduler and the Delivery Note app share the same accounts and the same four
+        roles. If you can sign in to one, the same email and password work on the other.</p>
+        <p>You do sign in <strong>separately at each address</strong>, because a browser will not
+        carry a session between two different websites. That is a browser rule, not a setting
+        anyone can change.</p>
+      </div>
+
+      <h4>What you need</h4>
+      <ul>
+        <li>The web address, from your administrator</li>
+        <li>Your work email address</li>
+        <li>A password — either one you set from an invitation, or a temporary one an
+            administrator gave you</li>
+      </ul>
+      <p>Any current browser works. There is nothing to install.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 2 -->
+    <section id="s2">
+      <h2 class="sec"><span class="n">2</span> Signing in</h2>
+
+      <h3>Your first time</h3>
+      <ol class="steps">
+        <li>Open the address. The sign-in panel appears over the page.</li>
+        <li>Enter your email address and password, then choose <strong>Sign in</strong>.</li>
+        <li>If you were given a temporary password, you are asked to set your own straight
+            away. You cannot skip this, and the temporary one stops working once you do.</li>
+        <li>The scheduler loads on the Calendar screen. Your name and role appear at the top
+            right.</li>
+      </ol>
+
+      <h3>If you forget your password</h3>
+      <p>Choose <strong>Forgot password?</strong> on the sign-in panel and enter your email. If
+      that address has an account, a reset link is sent to it.</p>
+
+      <div class="note">
+        <span class="lbl">Why the message never confirms your address</span>
+        <p>The screen says the same thing whether or not the address has an account, and a
+        wrong password gives the same message as an unknown email. That is deliberate: it stops
+        an outsider using the sign-in page to work out who has accounts.</p>
+      </div>
+
+      <h3>Lockout, sessions and timeouts</h3>
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr><th>Rule</th><th>Setting</th><th>What it means for you</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Failed sign-ins</td>
+              <td class="num">5 attempts</td>
+              <td>The account locks for 15 minutes. Waiting clears it; no administrator needed.</td>
+            </tr>
+            <tr>
+              <td>Session length</td>
+              <td class="num">8 hours</td>
+              <td>You are signed out after eight hours, whatever you are doing.</td>
+            </tr>
+            <tr>
+              <td>Idle timeout</td>
+              <td class="num">30 minutes</td>
+              <td>Leave the tab untouched for half an hour and you must sign in again.</td>
+            </tr>
+            <tr>
+              <td>Two-factor code</td>
+              <td>Off</td>
+              <td>Email and password only. An administrator can switch this on for Admins.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>Use <strong>Log out</strong> when you finish on a shared machine. It ends the session on
+      the server, not just in your browser, so the tab cannot be reopened into your account.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 3 -->
+    <section id="s3">
+      <h2 class="sec"><span class="n">3</span> The three screens</h2>
+
+      <p>The tabs at the top left switch between three views of the same O&amp;M data. Which of
+      them you can use depends on your role — see section 5.</p>
+
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr><th>Screen</th><th>What it is for</th><th>What you can do</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="role">Calendar</td>
+              <td>Scheduled site visits by Month, Week or Day.</td>
+              <td>Open a visit to see its detail. Use <strong>+ Schedule Site Visit</strong> to
+                  add one. Filter by technician, status or owner category, or search by job
+                  card, site or client.</td>
+            </tr>
+            <tr>
+              <td class="role">Workload</td>
+              <td>How visits are distributed across technicians and time.</td>
+              <td>Spot who is overloaded and where there is space before you book more work.</td>
+            </tr>
+            <tr>
+              <td class="role">O&amp;M Tickets</td>
+              <td>The job card board — maintenance and callout work.</td>
+              <td>Open a job card, read its history, add notes, and update status where your role
+                  allows it.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>The green dot beside <strong>Refresh</strong> shows the connection is live, how many
+      visits are loaded, and the time of the last update. The view also refreshes on its own
+      while the tab is open.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 4 -->
+    <section id="s4">
+      <h2 class="sec"><span class="n">4</span> How access works</h2>
+
+      <p>Your role controls three separate things. All three apply at once, and each can only
+      narrow what the previous one allowed.</p>
+
+      <h3>Screens — which parts of the app exist for you</h3>
+      <p>A role that has no site visits does not get an empty calendar; it gets a short
+      explanation instead. Nothing is shown greyed-out or teasing.</p>
+
+      <h3>Records — which rows you can see</h3>
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr><th>Scope</th><th>You see</th><th>Matched on</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="role">All Records</td>
+              <td>Every visit and job card in the O&amp;M base.</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="role">Assigned Only</td>
+              <td>Only work assigned to you.</td>
+              <td>Site visits match <code>Technician Email</code>; job cards match
+                  <code>Assigned To (Email)</code>, against your sign-in address.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note warn">
+        <span class="lbl">If assigned work is missing</span>
+        <p>A visit only reaches a technician on <strong>Assigned Only</strong> if the record's
+        <code>Technician Email</code> exactly matches their sign-in address. A blank or
+        mistyped email means the visit is invisible to them — the commonest cause of "my
+        calendar is empty".</p>
+      </div>
+
+      <h3>Fields — which columns you can read and change</h3>
+      <p>Even inside a record you can open, individual fields can be hidden or read-only.
+      Financial columns on a job card are the main example. Section 7 lists exactly which.</p>
+
+      <div class="note">
+        <span class="lbl">Hidden means absent</span>
+        <p>A field your role cannot read is removed by the server before the page receives it.
+        It is not merely hidden by the screen — it never arrives, so it cannot appear in a
+        search, an export, or by inspecting the page.</p>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 5 -->
+    <section id="s5">
+      <h2 class="sec"><span class="n">5</span> What each role sees</h2>
+
+      <div class="roles">
+        <article class="rc">
+          <div class="nm">Admin / Director</div>
+          <div class="who">Full control, including accounts</div>
+          <dl>
+            <dt>Screens</dt><dd>All three</dd>
+            <dt>Records</dt><dd>All records</dd>
+            <dt>Can delete</dt><dd><span class="chip y">Yes</span></dd>
+            <dt>Can export</dt><dd><span class="chip y">Yes</span></dd>
+            <dt>Admin panel</dt><dd><span class="chip y">Yes</span></dd>
+          </dl>
+        </article>
+
+        <article class="rc">
+          <div class="nm">Operations / Project Manager</div>
+          <div class="who">Plans and runs the work</div>
+          <dl>
+            <dt>Screens</dt><dd>All three</dd>
+            <dt>Records</dt><dd>All records</dd>
+            <dt>Can delete</dt><dd><span class="chip n">No</span></dd>
+            <dt>Can export</dt><dd><span class="chip y">Yes</span></dd>
+            <dt>Admin panel</dt><dd><span class="chip n">No</span></dd>
+          </dl>
+        </article>
+
+        <article class="rc">
+          <div class="nm">Technician / Field</div>
+          <div class="who">Does the visits</div>
+          <dl>
+            <dt>Screens</dt><dd>All three</dd>
+            <dt>Records</dt><dd><span class="chip p">Assigned only</span></dd>
+            <dt>Can delete</dt><dd><span class="chip n">No</span></dd>
+            <dt>Can export</dt><dd><span class="chip n">No</span></dd>
+            <dt>Admin panel</dt><dd><span class="chip n">No</span></dd>
+          </dl>
+        </article>
+
+        <article class="rc">
+          <div class="nm">Warehouse / Stores</div>
+          <div class="who">Stock and deliveries</div>
+          <dl>
+            <dt>Screens</dt><dd><span class="chip x">None here</span></dd>
+            <dt>Records</dt><dd>—</dd>
+            <dt>Can delete</dt><dd><span class="chip n">No</span></dd>
+            <dt>Can export</dt><dd><span class="chip n">Not here</span></dd>
+            <dt>Admin panel</dt><dd><span class="chip n">No</span></dd>
+          </dl>
+        </article>
+      </div>
+
+      <h3>Admin / Director</h3>
+      <p>Sees and does everything: all visits and job cards, all financial fields, deletion,
+      export, and the Admin panel for accounts, access levels and the audit log. This role
+      should be held by as few people as the business can manage.</p>
+
+      <h3>Operations / Project Manager</h3>
+      <p>The everyday planning role. Sees every visit and job card, creates and edits them,
+      and exports. Two limits: <strong>cannot delete anything</strong>, and cannot manage users
+      or change access levels. Ops can view documents up to Confidential but export only up to
+      Internal — so the most sensitive material can be read on screen and not carried out of
+      the system.</p>
+
+      <h3>Technician / Field</h3>
+      <p>Sees the calendar and tickets, but only work assigned to them. They can create and
+      edit their own visits and update job card progress. They <strong>cannot export at
+      all</strong>, cannot delete, and cannot see any financial field on a job card — no budget,
+      cost, project value or invoice.</p>
+      <p>On a job card a technician may change only four things: <code>Status</code>,
+      <code>Progress %</code>, <code>Site Status</code> and <code>Resource Status</code>. Every
+      other field is read-only for them, so field updates cannot disturb commercial data.</p>
+
+      <h3>Warehouse / Stores</h3>
+      <p>Has no site visits, so this application shows them a short panel reading
+      <em>"No access to the scheduler"</em> and nothing else. This is correct, not a fault.
+      Warehouse staff work in the Delivery Note app, where they have full access to their own
+      job.</p>
+
+      <div class="note">
+        <span class="lbl">If a Warehouse user needs the calendar</span>
+        <p>Do not work around it by sharing another person's sign-in. Ask an administrator to
+        change the role, or add site visit access to the Warehouse access level. Both are
+        recorded in the audit log; a shared password is not.</p>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 6 -->
+    <section id="s6">
+      <h2 class="sec"><span class="n">6</span> The permission matrix</h2>
+
+      <p>What each role may do, per area of the system. <span class="chip y">V</span> view,
+      <span class="chip y">C</span> create, <span class="chip y">E</span> edit,
+      <span class="chip y">D</span> delete, <span class="chip y">X</span> export.
+      <span class="chip n">—</span> means not permitted.</p>
+
+      <div class="scroller">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th class="role">Admin</th>
+              <th class="role">Ops / PM</th>
+              <th class="role">Technician</th>
+              <th class="role">Warehouse</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Site visits</strong><br><span style="color:var(--muted);font-size:13px">the Calendar</span></td>
+              <td><span class="chip y">V C E D X</span></td>
+              <td><span class="chip y">V C E X</span></td>
+              <td><span class="chip p">V C E · assigned only</span></td>
+              <td><span class="chip x">No access</span></td>
+            </tr>
+            <tr>
+              <td><strong>Job cards</strong><br><span style="color:var(--muted);font-size:13px">O&amp;M Tickets</span></td>
+              <td><span class="chip y">V C E D X</span></td>
+              <td><span class="chip y">V C E X</span></td>
+              <td><span class="chip p">V E · 4 fields writable</span></td>
+              <td><span class="chip p">V · no financials</span></td>
+            </tr>
+            <tr>
+              <td><strong>Workload</strong><br><span style="color:var(--muted);font-size:13px">dashboard</span></td>
+              <td><span class="chip y">V X</span></td>
+              <td><span class="chip y">V X</span></td>
+              <td><span class="chip p">V · own work</span></td>
+              <td><span class="chip y">V</span></td>
+            </tr>
+            <tr>
+              <td><strong>Clients</strong></td>
+              <td><span class="chip y">V C E D X</span></td>
+              <td><span class="chip y">V C E X</span></td>
+              <td><span class="chip p">V · limited fields</span></td>
+              <td><span class="chip p">V · no contact details</span></td>
+            </tr>
+            <tr>
+              <td><strong>People</strong><br><span style="color:var(--muted);font-size:13px">technician directory</span></td>
+              <td><span class="chip y">V C E D X</span></td>
+              <td><span class="chip y">V</span></td>
+              <td><span class="chip y">V</span></td>
+              <td><span class="chip p">V · no contact details</span></td>
+            </tr>
+            <tr>
+              <td><strong>Activity log</strong><br><span style="color:var(--muted);font-size:13px">notes on a job card</span></td>
+              <td><span class="chip y">V C X</span></td>
+              <td><span class="chip y">V C</span></td>
+              <td><span class="chip p">V C · own</span></td>
+              <td><span class="chip y">V C</span></td>
+            </tr>
+            <tr>
+              <td><strong>Documents</strong></td>
+              <td><span class="chip y">V C E D X</span><br><span style="color:var(--muted);font-size:12.5px">up to Restricted</span></td>
+              <td><span class="chip y">V C E X</span><br><span style="color:var(--muted);font-size:12.5px">view Confidential, export Internal</span></td>
+              <td><span class="chip p">V · Internal only</span></td>
+              <td><span class="chip p">V · Internal only</span></td>
+            </tr>
+            <tr>
+              <td><strong>User accounts</strong><br><span style="color:var(--muted);font-size:13px">the Admin panel</span></td>
+              <td><span class="chip y">Full</span></td>
+              <td><span class="chip n">—</span></td>
+              <td><span class="chip n">—</span></td>
+              <td><span class="chip n">—</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="lbl">Reading document sensitivity</span>
+        <p>Documents are labelled Public, Internal, Confidential or Restricted. A role has a
+        ceiling for viewing and a second, lower ceiling for exporting. An unlabelled document is
+        treated as <strong>Restricted</strong> — the most protected setting, not the least — so
+        forgetting to classify something never exposes it.</p>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 7 -->
+    <section id="s7">
+      <h2 class="sec"><span class="n">7</span> Hidden fields</h2>
+
+      <p>These are the exact columns each role cannot read. The server removes them before the
+      data leaves it, so they are absent rather than concealed.</p>
+
+      <h3>Technician — job cards</h3>
+      <p>Every commercial figure is withheld:</p>
+      <ul class="fields">
+        <li>Budget</li><li>Actual Cost</li><li>Project Value</li><li>Cost Exposure</li>
+        <li>Cost Variance %</li><li>Total BOM Value</li><li>Invoice</li>
+        <li>PDF: Financial Summary</li>
+      </ul>
+      <h4>And may write only</h4>
+      <ul class="fields">
+        <li>Status</li><li>Progress %</li><li>Site Status</li><li>Resource Status</li>
+      </ul>
+
+      <h3>Technician — clients</h3>
+      <p>Read-only, with the linked commercial history removed so one client record cannot be
+      used to browse unrelated work:</p>
+      <ul class="fields">
+        <li>Job Cards</li><li>Job Cards 2</li><li>Job Cards 3</li><li>Job Cards 4</li>
+        <li>Job Cards 5</li><li>Job Cards 6</li><li>Installation Category (from JCs)</li>
+        <li>Archived Sign-Offs</li><li>System Validation</li><li>Delivery Notes</li>
+      </ul>
+
+      <h3>Warehouse — job cards</h3>
+      <p>The same financial columns as the technician list above.</p>
+
+      <h3>Warehouse — contact details</h3>
+      <p>Warehouse staff can identify a client or a colleague but not contact them directly:</p>
+      <ul class="fields">
+        <li>Clients &middot; Contact Person</li><li>Clients &middot; Email</li>
+        <li>Clients &middot; Mobile Number</li><li>People &middot; Email</li>
+        <li>People &middot; Phone</li>
+      </ul>
+
+      <div class="note key">
+        <span class="lbl">Never returned, to anyone</span>
+        <p>Four fields are stripped from every response regardless of role, including Admin:
+        <code>Password Hash</code>, <code>MFA Secret</code>, <code>Invite Token Hash</code> and
+        <code>Password</code>. No screen, export or interface can reveal a password. If someone
+        forgets theirs it is reset, never looked up.</p>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 8 -->
+    <section id="s8">
+      <h2 class="sec"><span class="n">8</span> Administrator guide</h2>
+
+      <p>Administrators get an <strong>Admin</strong> button beside Log out. It opens a panel
+      with three tabs. Nobody else sees the button, and nobody else can reach what it does.</p>
+
+      <div class="note stop">
+        <span class="lbl">These changes affect both applications</span>
+        <p>The scheduler and the Delivery Note app share one set of accounts. Creating,
+        suspending or re-roling someone here changes them in <strong>both</strong> — there is no
+        scheduler-only user list. Do it once; do not create a second account for the same
+        person.</p>
+      </div>
+
+      <h3>8.1 Users</h3>
+      <p>The list shows everyone, filterable by status. Selecting a person opens their detail.</p>
+
+      <h4>Inviting someone</h4>
+      <ol class="steps">
+        <li>Choose <strong>Invite a user</strong>.</li>
+        <li>Enter their name, work email, job title and mobile.</li>
+        <li>Choose the access level — this is the decision that matters. See section 5.</li>
+        <li>Set the record scope: <strong>All Records</strong>, or <strong>Assigned Only</strong>
+            for a technician.</li>
+        <li>Choose <strong>Send invitation</strong>. They receive a link and set their own
+            password; you never see it.</li>
+      </ol>
+
+      <div class="note warn">
+        <span class="lbl">If email is not configured</span>
+        <p>Without a mail key set, the invitation is not sent — the link is written to the
+        server log instead. Send it to the person yourself, through a channel you trust. Do not
+        post it in a group chat: whoever opens it first sets the password.</p>
+      </div>
+
+      <h4>Account status</h4>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Status</th><th>Meaning</th><th>Use it when</th></tr></thead>
+          <tbody>
+            <tr><td class="role">Invited</td><td>Invitation sent, password not yet set. Cannot sign in.</td><td>Set automatically. It changes to Active on its own.</td></tr>
+            <tr><td class="role">Active</td><td>Normal working account.</td><td>The everyday state.</td></tr>
+            <tr><td class="role">Suspended</td><td>Blocked from signing in; record kept intact.</td><td>Someone is on leave, under investigation, or has lost a device.</td></tr>
+            <tr><td class="role">Disabled</td><td>Blocked permanently; record kept for the audit trail.</td><td>Someone has left. <strong>Use this rather than deleting.</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="lbl">Disable, do not delete</span>
+        <p>Deleting a user record breaks the audit trail: entries that name them lose the
+        person they refer to. <strong>Disabled</strong> stops all access just as firmly and keeps
+        the history readable. Changing status takes effect at their next request — combine it
+        with <strong>Revoke sessions</strong> to end access immediately.</p>
+      </div>
+
+      <h4>The two buttons on a user</h4>
+      <ul>
+        <li><strong>Force password reset</strong> — they keep their access but must set a new
+        password at their next sign-in. Use after a suspected shoulder-surf, a shared password,
+        or when someone has been told their password over the phone.</li>
+        <li><strong>Revoke sessions</strong> — signs them out everywhere immediately, on every
+        device. Use for a lost or stolen phone, or the moment someone leaves. The count on the
+        button is how many sessions are currently open.</li>
+      </ul>
+
+      <h4>Per-user overrides</h4>
+      <p>Below the role you can narrow a single person without creating a new access level:
+      restrict them to named clients or sites, set an approval limit in Rands, or grant the
+      restricted-documents flag. Overrides only ever <strong>tighten</strong> what the role
+      allows — they can never widen it.</p>
+
+      <h3>8.2 Access levels</h3>
+      <p>This tab edits what a whole role may do. A change here affects every person holding
+      that role, in both applications, immediately.</p>
+
+      <div class="note warn">
+        <span class="lbl">Change one thing at a time</span>
+        <p>Save, then sign in as somebody with that role and confirm the effect before changing
+        anything else. An access level edited in several places at once is very hard to unpick
+        when something stops working.</p>
+      </div>
+
+      <p>Anything not explicitly listed is denied. Removing a line does not loosen access — it
+      removes it. Adding a role or an area you have not tested is the one change worth making
+      outside working hours.</p>
+
+      <h3>8.3 Audit log</h3>
+      <p>Every security-significant action is recorded permanently: sign-ins and failures,
+      lockouts, password changes, permission edits, account changes, and every view of restricted
+      material. Search it by person or action, and <strong>Export CSV</strong> for a record.</p>
+      <p>Denied attempts are logged as well as allowed ones. A run of denials from one account
+      is worth asking about — usually it is someone confused about their role, occasionally it
+      is not.</p>
+
+      <h3>8.4 A monthly ten minutes</h3>
+      <ul>
+        <li>Filter users to <strong>Active</strong> and confirm every one still works here.</li>
+        <li>Check how many people hold <strong>Admin / Director</strong>. It should be a very
+            short list.</li>
+        <li>Skim the audit log for repeated failures or unfamiliar activity.</li>
+        <li>Confirm anyone who left is <strong>Disabled</strong> with sessions revoked.</li>
+      </ul>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 9 -->
+    <section id="s9">
+      <h2 class="sec"><span class="n">9</span> Rules that cannot be overridden</h2>
+
+      <p>These hold regardless of role, and regardless of what the screen appears to offer.
+      They are enforced on the server, where the browser cannot reach them.</p>
+
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Rule</th><th>What it means in practice</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>The browser holds no Airtable key</strong></td>
+              <td>One credential lives on the server. Your browser holds only a session cookie
+                  it cannot read, so nothing extractable from the page reaches Airtable.</td>
+            </tr>
+            <tr>
+              <td><strong>Anything unlisted is denied</strong></td>
+              <td>Access is granted by naming it. An area not listed in an access level is
+                  refused — no permission is ever inherited by accident.</td>
+            </tr>
+            <tr>
+              <td><strong>The screen is not the control</strong></td>
+              <td>Hiding a button is a courtesy. The same request sent by hand is refused just
+                  the same, because every request is re-checked against your role.</td>
+            </tr>
+            <tr>
+              <td><strong>Passwords are never recoverable</strong></td>
+              <td>Stored one-way only. Not visible to Admins, not in exports, not in email, not
+                  in the audit log. Forgotten passwords are reset.</td>
+            </tr>
+            <tr>
+              <td><strong>Out of scope reads as missing</strong></td>
+              <td>A record outside your scope returns "not found", not "not allowed", so the
+                  refusal itself cannot be used to confirm a record exists.</td>
+            </tr>
+            <tr>
+              <td><strong>Both outcomes are logged</strong></td>
+              <td>Refused attempts are recorded alongside successful ones, with who, what and
+                  when.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════ 10 -->
+    <section id="s10">
+      <h2 class="sec"><span class="n">10</span> Troubleshooting</h2>
+
+      <div class="scroller">
+        <table>
+          <thead><tr><th>What you see</th><th>What it means</th><th>What to do</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>"No access to the scheduler"</td>
+              <td>Your role has no site visits — normally Warehouse / Stores.</td>
+              <td>Correct for that role. If your job has changed, ask an administrator to change
+                  your access level.</td>
+            </tr>
+            <tr>
+              <td>Calendar is empty but colleagues see visits</td>
+              <td>You are on <strong>Assigned Only</strong> and nothing matches your address.</td>
+              <td>Ask for <code>Technician Email</code> on your visits to be checked against your
+                  sign-in address.</td>
+            </tr>
+            <tr>
+              <td>Costs and budgets missing on a job card</td>
+              <td>Working as intended for Technician and Warehouse.</td>
+              <td>Nothing. Ask an Ops/PM or Admin if you need a figure.</td>
+            </tr>
+            <tr>
+              <td>A field will not accept a change</td>
+              <td>It is read-only for your role. Technicians may write four job card fields.</td>
+              <td>Ask an Ops/PM to make the change.</td>
+            </tr>
+            <tr>
+              <td>"Invalid email or password"</td>
+              <td>Either one is wrong; the message never says which.</td>
+              <td>Retry carefully, then use <strong>Forgot password?</strong>. Stop before five
+                  attempts.</td>
+            </tr>
+            <tr>
+              <td>"Too many failed attempts"</td>
+              <td>Five failures; locked for 15 minutes.</td>
+              <td>Wait, then use the reset link. No administrator is needed.</td>
+            </tr>
+            <tr>
+              <td>Signed out unexpectedly</td>
+              <td>30 minutes idle, or the 8-hour limit, or an administrator revoked sessions.</td>
+              <td>Sign in again. If it repeats within minutes, tell an administrator.</td>
+            </tr>
+            <tr>
+              <td>Signed in here but not on the Delivery app</td>
+              <td>Normal — sessions do not cross between two addresses.</td>
+              <td>Sign in again at that address with the same details.</td>
+            </tr>
+            <tr>
+              <td>"Could not load the schedule"</td>
+              <td>The data did not load; the message says why.</td>
+              <td>Use <strong>Refresh</strong>. If it persists, send the exact wording to an
+                  administrator.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note stop">
+        <span class="lbl">Never do this</span>
+        <p>Do not share a password or sign in as someone else, even briefly and even to help.
+        Every action is recorded against the account that performed it, so borrowed access
+        attributes your work to another person and theirs to you — and it hands them whatever
+        your role can reach. If someone needs access, that is a two-minute change for an
+        administrator.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <span>TAGEX Energy &middot; O&amp;M Site Visit Scheduler</span>
+    <span>Four roles &middot; Server-enforced access control</span>
+    <span>Questions: your system administrator</span>
+  </footer>
+
+</div>

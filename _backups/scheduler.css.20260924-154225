@@ -1,0 +1,331 @@
+/* ============================================================================
+ * Scoped under .mod-scheduler by scripts/scope-css.js — originally generated, now edited
+ * by hand, because neither the generator nor its source survives: scripts/scope-css.js is not
+ * in this repo and the source below was in a temp directory that has since been cleared.
+ * Anything added here must be written already scoped, with the .mod-scheduler prefix.
+ * Source (gone): C:/Users/Raymond/AppData/Local/Temp/sched.css
+ *
+ * Every selector is prefixed with the container so the O&M scheduler's styles cannot
+ * leak into the delivery note app, and vice versa. :root became the container itself,
+ * so the scheduler's CSS custom properties still cascade correctly within its panel.
+ * ==========================================================================*/
+.mod-scheduler{
+    --bg:#0e0f11; --surface:#16181c; --card:#1c1f25; --accent:#f0a500;
+    --line:#2a2e36; --line2:#363b45; --text:#e9ecef; --muted:#8b919c; --muted2:#6a7079;
+    --ok:#3ecf8e; --warn:#f0a500; --bad:#ef5d5d; --info:#4aa3ff;
+    --r:10px; --shadow:0 8px 30px rgba(0,0,0,.45);
+    --fontd:"Barlow Semi Condensed",-apple-system,system-ui,sans-serif;
+    --fontb:"Inter",-apple-system,system-ui,sans-serif;
+  }
+  .mod-scheduler *{box-sizing:border-box}
+  .mod-scheduler{margin:0;height:100%}
+  .mod-scheduler{background:var(--bg);color:var(--text);font-family:var(--fontb);font-size:14px;-webkit-font-smoothing:antialiased}
+  .mod-scheduler a{color:var(--accent)}
+  .mod-scheduler button{font-family:inherit;cursor:pointer}
+  .mod-scheduler .hidden{display:none!important}
+
+  
+  /* ---------- Token gate ---------- */
+
+  .mod-scheduler .btn{background:var(--accent);color:#181400;border:none;padding:11px 16px;border-radius:8px;font-weight:600;font-size:13px;letter-spacing:.2px}
+  .mod-scheduler .btn:hover{filter:brightness(1.08)}
+  .mod-scheduler .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line2)}
+  .mod-scheduler .btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
+  .mod-scheduler .btn.sm{padding:7px 12px;font-size:12px}
+  .mod-scheduler .btn.danger{background:var(--bad);color:#fff}
+  .mod-scheduler .gate-err{color:var(--bad);font-size:12px;margin-top:10px;min-height:16px}
+
+  
+  /* ---------- Shell ---------- */
+
+
+  
+  .mod-scheduler #app{display:flex;flex-direction:column;height:100%}
+  .mod-scheduler header.topbar{display:flex;align-items:center;gap:14px;padding:12px 18px;background:var(--surface);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .mod-scheduler .brand{font-family:var(--fontd);font-weight:600;letter-spacing:.6px;font-size:18px;display:flex;align-items:center;gap:9px}
+  .mod-scheduler .brand .dot{width:10px;height:10px;border-radius:3px;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .mod-scheduler .brand b{color:var(--accent)}
+  .mod-scheduler nav.tabs{display:flex;gap:4px;margin-left:6px}
+  .mod-scheduler nav.tabs button{background:transparent;border:1px solid transparent;color:var(--muted);padding:8px 14px;border-radius:8px;font-size:13px;font-weight:500}
+  .mod-scheduler nav.tabs button.active{background:var(--card);color:var(--text);border-color:var(--line)}
+  .mod-scheduler nav.tabs button:hover{color:var(--text)}
+  .mod-scheduler .grow{flex:1}
+  .mod-scheduler .topbar .status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}
+  .mod-scheduler .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .mod-scheduler .pulse.bad{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .mod-scheduler #refreshBtn.spinning{pointer-events:none;opacity:.6}
+  .mod-scheduler #refreshBtn.spinning::before{content:"↻ ";display:inline-block;animation:spin .6s linear infinite}
+  .mod-scheduler #refreshBtn{transition:opacity .15s}
+
+  .mod-scheduler main{flex:1;overflow:auto;padding:18px}
+  .mod-scheduler main.om-mode{padding:0}
+  .mod-scheduler .view{max-width:1280px;margin:0 auto}
+
+  
+  /* ---------- Calendar toolbar ---------- */
+
+
+  
+  .mod-scheduler .cal-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+  .mod-scheduler .seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .mod-scheduler .seg button{background:transparent;border:none;color:var(--muted);padding:8px 14px;font-size:12.5px;font-weight:600;letter-spacing:.3px}
+  .mod-scheduler .seg button.active{background:var(--accent);color:#181400}
+  .mod-scheduler .navg{display:flex;align-items:center;gap:8px}
+  .mod-scheduler .navg button{width:34px;height:34px;border-radius:8px;background:var(--card);border:1px solid var(--line);color:var(--text);font-size:16px;line-height:1}
+  .mod-scheduler .navg button:hover{border-color:var(--accent);color:var(--accent)}
+  .mod-scheduler .period{font-family:var(--fontd);font-size:20px;font-weight:600;letter-spacing:.4px;min-width:210px}
+  .mod-scheduler .filters{display:flex;gap:8px;flex-wrap:wrap}
+  .mod-scheduler select.f, .mod-scheduler input.f{background:var(--card);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:8px;font-size:12.5px}
+  .mod-scheduler select.f:focus, .mod-scheduler input.f:focus{outline:none;border-color:var(--accent)}
+
+  
+  /* ---------- Month grid ---------- */
+
+
+  
+  .mod-scheduler .month{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .mod-scheduler .dow{display:grid;grid-template-columns:repeat(7,1fr);background:var(--surface);border-bottom:1px solid var(--line)}
+  .mod-scheduler .dow div{padding:9px 10px;font-size:11px;font-weight:700;letter-spacing:.6px;color:var(--muted);text-transform:uppercase}
+  .mod-scheduler .weeks{display:grid;grid-template-rows:repeat(6,minmax(96px,auto))}
+  .mod-scheduler .week{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--line)}
+  .mod-scheduler .week:last-child{border-bottom:none}
+  .mod-scheduler .cell{border-right:1px solid var(--line);padding:6px;min-height:96px;position:relative;display:flex;flex-direction:column;gap:3px;cursor:pointer;transition:background .12s}
+  .mod-scheduler .cell:last-child{border-right:none}
+  .mod-scheduler .cell:hover{background:#202329}
+  .mod-scheduler .cell.dim{background:#131519}
+  .mod-scheduler .cell.dim .dnum{color:var(--muted2)}
+  .mod-scheduler .cell.today .dnum{background:var(--accent);color:#181400;border-radius:6px;padding:1px 7px;font-weight:700}
+  .mod-scheduler .dnum{font-size:12.5px;color:var(--muted);font-weight:600;align-self:flex-start}
+  .mod-scheduler .ev{font-size:11px;padding:3px 6px;border-radius:5px;color:#0c0d0f;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid rgba(0,0,0,.25);cursor:grab}
+  .mod-scheduler .ev:active{cursor:grabbing}
+  .mod-scheduler .ev .t{font-weight:700;opacity:.85;margin-right:4px}
+  .mod-scheduler .ev.drag-over, .mod-scheduler .cell.drop{outline:2px dashed var(--accent);outline-offset:-2px}
+  .mod-scheduler .more{font-size:10.5px;color:var(--muted);font-weight:600;padding-left:4px}
+
+  
+  /* ---------- Week / Day ---------- */
+
+
+  
+  .mod-scheduler .timegrid{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .mod-scheduler .tg-head{display:grid;border-bottom:1px solid var(--line);background:var(--surface)}
+  .mod-scheduler .tg-head .corner{border-right:1px solid var(--line)}
+  .mod-scheduler .tg-head .col{padding:8px;text-align:center;border-right:1px solid var(--line);font-size:12px}
+  .mod-scheduler .tg-head .col:last-child{border-right:none}
+  .mod-scheduler .tg-head .col .d{font-family:var(--fontd);font-size:16px;font-weight:600}
+  .mod-scheduler .tg-head .col.today .d{color:var(--accent)}
+  .mod-scheduler .tg-head .col .w{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px}
+  .mod-scheduler .tg-body{position:relative;max-height:62vh;overflow:auto}
+  .mod-scheduler .tg-grid{display:grid;position:relative}
+  .mod-scheduler .hour-col{border-right:1px solid var(--line)}
+  .mod-scheduler .hour-lbl{height:52px;font-size:10.5px;color:var(--muted2);text-align:right;padding:2px 6px 0;border-bottom:1px solid var(--line)}
+  .mod-scheduler .day-col{border-right:1px solid var(--line);position:relative}
+  .mod-scheduler .day-col:last-child{border-right:none}
+  .mod-scheduler .slot{height:52px;border-bottom:1px solid var(--line);cursor:pointer}
+  .mod-scheduler .slot:hover{background:#202329}
+  .mod-scheduler .tev{position:absolute;left:4px;right:4px;border-radius:6px;padding:4px 7px;color:#0c0d0f;font-weight:600;font-size:11px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.35);border-left:3px solid rgba(0,0,0,.3);cursor:pointer;z-index:2}
+  .mod-scheduler .tev .ttime{font-size:10px;opacity:.85;font-weight:700}
+  .mod-scheduler .tev.conflict{outline:2px solid var(--bad)}
+
+  
+  /* ---------- Dashboard ---------- */
+
+
+  
+  .mod-scheduler .grid-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:18px}
+  .mod-scheduler .kcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;position:relative;overflow:hidden}
+  .mod-scheduler .kcard::after{content:"";position:absolute;right:-20px;top:-20px;width:70px;height:70px;border-radius:50%;background:radial-gradient(circle,rgba(240,165,0,.12),transparent 70%)}
+  .mod-scheduler .kcard .label{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700}
+  .mod-scheduler .kcard .val{font-family:var(--fontd);font-size:34px;font-weight:600;margin-top:6px;line-height:1}
+  .mod-scheduler .kcard .sub{font-size:11.5px;color:var(--muted2);margin-top:4px}
+  .mod-scheduler .kcard.accent .val{color:var(--accent)}
+  .mod-scheduler .kcard.bad .val{color:var(--bad)}
+  .mod-scheduler .panel{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:18px}
+  .mod-scheduler .panel h3{font-family:var(--fontd);margin:0 0 14px;font-size:16px;font-weight:600;letter-spacing:.4px;display:flex;align-items:center;gap:8px}
+  .mod-scheduler .panel h3 .bar{width:4px;height:16px;background:var(--accent);border-radius:2px}
+  .mod-scheduler .twrap{overflow:auto}
+  .mod-scheduler table{width:100%;border-collapse:collapse;font-size:13px}
+  .mod-scheduler th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;border-bottom:1px solid var(--line)}
+  .mod-scheduler td{padding:9px 10px;border-bottom:1px solid var(--line);color:var(--text)}
+  .mod-scheduler tr:last-child td{border-bottom:none}
+  .mod-scheduler .barcell{display:flex;align-items:center;gap:8px}
+  .mod-scheduler .bar-track{flex:1;height:7px;background:#0e0f11;border-radius:4px;overflow:hidden;min-width:60px}
+  .mod-scheduler .bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),#ffce5a);border-radius:4px}
+  .mod-scheduler .chip{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;color:#0c0d0f}
+  .mod-scheduler .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px}
+  .mod-scheduler .legend span{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+  .mod-scheduler .legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  
+  /* ---------- Modal ---------- */
+
+
+  
+  .mod-scheduler .modal-bg{position:fixed;inset:0;background:rgba(5,6,8,.7);backdrop-filter:blur(3px);z-index:120;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
+  .mod-scheduler .modal{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line2);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+  .mod-scheduler .modal .mh{display:flex;align-items:center;gap:10px;padding:16px 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+  .mod-scheduler .modal .mh .ic{width:34px;height:34px;border-radius:9px;background:var(--accent);color:#181400;display:flex;align-items:center;justify-content:center;font-size:18px}
+  .mod-scheduler .modal .mh h2{font-family:var(--fontd);font-size:18px;font-weight:600;margin:0;letter-spacing:.4px}
+  .mod-scheduler .modal .mh .x{margin-left:auto;background:transparent;border:none;color:var(--muted);font-size:22px;line-height:1}
+  .mod-scheduler .modal .mh .x:hover{color:var(--text)}
+  .mod-scheduler .mbody{padding:20px;display:flex;flex-direction:column;gap:14px}
+  .mod-scheduler .fld label{display:block;font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+  .mod-scheduler .fld input, .mod-scheduler .fld select, .mod-scheduler .fld textarea{width:100%;background:#0e0f11;border:1px solid var(--line2);color:var(--text);padding:10px 12px;border-radius:8px;font-size:13px;font-family:inherit}
+  .mod-scheduler .fld textarea{resize:vertical;min-height:64px}
+  .mod-scheduler .fld input:focus, .mod-scheduler .fld select:focus, .mod-scheduler .fld textarea:focus{outline:none;border-color:var(--accent)}
+  .mod-scheduler .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .mod-scheduler .multi{max-height:120px;overflow:auto;border:1px solid var(--line2);border-radius:8px;background:#0e0f11;padding:6px}
+  .mod-scheduler .multi label{display:flex;align-items:center;gap:8px;padding:5px 6px;font-size:13px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--text);cursor:pointer;border-radius:6px}
+  .mod-scheduler .multi label:hover{background:#181b20}
+  .mod-scheduler .multi input{width:auto}
+  .mod-scheduler .conflict-warn{background:rgba(239,93,93,.12);border:1px solid var(--bad);color:#ffb4b4;padding:10px 12px;border-radius:8px;font-size:12.5px;display:flex;gap:8px;align-items:flex-start}
+  .mod-scheduler .mfoot{display:flex;gap:10px;padding:16px 20px;border-top:1px solid var(--line);background:var(--surface)}
+  .mod-scheduler .mfoot .grow{flex:1}
+
+  
+  /* ---------- Detail popover ---------- */
+
+
+  
+  .mod-scheduler .detail-row{display:flex;gap:10px;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .mod-scheduler .detail-row .k{color:var(--muted);min-width:120px;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+  .mod-scheduler .detail-row .v{color:var(--text)}
+
+  
+  /* ---------- toast ---------- */
+
+
+  
+  .mod-scheduler #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--card);border:1px solid var(--line2);color:var(--text);padding:12px 18px;border-radius:10px;box-shadow:var(--shadow);font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:300;border-left:4px solid var(--accent)}
+  .mod-scheduler #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .mod-scheduler #toast.bad{border-left-color:var(--bad)}
+  .mod-scheduler #toast.ok{border-left-color:var(--ok)}
+
+  .mod-scheduler .loading{display:flex;align-items:center;justify-content:center;gap:12px;padding:60px;color:var(--muted);font-size:14px}
+  .mod-scheduler .spin{width:20px;height:20px;border:2.5px solid var(--line2);border-top-color:var(--accent);border-radius:50%;animation:sp 0.7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  @media(max-width:720px){
+    .mod-scheduler main{padding:12px}
+    .mod-scheduler .period{font-size:17px;min-width:auto}
+    .mod-scheduler nav.tabs{order:3;width:100%;justify-content:space-between}
+    .mod-scheduler nav.tabs button{flex:1;padding:8px 6px;font-size:12px}
+    .mod-scheduler .two{grid-template-columns:1fr}
+    .mod-scheduler .weeks{grid-template-rows:repeat(6,minmax(64px,auto))}
+    .mod-scheduler .cell{min-height:64px;padding:3px}
+    .mod-scheduler .ev .label-txt{display:none}
+    .mod-scheduler .ev .t{margin:0}
+    .mod-scheduler .cal-toolbar{gap:8px}
+    .mod-scheduler .filters{width:100%}
+    .mod-scheduler .filters select.f, .mod-scheduler .filters input.f{flex:1}
+  }
+
+  
+  /* ── O&M TICKETS PANEL ── */
+
+
+  
+  .mod-scheduler #view-omtickets main{display:none}
+  .mod-scheduler .om-view{display:none;} .mod-scheduler .om-view.active{display:block;}
+  .mod-scheduler .om-slbl{font-family:monospace;font-size:9px;font-weight:600;color:var(--accent);letter-spacing:.14em;text-transform:uppercase;display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+  .mod-scheduler .om-slbl::after{content:'';flex:1;height:1px;background:var(--line);}
+  .mod-scheduler .om-stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;}
+  .mod-scheduler .om-sv{font-family:monospace;font-size:24px;font-weight:600;line-height:1;margin-bottom:3px;}
+  .mod-scheduler .om-sl{font-family:monospace;font-size:9px;color:var(--muted);text-transform:uppercase;}
+  .mod-scheduler .om-jc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:7px;cursor:pointer;transition:border-color .15s;}
+  .mod-scheduler .om-jc:hover{border-color:var(--accent);}
+  .mod-scheduler .om-jcref{font-family:monospace;font-size:9px;color:var(--accent);margin-bottom:2px;}
+  .mod-scheduler .om-jcttl{font-size:13px;font-weight:500;line-height:1.3;margin-bottom:6px;}
+  .mod-scheduler .om-jcmeta{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:4px;}
+  .mod-scheduler .om-jcfoot{display:flex;justify-content:space-between;align-items:center;margin-top:4px;}
+  .mod-scheduler .om-jccli{font-family:monospace;font-size:9px;color:var(--muted);}
+  .mod-scheduler .om-sb{font-family:monospace;font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;}
+  .mod-scheduler .s-new{background:rgba(170,85,247,.14);color:#b06cf8;} .mod-scheduler .s-prog{background:rgba(240,165,0,.14);color:var(--accent);}
+  .mod-scheduler .s-mon{background:rgba(249,115,22,.14);color:#fb923c;} .mod-scheduler .s-done{background:rgba(62,207,142,.14);color:var(--ok);}
+  .mod-scheduler .s-closed{background:rgba(139,145,156,.12);color:var(--muted);} .mod-scheduler .s-other{background:rgba(74,163,255,.14);color:var(--info);}
+  .mod-scheduler .om-pb{font-family:monospace;font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;}
+  .mod-scheduler .p-crit{background:rgba(239,93,93,.14);color:var(--bad);} .mod-scheduler .p-high{background:rgba(240,165,0,.14);color:var(--warn);}
+  .mod-scheduler .p-med{background:rgba(74,163,255,.14);color:var(--info);} .mod-scheduler .p-low{background:rgba(139,145,156,.1);color:var(--muted2);}
+  .mod-scheduler .om-ov{font-family:monospace;font-size:9px;color:var(--bad);font-weight:600;}
+  .mod-scheduler .om-own{font-family:monospace;font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;background:rgba(240,165,0,.15);color:#f0a500;border:1px solid rgba(240,165,0,.3);}
+  .mod-scheduler .om-av{width:18px;height:18px;border-radius:50%;background:rgba(240,165,0,.12);border:1px solid var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:7px;font-weight:600;color:var(--accent);}
+  .mod-scheduler .om-chip{font-family:monospace;font-size:10px;padding:5px 10px;border:1px solid var(--line2);border-radius:20px;cursor:pointer;white-space:nowrap;color:var(--muted);background:transparent;}
+  .mod-scheduler .om-chip.on{border-color:var(--accent);color:var(--accent);background:rgba(240,165,0,.1);}
+  .mod-scheduler .om-fcard{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px;}
+  .mod-scheduler .om-fttl{font-family:monospace;font-size:9px;font-weight:600;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;}
+  .mod-scheduler .om-fld{margin-bottom:10px;}
+  .mod-scheduler .om-fld label{display:block;font-family:monospace;font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
+  .mod-scheduler .om-fld input, .mod-scheduler .om-fld select, .mod-scheduler .om-fld textarea{width:100%;background:#0e0f11;border:1px solid var(--line2);border-radius:8px;color:var(--text);font-family:inherit;font-size:13px;padding:9px 11px;outline:none;}
+  .mod-scheduler .om-fld input:focus, .mod-scheduler .om-fld select:focus, .mod-scheduler .om-fld textarea:focus{border-color:var(--accent);}
+  .mod-scheduler .om-priopt{padding:8px 4px;border:1px solid var(--line2);border-radius:8px;text-align:center;font-family:monospace;font-size:10px;font-weight:600;cursor:pointer;}
+  .mod-scheduler .om-priopt.pnorm{color:var(--info);} .mod-scheduler .om-priopt.pnorm.sel{background:rgba(74,163,255,.12);border-color:var(--info);}
+  .mod-scheduler .om-priopt.phigh{color:var(--accent);} .mod-scheduler .om-priopt.phigh.sel{background:rgba(240,165,0,.12);border-color:var(--accent);}
+  .mod-scheduler .om-priopt.purg{color:var(--bad);} .mod-scheduler .om-priopt.purg.sel{background:rgba(239,93,93,.12);border-color:var(--bad);}
+  .mod-scheduler .om-priopt.plow{color:var(--muted);} .mod-scheduler .om-priopt.plow.sel{background:rgba(139,145,156,.14);border-color:var(--muted);}
+  /* How the fault reached us. Same chip as priority, but taller: it is tapped on a phone,
+     usually one-handed and often while the caller is still talking. 44px is the floor. */
+  .mod-scheduler .om-chanopt{
+    min-height:44px;display:flex;align-items:center;justify-content:center;
+    padding:8px 6px;border:1px solid var(--line2);border-radius:8px;text-align:center;
+    font-family:monospace;font-size:10px;font-weight:600;color:var(--muted);cursor:pointer;
+    line-height:1.2;
+  }
+  .mod-scheduler .om-chanopt:hover{border-color:var(--accent);color:var(--text);}
+  .mod-scheduler .om-chanopt.sel{background:rgba(240,165,0,.12);border-color:var(--accent);color:var(--accent);}
+  .mod-scheduler .om-jcprev{display:none;background:#0e0f11;border:1px solid var(--line2);border-radius:8px;padding:9px 11px;margin-top:-4px;font-family:monospace;font-size:10px;color:var(--muted);line-height:1.8;}
+  .mod-scheduler .om-ibox{background:rgba(240,165,0,.1);border:1px solid rgba(240,165,0,.2);border-radius:8px;padding:8px 12px;font-family:monospace;font-size:9px;color:var(--accent);margin-bottom:10px;line-height:1.6;}
+  .mod-scheduler .om-ok{background:rgba(62,207,142,.1);border:1px solid rgba(62,207,142,.25);border-radius:8px;padding:8px 12px;font-family:monospace;font-size:9px;color:var(--ok);margin-bottom:10px;}
+  .mod-scheduler .om-err{background:rgba(239,93,93,.1);border:1px solid rgba(239,93,93,.25);border-radius:8px;padding:8px 12px;font-family:monospace;font-size:9px;color:var(--bad);margin-bottom:10px;}
+  .mod-scheduler .om-tab{flex:1;padding:7px;text-align:center;font-family:monospace;font-size:10px;font-weight:600;border-radius:6px;cursor:pointer;color:var(--muted);}
+  .mod-scheduler .om-tab.on{background:var(--accent);color:#181400;}
+  .mod-scheduler .om-tl{padding-left:16px;position:relative;}
+  .mod-scheduler .om-tl::before{content:'';position:absolute;left:4px;top:0;bottom:0;width:1px;background:var(--line);}
+  .mod-scheduler .om-tli{position:relative;margin-bottom:12px;}
+  .mod-scheduler .om-tld{position:absolute;left:-14px;top:3px;width:8px;height:8px;border-radius:50%;border:2px solid var(--accent);background:var(--bg);}
+  .mod-scheduler .om-tld.g{border-color:var(--ok);}
+  .mod-scheduler .om-tlt{font-family:monospace;font-size:9px;color:var(--muted2);}
+  .mod-scheduler .om-tltx{font-size:11px;color:var(--muted);line-height:1.5;margin-top:2px;}
+  .mod-scheduler .om-nr{display:flex;gap:7px;margin-top:10px;}
+  .mod-scheduler .om-nr input{flex:1;background:#0e0f11;border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:13px;padding:9px 11px;outline:none;}
+  .mod-scheduler .om-nr input:focus{border-color:var(--accent);}
+  .mod-scheduler .om-nrsend{background:var(--accent);color:#181400;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;font-family:monospace;font-size:11px;font-weight:600;}
+  .mod-scheduler .om-clic{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:11px 14px;margin-bottom:7px;}
+  .mod-scheduler .om-bhdr{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 11px;border-radius:8px;font-family:monospace;font-size:10px;font-weight:600;}
+  .mod-scheduler .om-bcnt{margin-left:auto;border-radius:20px;padding:0 8px;font-size:9px;color:#fff;min-width:20px;text-align:center;}
+  .mod-scheduler .b-crit{background:rgba(239,93,93,.12);border:1px solid rgba(239,93,93,.3);color:var(--bad);}
+  .mod-scheduler .b-warn{background:rgba(240,165,0,.12);border:1px solid rgba(240,165,0,.3);color:var(--accent);}
+  .mod-scheduler .b-prog{background:rgba(74,163,255,.12);border:1px solid rgba(74,163,255,.25);color:var(--info);}
+  .mod-scheduler .b-pend{background:rgba(62,207,142,.12);border:1px solid rgba(62,207,142,.3);color:var(--ok);}
+  .mod-scheduler .b-crit .om-bcnt{background:var(--bad);} .mod-scheduler .b-warn .om-bcnt{background:var(--accent);color:#0a0a0b;}
+  .mod-scheduler .b-prog .om-bcnt{background:var(--info);} .mod-scheduler .b-pend .om-bcnt{background:var(--ok);}
+  .mod-scheduler .om-trie{font-family:monospace;font-size:9px;color:var(--muted2);padding:8px 11px;border:1px dashed var(--line);border-radius:8px;text-align:center;}
+  .mod-scheduler .om-acts{display:flex;gap:5px;overflow-x:auto;padding-bottom:4px;margin-bottom:12px;}
+  .mod-scheduler .om-act{font-family:monospace;font-size:10px;padding:7px 12px;border:1px solid var(--line2);border-radius:20px;cursor:pointer;white-space:nowrap;color:var(--muted);background:var(--surface);}
+  .mod-scheduler .om-act.go{border-color:var(--accent);color:var(--accent);background:rgba(240,165,0,.1);}
+  .mod-scheduler .om-act.ok{border-color:var(--ok);color:var(--ok);background:rgba(62,207,142,.1);}
+  .mod-scheduler .om-act.cl{border-color:var(--muted2);color:var(--muted2);}
+  .mod-scheduler .om-act.bad{border-color:var(--bad);color:var(--bad);background:rgba(239,93,93,.1);}
+  .mod-scheduler .om-act.mon{border-color:var(--warn);color:var(--warn);background:rgba(240,165,0,.08);}
+  .mod-scheduler .om-df{margin-bottom:11px;}
+  .mod-scheduler .om-df label{display:block;font-family:monospace;font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px;}
+  .mod-scheduler .om-pbw{height:5px;background:var(--line2);border-radius:3px;overflow:hidden;}
+  .mod-scheduler .om-pbf{height:5px;background:var(--accent);border-radius:3px;transition:width .3s;}
+  .mod-scheduler .om-empty{text-align:center;padding:36px 20px;color:var(--muted2);font-family:monospace;font-size:10px;}
+  .mod-scheduler .om-loading{display:flex;align-items:center;gap:10px;padding:18px;font-family:monospace;font-size:10px;color:var(--muted2);}
+  .mod-scheduler .om-sp{display:inline-block;width:12px;height:12px;border:2px solid rgba(240,165,0,.2);border-top:2px solid var(--accent);border-radius:50%;animation:spin .6s linear infinite;}
+
+  /* Tickets. Everything else reuses the job card vocabulary above; these are the shapes that
+     had no equivalent: a two-column fact list, a spares table, and the detail header. */
+  .mod-scheduler .om-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+  .mod-scheduler .om-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px 14px;}
+  .mod-scheduler .om-fact{display:flex;justify-content:space-between;gap:10px;font-family:monospace;font-size:10px;padding:4px 0;border-bottom:1px solid var(--line);}
+  .mod-scheduler .om-fact span{color:var(--muted2);}
+  .mod-scheduler .om-fact b{color:var(--text);font-weight:600;text-align:right;}
+  .mod-scheduler .om-tbl{width:100%;border-collapse:collapse;font-family:monospace;font-size:10px;}
+  .mod-scheduler .om-tbl th{text-align:left;color:var(--muted2);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line2);}
+  .mod-scheduler .om-tbl td{padding:4px 6px;border-bottom:1px solid var(--line);color:var(--text);}
+  .mod-scheduler .om-dhead{display:flex;gap:10px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:2;}
+  .mod-scheduler .om-dref{font-family:monospace;font-size:12px;color:var(--accent);font-weight:700;}
+  .mod-scheduler .om-dtitle{font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mod-scheduler .om-dbody{padding:14px 18px 40px;}
