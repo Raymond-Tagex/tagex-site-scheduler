@@ -2129,8 +2129,8 @@ function omBuildTicket(rec,acts,spares){
       </div>
       <div class="om-fcard"><div class="om-fttl">What was done</div>
         ${canEdit?`
-        <textarea id="om-tktres" rows="5" placeholder="What fixed it: the work done, parts replaced, readings after.">${esc(omFstr(f,TK.resolution))}</textarea>
-        <div class="om-hint">Printed on the report under Resolution. A ticket cannot be marked Resolved or Closed without it.</div>
+        <textarea id="om-tktres" rows="5" placeholder="What fixed it: the work done, parts replaced, readings after."></textarea>
+        <div class="om-hint">Saved to the Activity below and printed on the report under Resolution. A ticket cannot be marked Resolved or Closed without it.${omFstr(f,TK.resolution).trim()?' Already recorded \u2014 anything saved now is added to it.':''}</div>
         <div id="om-tktresmsg"></div>
         <button class="btn ghost sm" data-act="omTktSaveResolution" data-a1="${esc(rec.id)}" style="margin-top:8px">Save</button>
         `:`<div class="om-tltx">${esc(omFstr(f,TK.resolution))||'<span class="om-hint">Nothing recorded yet.</span>'}</div>`}
@@ -2572,7 +2572,39 @@ async function omTktAddNote(id){
   }
 }
 
-/** Save what fixed it, without closing the ticket. */
+/**
+ * The Resolution field with one more account of the work added to it.
+ *
+ * WHY IT ADDS RATHER THAN REPLACES. The box is emptied once its text is saved, so the next
+ * thing typed there is the next thing that was done, not a corrected copy of the last. Writing
+ * it over the field would drop the earlier work from the report while the activity log still
+ * showed it.
+ */
+function omResolutionWith(saved,text){
+  const was=String(saved==null?'':saved).trim();
+  return was?was+'\n\n'+text:text;
+}
+
+/**
+ * Put what was done in the ticket's activity, so it reads in order with everything else.
+ * Failing to write it is reported by the caller; the Resolution field is already saved.
+ */
+async function omLogResolution(rec,text){
+  await omPost(OM_T.ACT,{
+    [OM_F.AL_NOTE]:'What was done: '+text,
+    [OM_F.AL_JC]:[].concat(rec.fields[TK.jc]||[]),
+    [OM_F.AL_TICKET]:[rec.id],
+    [OM_F.AL_TYPE]:'Comment',
+  });
+}
+
+/**
+ * Save what fixed it, without closing the ticket.
+ *
+ * It is added to the Resolution field (which the report prints) AND written to the activity
+ * log, then the box is emptied: once saved, it is in the Activity, and leaving it in the box
+ * read as though it had not been.
+ */
 async function omTktSaveResolution(id){
   const rec=omTktData.find(r=>r.id===id); if(!rec)return;
   const el=document.getElementById('om-tktres');
@@ -2585,8 +2617,10 @@ async function omTktSaveResolution(id){
   }
   if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving\u2026</div>';
   try{
-    const up=await tktUpdate(id,{[TK.resolution]:text});
+    const up=await tktUpdate(id,{[TK.resolution]:omResolutionWith(omFstr(rec.fields,TK.resolution),text)});
     if(up) Object.assign(rec.fields,up.fields);
+    try{ await omLogResolution(rec,text); }
+    catch(e){ toast('Saved on the ticket, but not written to the activity log: '+e.message,'bad'); }
     omOpenTicket(id);
   }catch(e){
     if(msg) msg.innerHTML='<div class="om-err">\u2715 '+esc(e.message)+'</div>';
@@ -2609,7 +2643,7 @@ async function omTktStatus(id,next){
   // Resolved and Closed print a Resolution on the report. Without one it prints OUTSTANDING
   // over a ticket somebody has closed, which is worse than useless to whoever reads it next.
   // Cancelled is exempt: a ticket that should never have existed has nothing to resolve.
-  let extra=null;
+  let extra=null, logged=null;
   if(['Resolved','Closed'].includes(next)){
     const box=document.getElementById('om-tktres');
     const typed=(box&&box.value||'').trim();
@@ -2620,12 +2654,18 @@ async function omTktStatus(id,next){
       if(box) box.focus();
       return;
     }
-    if(omUsableText(typed)&&typed!==saved) extra={[TK.resolution]:typed};
+    if(omUsableText(typed)){ extra={[TK.resolution]:omResolutionWith(saved,typed)}; logged=typed; }
   }
 
   if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving\u2026</div>';
   try{
     const r=await omMoveTicket(rec,next,'changed by hand',extra);
+    // What was typed in the box went onto the ticket with the status; it belongs in the
+    // activity as well, the same as it would had Save been pressed first.
+    if(logged){
+      try{ await omLogResolution(rec,logged); }
+      catch(e){ r.logError=r.logError||e.message; }
+    }
     // What happened to the calendar is not a detail: a visit that was on it is now off it, or
     // marked done, and the person who pressed the button is the one who should hear about it.
     const said=[];

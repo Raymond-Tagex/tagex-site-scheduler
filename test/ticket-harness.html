@@ -717,6 +717,40 @@ async function suite(log) {
   t('linked to the ticket', slog.fields[FID.alTicket], ['recTKTa']);
   t('and to its job card', slog.fields[FID.alJc], ['recJC1']);
 
+  log('\nWHAT WAS DONE GOES TO THE ACTIVITY, AND OFF THE SCREEN');
+  await backToTkt('TKT-2026-0009');
+  const resBox = () => document.getElementById('om-tktres');
+  const saveRes = () => d().querySelector('[data-act="omTktSaveResolution"]')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  window.SENT = [];
+  resBox().value = 'ok';
+  saveRes();
+  await settle(12);
+  t('a word that says nothing is not saved', window.SENT.length, 0);
+
+  resBox().value = 'Second visit booked with the supplier to test the inverter on site.';
+  saveRes();
+  await settle(20);
+  const resUpd = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('it is saved on the ticket, for the report',
+    /Second visit booked/.test(resUpd && resUpd.fields[FID.resolution]), true);
+  const resLog = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('and written to the activity log', !!resLog, true);
+  t('saying what it is', resLog.fields[FID.alNote],
+    'What was done: Second visit booked with the supplier to test the inverter on site.');
+  t('as something a person wrote', resLog.fields[FID.alType], 'Comment');
+  t('linked to the ticket', resLog.fields[FID.alTicket], ['recTKTc']);
+  t('and to its job card', resLog.fields[FID.alJc], ['recJC1']);
+  t('then the box is emptied', resBox().value, '');
+
+  window.SENT = [];
+  resBox().value = 'Inverter tested with the supplier and replaced under warranty.';
+  saveRes();
+  await settle(20);
+  const resUpd2 = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('a second save adds to what the report prints, and keeps the first',
+    /Second visit booked[\s\S]*replaced under warranty/.test(resUpd2 && resUpd2.fields[FID.resolution]), true);
+
   log('\nA NOTE AGAINST THE TICKET');
   await backToTkt('TKT-2026-0009');
   const noteBox = () => document.getElementById('om-tktnote');
@@ -2188,8 +2222,20 @@ const MUTANTS = [
    '  return t.length>=0;'],
 
   ['the resolution is not saved with the status that depends on it',
-   '    if(omUsableText(typed)&&typed!==saved) extra={[TK.resolution]:typed};',
+   '    if(omUsableText(typed)){ extra={[TK.resolution]:omResolutionWith(saved,typed)}; logged=typed; }',
    '    // MUTANT: not carried'],
+
+  ['what was done is saved but never reaches the activity log',
+   '    try{ await omLogResolution(rec,text); }',
+   '    try{ }'],
+
+  ['the box is filled back in with what was saved',
+   '        <textarea id="om-tktres" rows="5" placeholder="What fixed it: the work done, parts replaced, readings after."></textarea>',
+   '        <textarea id="om-tktres" rows="5" placeholder="What fixed it: the work done, parts replaced, readings after.">${esc(omFstr(f,TK.resolution))}</textarea>'],
+
+  ['a second save wipes the first from the report',
+   "  return was?was+'\\n\\n'+text:text;",
+   '  return text;'],
 
   ['extra fields are dropped, so the resolution never reaches Airtable',
    '  const patch=Object.assign({[TK.status]:next}, extra||{});',
