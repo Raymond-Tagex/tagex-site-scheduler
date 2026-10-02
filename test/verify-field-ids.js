@@ -22,7 +22,7 @@ const ROLES = require(path.join(__dirname, 'roles.fixture.json'));
 
 const TECH = 'Technician / Field';
 const WH = 'Warehouse / Stores';
-const OPS = 'Operations / Project Manager';
+const OPS = 'Operations Manager';
 
 let pass = 0, fail = 0;
 const failures = [];
