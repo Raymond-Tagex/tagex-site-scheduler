@@ -1,0 +1,191 @@
+{
+ "dashboard": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "job_cards": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "fields": {
+   "deny_read": [
+    "Budget",
+    "Actual Cost",
+    "Project Value",
+    "Cost Exposure",
+    "Cost Variance %",
+    "Total BOM Value",
+    "PDF: Financial Summary"
+   ]
+  }
+ },
+ "clients": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "documents": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "sensitivity_max": "Internal"
+ },
+ "picking_slips": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "picking_slip_items": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "delivery_notes": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "fields": {
+   "deny_read": [
+    "Total Value"
+   ]
+  }
+ },
+ "delivery_lines": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "fields": {
+   "deny_read": [
+    "Unit Cost",
+    "Line Value"
+   ],
+   "deny_write": [
+    "Unit Cost",
+    "Line Value"
+   ]
+  }
+ },
+ "stock_items": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "fields": {
+   "deny_read": [
+    "Unit Cost"
+   ],
+   "deny_write": [
+    "Unit Cost"
+   ]
+  }
+ },
+ "site_visits": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "activity_log": {
+  "view": true,
+  "create": true,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "people": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "audit_log": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "scope": "own"
+ },
+ "systems": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "warranty_register": {
+  "view": true,
+  "create": false,
+  "edit": true,
+  "delete": false,
+  "export": false
+ },
+ "tickets": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": false,
+  "fields": {
+   "deny_read": [
+    "Cost Recoverable"
+   ],
+   "deny_write": [
+    "Cost Recoverable"
+   ]
+  }
+ },
+ "second_hand_parts": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "fields": {
+   "deny_read": [
+    "Sale Price"
+   ]
+  }
+ },
+ "support_requests": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "site_information": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "site_equipment": {
+  "view": true,
+  "create": false,
+  "edit": true,
+  "delete": false,
+  "export": false
+ }
+}

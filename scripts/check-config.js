@@ -128,7 +128,8 @@ function loadEnvLocal() {
     const roles = await at.list(T.BASES.IAM, T.TABLES.access_levels.IAM, {
       fields: ['Role Name', 'Permissions', 'Active', 'Can Manage Users'],
     });
-    const expected = ['Admin / Director', 'Operations / Project Manager', 'Technician / Field', 'Warehouse / Stores'];
+    const expected = ['Admin / Director', 'Operations Manager', 'Project Manager', 'RMA Supervisor',
+      'Technician / Field', 'Warehouse / Stores', 'Driver', 'Site Installer'];
     for (const name of expected) {
       const r = roles.find((x) => x.fields['Role Name'] === name);
       if (!r) { bad(`Access Level "${name}" is missing`); continue; }

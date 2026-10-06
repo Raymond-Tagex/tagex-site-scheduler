@@ -17,7 +17,7 @@ const T = require(path.join(__dirname, '..', 'api', '_lib', 'tables.js'));
 const ROLES = require(path.join(__dirname, 'roles.fixture.json'));
 
 const ADMIN = 'Admin / Director';
-const OPS   = 'Operations / Project Manager';
+const OPS   = 'Operations Manager';
 const TECH  = 'Technician / Field';
 const WH    = 'Warehouse / Stores';
 const ROLE_ORDER = [ADMIN, OPS, TECH, WH];
@@ -380,7 +380,7 @@ console.log('\n\x1b[1mPICKING SLIP WORKFLOW\x1b[0m\n');
     T.TABLES.picking_slips.softDelete.deletedValue, 'Cancelled');
 
   // who may raise a slip
-  check('Ops can create a picking slip',        can('Operations / Project Manager', 'picking_slips', 'create'), true);
+  check('Ops can create a picking slip',        can('Operations Manager', 'picking_slips', 'create'), true);
   check('Admin can create a picking slip',      can('Admin / Director', 'picking_slips', 'create'), true);
   check('Warehouse CANNOT create a slip',       can('Warehouse / Stores', 'picking_slips', 'create'), false);
   check('Warehouse can edit a slip (picking)',  can('Warehouse / Stores', 'picking_slips', 'edit'), true);
@@ -396,7 +396,7 @@ console.log('\n\x1b[1mPICKING SLIP WORKFLOW\x1b[0m\n');
     check(r + ' cannot delete a signature', can(r, 'signatures', 'delete'), false);
   }
   check('Ops may read but not record signatures',
-    can('Operations / Project Manager', 'signatures', 'create'), false);
+    can('Operations Manager', 'signatures', 'create'), false);
 
   // the two new roles are scoped and skint
   for (const r of ['Driver', 'Site Installer']) {
@@ -426,7 +426,7 @@ console.log('\n\x1b[1mPICKING SLIP WORKFLOW\x1b[0m\n');
   // today's flow is untouched
   check('Warehouse still creates delivery notes', can('Warehouse / Stores', 'delivery_notes', 'create'), true);
   check('Warehouse still creates delivery lines', can('Warehouse / Stores', 'delivery_lines', 'create'), true);
-  check('Ops still creates delivery notes', can('Operations / Project Manager', 'delivery_notes', 'create'), true);
+  check('Ops still creates delivery notes', can('Operations Manager', 'delivery_notes', 'create'), true);
 }
 
 // ── the admin role editor must be able to express every module ───────────────
@@ -460,6 +460,78 @@ console.log('\n\x1b[1mPICKING SLIP WORKFLOW\x1b[0m\n');
 
   check('save handler carries forward unrendered modules',
     /rendered\.has\(m\)/.test(src) && /!\(m in next\)/.test(src), true);
+}
+
+
+// ── Project Manager and RMA Supervisor ───────────────────────────────────────
+//
+// Split out of "Operations / Project Manager" on 2026-10-02. The Operations Manager keeps the
+// old record and its grants unchanged; these two are new. The RMA Supervisor's grants follow
+// the RMA procedure (TGX-RMA-P01, section 4): it reads the original sale -- job card, client,
+// invoice, picking slip, delivery note, serial numbers -- to complete F01 Sections A and B, and
+// records what the claim changes on the platform (ticket, warranty, replaced equipment). It
+// does not see costing or prices, cannot delete, cannot export, and holds nothing in identity.
+console.log('\n\x1b[1mPROJECT MANAGER AND RMA SUPERVISOR\x1b[0m\n');
+{
+  const PM = 'Project Manager', RMA = 'RMA Supervisor';
+  const pp = {
+    [PM]:  P.effectivePermissions(ROLES[PM].Permissions, null),
+    [RMA]: P.effectivePermissions(ROLES[RMA].Permissions, null),
+  };
+  const ops = (role, m) => P.OPS.filter((op) => P.can(pp[role], m, op).ok).map((op) => LETTER[op]).join('') || '-';
+  const SPLIT = {
+    //                    PM       RMA Supervisor
+    job_cards:          ['VCEX',  'V'],
+    clients:            ['VCEX',  'V'],
+    documents:          ['VCEX',  'V'],
+    picking_slips:      ['VCEX',  'V'],
+    picking_slip_items: ['VCEX',  'V'],
+    delivery_notes:     ['VCEX',  'V'],
+    delivery_lines:     ['VCEX',  'V'],
+    stock_items:        ['VCEX',  'V'],
+    site_visits:        ['VCEX',  'V'],
+    activity_log:       ['VCE',   'VC'],
+    costing:            ['VCEX',  '-'],
+    tickets:            ['VCEX',  'VCE'],
+    warranty_register:  ['VCEX',  'VE'],
+    systems:            ['VCEX',  'V'],
+    site_information:   ['VCEX',  'V'],
+    site_equipment:     ['VCEDX', 'VE'],
+    second_hand_parts:  ['VCEX',  'V'],
+    support_requests:   ['VCEX',  'V'],
+    contracts:          ['V',     '-'],
+    slas:               ['V',     '-'],
+    error_criteria:     ['V',     '-'],
+    response_templates: ['V',     '-'],
+    reports:            ['VX',    '-'],
+    signatures:         ['VC',    '-'],
+    restricted_personal:['-',     '-'],
+    users:              ['-',     '-'],
+    access_levels:      ['-',     '-'],
+    sessions:           ['-',     '-'],
+  };
+  for (const [m, [pm, rma]] of Object.entries(SPLIT)) {
+    check(`matrix ${m} / ${PM}`, ops(PM, m), pm);
+    check(`matrix ${m} / ${RMA}`, ops(RMA, m), rma);
+  }
+  const strip = (role, m, rec) => Object.keys(P.filterReadFields(pp[role][m] || {}, rec));
+  check('RMA Supervisor sees the original invoice on a job card (F01 Section A)',
+    strip(RMA, 'job_cards', { Invoice: 'INV-1', Budget: 1 }).includes('Invoice'), true);
+  check('but not the job card budget',
+    strip(RMA, 'job_cards', { Invoice: 'INV-1', Budget: 1 }).includes('Budget'), false);
+  check('RMA Supervisor sees the end-user contact the Solax form needs',
+    strip(RMA, 'clients', { Email: 'a@b.co', 'Mobile Number': '1' }).length, 2);
+  check('RMA Supervisor never sees a unit cost on stock',
+    strip(RMA, 'stock_items', { Code: 'X', 'Unit Cost': 9 }).includes('Unit Cost'), false);
+  check('nor on a delivery line',
+    strip(RMA, 'delivery_lines', { Qty: 1, 'Unit Cost': 9, 'Line Value': 9 }).length, 1);
+  check('nor the cost recoverable on a ticket',
+    strip(RMA, 'tickets', { Subject: 's', 'Cost Recoverable': 9 }).includes('Cost Recoverable'), false);
+  check('the role flags match: RMA Supervisor cannot export',  ROLES[RMA]['Can Export Data'], false);
+  check('and neither new role can manage users',
+    ROLES[PM]['Can Manage Users'] || ROLES[RMA]['Can Manage Users'], false);
+  check('Operations Manager is still the old record, not a new one',
+    ROLES['Operations Manager'].recordId, 'recjAVlENZ3OS3wH2');
 }
 
 

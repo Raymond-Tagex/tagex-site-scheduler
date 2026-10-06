@@ -1,0 +1,194 @@
+{
+ "dashboard": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": true
+ },
+ "job_cards": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "clients": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "documents": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true,
+  "sensitivity_max": "Confidential",
+  "export_sensitivity_max": "Internal"
+ },
+ "picking_slips": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "picking_slip_items": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "delivery_notes": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "export": true,
+  "delete": false
+ },
+ "delivery_lines": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "export": true,
+  "delete": false
+ },
+ "signatures": {
+  "view": true,
+  "create": true,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "stock_items": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "site_visits": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "activity_log": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": false
+ },
+ "costing": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "people": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "audit_log": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false,
+  "scope": "own"
+ },
+ "reports": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": true
+ },
+ "systems": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "contracts": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "slas": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "warranty_register": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "tickets": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "error_criteria": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "second_hand_parts": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "support_requests": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "response_templates": {
+  "view": true,
+  "create": false,
+  "edit": false,
+  "delete": false,
+  "export": false
+ },
+ "site_information": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": false,
+  "export": true
+ },
+ "site_equipment": {
+  "view": true,
+  "create": true,
+  "edit": true,
+  "delete": true,
+  "export": true
+ }
+}
