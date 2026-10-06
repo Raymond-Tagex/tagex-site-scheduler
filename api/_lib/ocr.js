@@ -158,4 +158,35 @@ async function readDocument(buf, filename, contentType, maxPages, spread) {
   };
 }
 
-module.exports = { readDocument, recognise, reset, LANG, TESSDATA, TIMEOUT_MS };
+/**
+ * Read pages that have already been rendered to images.
+ *
+ * The caller did the compositing -- see public/js/pdfpages.js for why a PDF cannot be read here
+ * by lifting its images out. Each page is recognised on its own and the texts are joined in the
+ * order they were sent, so a field that spans a page break still reads in order.
+ *
+ * @param {Buffer[]} images  JPEG or PNG bytes, one per page, in document order
+ * @returns {Promise<{text:string, confidence:number, pages:number, note:string, available:number}>}
+ */
+async function readPages(images) {
+  const list = (images || []).filter((b) => b && b.length);
+  if (!list.length) {
+    return { text: '', confidence: 0, pages: 0, available: 0, note: 'No page image was sent.' };
+  }
+  const parts = [];
+  let total = 0;
+  for (const img of list) {
+    const r = await recognise(img);
+    parts.push(r.text);
+    total += r.confidence;
+  }
+  return {
+    text: parts.join('\n'),
+    confidence: Math.round(total / list.length),
+    pages: list.length,
+    available: list.length,
+    note: '',
+  };
+}
+
+module.exports = { readDocument, readPages, recognise, reset, LANG, TESSDATA, TIMEOUT_MS };

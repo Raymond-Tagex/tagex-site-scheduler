@@ -835,6 +835,86 @@ console.log('\n\x1b[1mSITE SIGNING LINKS\x1b[0m\n');
     t('sampling spreads across the middle too', widths(spread), [0, 6, 13, 19]);
   }
 
+  console.log('\n\x1b[1mPAGES THE BROWSER RENDERED\x1b[0m\n');
+
+  // WHY THIS PATH EXISTS. Lifting the embedded images out of a PDF works while a scanned page
+  // IS one image. A composited scan is not: a real 38-page site agreement holds 609 image
+  // objects -- a text mask, a background and strips of each, per page -- and the largest-layer
+  // heuristic above found FOUR fragments in the whole document, of four different sizes, none
+  // of them a page. A renderer composites those layers back into the page a person sees, and
+  // the browser has one, so the client sends pages and this reads them.
+  {
+    const page = fx('jobcard.jpg');
+
+    const one = await OCR.readPages([page]);
+    t('one page reads as one page', one.pages, 1);
+    t('and gives up its text', one.text.length > 40, true);
+    t('with a confidence', one.confidence > 0, true);
+
+    const two = await OCR.readPages([page, page]);
+    t('two pages read as two', two.pages, 2);
+    t('their text is joined in the order sent',
+      two.text.trim() === (one.text + '\n' + one.text).trim(), true);
+    t('and nothing is reported as unavailable', two.available, 2);
+
+    // An empty list is a caller error, not a crash, and not an empty success either.
+    const none = await OCR.readPages([]);
+    t('no pages is nothing read', [none.pages, none.text], [0, '']);
+    t('and says so', /No page image/.test(none.note), true);
+    t('an empty buffer is skipped rather than recognised',
+      (await OCR.readPages([Buffer.alloc(0), page])).pages, 1);
+  }
+
+  // ── the endpoint takes them ──────────────────────────────────────────────
+  {
+    const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'siteinfo-ocr.js'), 'utf8');
+    t('the endpoint accepts rendered pages', /Array\.isArray\(body\.pages\)/.test(api), true);
+    t('and caps how many it will run OCR on', /MAX_PAGES_IN/.test(api), true);
+    t('it reads them with readPages, not the image lift',
+      /hasPages[\s\S]{0,60}ocr\.readPages\(pageBufs\)/.test(api), true);
+    t('the whole-file path is still there for everything else',
+      /ocr\.readDocument\(buf, filename, contentType, 2\)/.test(api), true);
+
+    // THE FICA GATE STILL CLOSES. The name is judged, and so is the text OCR finds -- which on
+    // correctly rendered pages is far more than the old path ever recovered.
+    t('the name is still classified', /upload\.classify\(\{\s*\n?\s*filename,/.test(api), true);
+    t('a page render is judged as the image it is, not as a PDF with no text layer',
+      /contentType: hasPages \? 'image\/jpeg' : contentType/.test(api), true);
+    t('and the text is classified after reading, as before',
+      /contentType: 'text\/plain', buf: Buffer\.from\(read\.text/.test(api), true);
+    t('the byte ceiling applies to the pages together, not each',
+      /bytes \+= b\.length[\s\S]{0,120}bytes > MAX_BYTES/.test(api), true);
+  }
+
+  // ── and the client sends them ────────────────────────────────────────────
+  {
+    const cl = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'siteinfo-batch.js'), 'utf8');
+    const pp = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'pdfpages.js'), 'utf8');
+    const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+
+    t('a PDF is rendered rather than sent', /TX\.pdfPages\.isPdf\(file\)/.test(cl), true);
+    t('both readers go through one request builder',
+      (cl.match(/await asRequest\(prepped\)/g) || []).length, 2);
+    t('neither builds the request by hand any more',
+      /content: await toBase64\(prepped\.blob\),\n\s*\};/.test(cl), false);
+    t('the old PDF size refusal is gone, because the file is no longer sent',
+      /over the .* reading limit\. Re-save or split it/.test(cl), false);
+
+    // THE FRONT AND A SPREAD. Reading only the first pages would let a bank statement bound
+    // into the back of a long agreement past the text check.
+    t('the renderer reads the front and then samples', /front/.test(pp) && /sample/.test(pp), true);
+    t('the library is vendored, because script-src is self',
+      /\/vendor\/pdf\.min\.js/.test(pp), true);
+    t('and it really is in the repository',
+      fs.existsSync(path.join(__dirname, '..', 'public', 'vendor', 'pdf.min.js')), true);
+    t('with its worker', fs.existsSync(path.join(__dirname, '..', 'public', 'vendor', 'pdf.worker.min.js')), true);
+    t('and its licence', fs.existsSync(path.join(__dirname, '..', 'public', 'vendor', 'pdf.js-LICENSE.txt')), true);
+    t('nothing is fetched from a CDN at runtime', /https?:\/\//.test(pp.replace(/\/\/[^\n]*/g, '')), false);
+    t('the module is served with the page', /<script src="\/js\/pdfpages\.js">/.test(page), true);
+    t('before the module that uses it',
+      page.indexOf('/js/pdfpages.js') < page.indexOf('/js/siteinfo-batch.js'), true);
+  }
+
   console.log('\n\x1b[1mSITE MATCHING AND PRECEDENCE\x1b[0m\n');
 
   t('the same name matches', OCRAPI.namesMatch('ALAN AUCAMP', 'alan aucamp'), true);

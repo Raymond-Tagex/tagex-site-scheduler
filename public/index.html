@@ -388,22 +388,36 @@
             <div class="om-fld"><label>Type code</label><input list="njc-typelist" id="njc-rtype" data-on="input" data-act="omRefBuild" placeholder="MAINT"><datalist id="njc-typelist"></datalist></div>
             <div class="om-fld"><label>Entity code</label><input list="njc-entlist" id="njc-rent" data-on="input" data-act="omRefBuild" placeholder="TE"><datalist id="njc-entlist"></datalist></div>
           </div>
-          <div class="om-fld"><label>Reference <span id="njc-seqnote" style="color:var(--muted2);font-size:10px;"></span></label><input type="text" id="njc-ref" placeholder="OM-2026-0001/MAINT/TE"></div>
+          <div class="om-fld"><label>Job card number <span id="njc-seqnote" style="color:var(--muted2);font-size:10px;"></span></label><input type="text" id="njc-ref" placeholder="OM-2026-0001/MAINT/TE"></div>
         </div>
         <div class="om-fcard">
-          <div class="om-fttl">Details</div>
+          <div class="om-fttl">Job Card Details</div>
           <div class="om-fld"><label>Title *</label><input type="text" id="njc-title" placeholder="Short description of the job"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="om-fld"><label>Entity name</label><select id="njc-entity"></select></div>
+            <div class="om-fld"><label>Ticket raised by</label><input type="text" id="njc-raisedby" placeholder="Who reported it"></div>
+          </div>
+          <div class="om-fld"><label>Operational classification</label><select id="njc-opclass"></select></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <div class="om-fld"><label>Work Type</label><select id="njc-type"></select></div>
             <div class="om-fld"><label>Priority</label><select id="njc-pri"></select></div>
           </div>
           <div class="om-fld"><label>Status</label><select id="njc-stat"></select></div>
           <div class="om-fld"><label>Owner category</label><select id="njc-owner"></select></div>
+          <div class="om-fld"><label>Suggested site actions</label>
+            <div class="om-jcmulti" id="njc-actions"></div></div>
+          <div class="om-fld"><label>Other action</label><input type="text" id="njc-actother" placeholder="If none of the above"></div>
+        </div>
+        <div class="om-fcard">
+          <div class="om-fttl">Notes and Scope</div>
+          <div class="om-fld"><label>Pre-visit notes</label><textarea id="njc-prevnotes" rows="2" placeholder="What is known before going"></textarea></div>
+          <div class="om-fld"><label>General notes</label><textarea id="njc-gennotes" rows="2" placeholder="Access, contacts, anything else"></textarea></div>
+          <div class="om-fld"><label>Pre-site visit — scope of work</label><textarea id="njc-prescope" rows="3" placeholder="A detailed description of the work to be executed"></textarea></div>
         </div>
         <div class="om-fcard">
           <div class="om-fttl">Schedule</div>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-            <div class="om-fld"><label>Issued</label><input type="date" id="njc-iss"></div>
+            <div class="om-fld"><label>Actual date of issue</label><input type="date" id="njc-iss"></div>
             <div class="om-fld"><label>Due</label><input type="date" id="njc-due"></div>
             <div class="om-fld"><label>Progress %</label><input type="number" id="njc-prog" min="0" max="100" value="0"></div>
           </div>
@@ -534,6 +548,7 @@
 <script src="/js/mod-scheduler.js"></script>
 <script src="/js/mod-siteinfo.js"></script>
 <script src="/js/siteinfo-import.js"></script>
+<script src="/js/pdfpages.js"></script>
 <script src="/js/siteinfo-batch.js"></script>
 <script src="/js/mod-admin.js"></script>
 <script src="/js/shell.js"></script>
