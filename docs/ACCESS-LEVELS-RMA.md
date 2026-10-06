@@ -30,8 +30,8 @@ So "RMA Supervisor" exists in both places:
 |---|---|---|
 | Admin / Director | `recnux0y686i1pUZX` | unchanged |
 | **Operations Manager** | `recjAVlENZ3OS3wH2` | **renamed** from *Operations / Project Manager*. Same record, same permissions. Everyone who holds it today keeps it. |
-| **Project Manager** | new | created from the Operations grant (see §3) |
-| **RMA Supervisor** | new | see §4 |
+| **Project Manager** | `recndoGFlPZPm0pdD` | created from the Operations grant (see §3) |
+| **RMA Supervisor** | `rec1Yl8OY1omBv0ZI` | see §4 |
 | Technician / Field | `recLBElqoyXofiWCR` | unchanged |
 | Warehouse / Stores | `recu56ankV4dDTpAv` | unchanged |
 | Driver | `recBm5sxSi40M85WB` | unchanged |
