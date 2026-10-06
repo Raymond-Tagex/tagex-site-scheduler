@@ -8,7 +8,7 @@
   },
   "scripts": {
     "deploy": "vercel --prod",
-    "test": "node test/verify-part-b.js && node test/verify-part-c.js && node test/verify-field-ids.js && node test/verify-ticket-report.js && node test/verify-at-order.js",
+    "test": "node test/verify-part-b.js && node test/verify-part-c.js && node test/verify-field-ids.js && node test/verify-ticket-report.js && node test/verify-at-order.js && node test/verify-jobcard-form.js",
     "check": "node scripts/check-config.js",
     "users": "node scripts/manage-users.js",
     "harness": "node scripts/ui-harness.js"

@@ -20,3 +20,10 @@ Thumbs.db
 # Local scratch
 *.log
 tmp/
+
+# Machine-specific preview server config (absolute paths to a local scratchpad)
+.claude/launch.json
+
+# Client site documents. These are FICA / POPIA material and must never enter version
+# control — keep them outside the repository, not merely untracked.
+/*.pdf

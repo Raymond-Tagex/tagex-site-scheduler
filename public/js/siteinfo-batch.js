@@ -35,6 +35,9 @@
   // is kept at the resolution it was taken at, so the limit has to be reported rather than
   // engineered around.
   const UPLOAD_MAX_BYTES = 3 * 1024 * 1024;
+  // A PDF is no longer sent, so the platform's body limit does not apply to it — this is about
+  // what a browser can sensibly open and hold in memory, which is a far larger number.
+  const PDF_MAX_BYTES = 60 * 1024 * 1024;
 
   let FILES = [];          // [{ file, rel }]
   let CARD = -1;           // index in FILES of the job card
@@ -95,19 +98,45 @@
   // ── file preparation ──────────────────────────────────────────────────────
 
   /**
-   * Shrink an image until it fits the server's ceiling. PDFs are passed through untouched:
-   * re-compressing one here would need a renderer, which is the dependency this whole design
-   * avoids. An oversized PDF is reported plainly instead of failing at the server.
+   * Get a file into a shape the reader can actually read.
+   *
+   * A PDF IS RENDERED HERE, page by page, and the pages are what get sent.
+   *
+   * It used to be passed through whole, on the reasoning that re-compressing it would need a
+   * renderer and the server could lift the page images out instead. That holds only while a
+   * scanned page IS one image. A composited scan — the scanner separating each page into a text
+   * mask and a background, often in strips — is not: a real 38-page site agreement turned out to
+   * hold 609 image objects, and the server found four fragments in the whole document. The
+   * browser has a renderer that composites those layers the way the page is meant to look, so
+   * the rendering happens here.
+   *
+   * It also removes the size limit on PDFs. The ceiling was on the FILE, because the file was
+   * what got sent; now the pages are, so a 40 MB scan is opened locally and a dozen page
+   * pictures go over the wire.
+   *
+   * An image still only needs shrinking.
    */
-  function prepare(file) {
+  function prepare(file, onProgress) {
+    if (TX.pdfPages && TX.pdfPages.isPdf(file)) {
+      if (file.size > PDF_MAX_BYTES) {
+        return Promise.reject(new Error('That PDF is ' + bytes(file.size) + ', over the '
+          + bytes(PDF_MAX_BYTES) + ' limit for opening a file in the browser. Split it first.'));
+      }
+      return TX.pdfPages.render(file, { onProgress }).then((out) => ({
+        pages: out.pages,
+        total: out.total,
+        type: file.type || 'application/pdf',
+        name: file.name,
+      }));
+    }
     return new Promise((resolve, reject) => {
       if (!/^image\//.test(file.type || '')) {
         if (file.size > OCR_MAX_BYTES) {
-          reject(new Error('That PDF is ' + bytes(file.size) + ', over the ' + bytes(OCR_MAX_BYTES)
-            + ' reading limit. Re-save or split it, or photograph the page instead.'));
+          reject(new Error('That file is ' + bytes(file.size) + ', over the ' + bytes(OCR_MAX_BYTES)
+            + ' reading limit.'));
           return;
         }
-        resolve({ blob: file, type: file.type || 'application/pdf', name: file.name });
+        resolve({ blob: file, type: file.type || 'application/octet-stream', name: file.name });
         return;
       }
 
@@ -140,6 +169,25 @@
   }
 
   const toBase64 = (blob) => TX.siteinfo.files.toBase64(blob);
+
+  /**
+   * The request fields for a prepared file: either the file itself, or its rendered pages.
+   *
+   * Both call sites go through this, so a PDF cannot be rendered on one path and sent whole on
+   * the other — which is how the batch reader and the single reader came to disagree before.
+   */
+  async function asRequest(prepped) {
+    const req = { filename: prepped.name, contentType: prepped.type };
+    if (prepped.pages) {
+      req.pages = [];
+      for (const p of prepped.pages) {
+        req.pages.push({ page: p.page, content: await toBase64(p.blob) });
+      }
+    } else {
+      req.content = await toBase64(prepped.blob);
+    }
+    return req;
+  }
 
   // ── the modal ─────────────────────────────────────────────────────────────
 
@@ -547,10 +595,12 @@
       const top = folderName();
       if (top) req.siteNameHint = top;
       if (willRead) {
-        const prepped = await prepare(FILES[CARD].file);
-        req.content = await toBase64(prepped.blob);
-        req.filename = prepped.name;
-        req.contentType = prepped.type;
+        // say() belongs to the batch reader's scope. This one writes into its own body.
+        const prepped = await prepare(FILES[CARD].file, (done, of) => {
+          body.innerHTML = '<div class="si-empty">Rendering page ' + done + ' of ' + of
+            + ' of ' + esc(FILES[CARD].file.name) + '\u2026</div>';
+        });
+        Object.assign(req, await asRequest(prepped));
       }
       RESULT = await TX.request('/api/siteinfo-ocr', req);
 
@@ -631,11 +681,7 @@
       let note = '';
       try {
         const prepped = await prepare(file);
-        const req = {
-          filename: prepped.name,
-          contentType: prepped.type,
-          content: await toBase64(prepped.blob),
-        };
+        const req = await asRequest(prepped);
         if (JOBCARD) { req.jobCardId = JOBCARD.id; req.base = JOBCARD.base; }
         const top = folderName();
         if (top) req.siteNameHint = top;

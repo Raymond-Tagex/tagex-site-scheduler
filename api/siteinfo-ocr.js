@@ -32,6 +32,10 @@ const upload = require('./siteinfo-upload.js');
 // bare platform 413. The client downsamples photographs before sending for the same reason.
 const MAX_BYTES = 3 * 1024 * 1024;
 
+// How many rendered pages one request may carry. The byte ceiling above is the real limit; this
+// stops a caller making us run OCR three hundred times inside one function invocation.
+const MAX_PAGES_IN = 12;
+
 const BASES = ['CI', 'OM'];
 
 /** Airtable formula string literal. */
@@ -267,14 +271,44 @@ module.exports = async function handler(req, res) {
   // A job card on its own is enough to build a proposal — the record already says who the
   // client is and where the site is, so a scan is an optional extra rather than the only
   // source. Without a job card there is nothing to go on but the file, so one is required.
-  const hasFile = !!(filename && body.content);
+  // PAGES A BROWSER HAS ALREADY RENDERED.
+  //
+  // A composited scan — one where the scanner split each page into layers and strips — cannot be
+  // read by lifting its embedded images out, which is all this server can do without a PDF
+  // renderer. The browser has a renderer, so the client sends page pictures instead of the file
+  // and this reads them exactly as it reads a photograph of a page. See public/js/pdfpages.js.
+  const sentPages = Array.isArray(body.pages) ? body.pages.slice(0, MAX_PAGES_IN) : [];
+  const hasPages = !!(filename && sentPages.length);
+  const hasFile = !!(filename && body.content) || hasPages;
   if (!hasFile && !jobCardId) {
     return H.fail(res, 400, 'bad_request',
       'Choose a job card, or send a file to read.');
   }
 
   let buf = null;
-  if (hasFile) {
+  let pageBufs = [];
+  if (hasPages) {
+    let bytes = 0;
+    for (const p of sentPages) {
+      let b;
+      try { b = Buffer.from(String(p && p.content ? p.content : p), 'base64'); }
+      catch (e) { return H.fail(res, 400, 'bad_request', 'A page image could not be decoded.'); }
+      if (!b.length) continue;
+      bytes += b.length;
+      if (bytes > MAX_BYTES) {
+        return H.fail(res, 413, 'file_too_large',
+          `Those pages come to ${(bytes / 1048576).toFixed(1)} MB. The limit for reading is `
+          + `${MAX_BYTES / 1048576} MB — read fewer pages at a time.`);
+      }
+      pageBufs.push(b);
+    }
+    if (!pageBufs.length) return H.fail(res, 400, 'bad_request', 'No page image was sent.');
+    // The name is still judged, and the text every page gives up is judged after OCR. What is
+    // NOT available here is the file's own text layer, because the file was not sent -- which
+    // is why the client renders a SPREAD of pages and not only the front ones: a bank statement
+    // bound into the back of an agreement has to reach the text check below.
+    buf = pageBufs[0];
+  } else if (hasFile) {
     try { buf = Buffer.from(String(body.content), 'base64'); }
     catch (e) { return H.fail(res, 400, 'bad_request', 'The file content could not be decoded.'); }
     if (!buf.length) return H.fail(res, 400, 'bad_request', 'The file is empty.');
@@ -294,7 +328,13 @@ module.exports = async function handler(req, res) {
   // Ordinary classification first, on the name and any text layer. Note the asymmetry: a BLOCKED
   // verdict ends the request, but a REVIEW verdict does NOT — this route writes nothing, and the
   // OCR below is exactly what turns an unreadable scan into a judgeable one.
-  const pre = upload.classify({ filename, contentType, buf });
+  // On a page render, the name is the PDF's and the bytes are a JPEG of its first page --
+  // so this is the name check plus an image check, and the text check below does the rest.
+  const pre = upload.classify({
+    filename,
+    contentType: hasPages ? 'image/jpeg' : contentType,
+    buf,
+  });
   if (pre.verdict === 'BLOCKED') {
     await A.auditNow({
       ...ctx, action: 'View', result: 'Denied', denialReason: 'sensitive_content',
@@ -305,7 +345,9 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    read = await ocr.readDocument(buf, filename, contentType, 2);
+    read = hasPages
+      ? await ocr.readPages(pageBufs)
+      : await ocr.readDocument(buf, filename, contentType, 2);
   } catch (e) {
     return H.fail(res, 500, 'ocr_failed',
       'The document could not be read: ' + String(e.message || e).slice(0, 200));

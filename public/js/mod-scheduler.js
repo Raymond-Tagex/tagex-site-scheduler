@@ -2373,6 +2373,36 @@ async function omPullApply(id){
   }
 }
 
+/**
+ * Build and download the printed job card.
+ *
+ * The browser sends a record id and nothing else; everything on the sheet is read on the
+ * server under this role's own permissions. See api/jobcard-form.js.
+ */
+async function omJcForm(id){
+  const btn=document.querySelector('[data-act="omJcForm"][data-a1="'+id+'"]');
+  const was=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
+  try{
+    const r=await TX.request('/api/jobcard-form',{ jobCardId:id });
+    // base64 -> bytes. A PDF is binary; anything that treats it as text corrupts it.
+    const bin=atob(r.content);
+    const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    const url=URL.createObjectURL(new Blob([bytes],{type:r.contentType||'application/pdf'}));
+    const a=document.createElement('a');
+    a.href=url; a.download=r.filename||'job-card.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+  }catch(e){
+    const m=document.getElementById('njc-msg');
+    if(m) m.innerHTML='<div class="om-err">\u2715 The job card could not be built: '
+      +esc(TX.errorText(e))+'</div>';
+    else toast('The job card could not be built: '+TX.errorText(e),'bad');
+  }
+  if(btn){ btn.disabled=false; btn.textContent=was; }
+}
+
 async function omTktReport(id){
   const btn=document.querySelector('[data-act="omTktReport"]');
   const was=btn?btn.textContent:'';
@@ -2708,6 +2738,169 @@ async function omOpenDetail(id){
   omBuildDetail(rec,actLog);
 }
 
+
+// ── The paper job card's own fields ───────────────────────────────────────────────────────
+//
+// Every line on TAGEX JOB CARD TEMPLATE SEP2026.docx that the table did not already answer.
+// Created by scripts/provision-jobcard-template.js; read and written by id like everything
+// else here, so a field renamed in Airtable does not silently stop saving.
+const JCF = {
+  JC_DDEC:'fldbNh4XNJSowGUWr', JC_DDECBY:'fldRvhC67t2wdRwgF', JC_DDECDT:'fld0UbmgpEygcokIl',
+  JC_ENTITY:'fldLaKUHydb1ig8ie', JC_RAISEDBY:'fld1SZTKrfnJlyg65',
+  JC_ACTIONS:'fldS7W92nxn106Vu9', JC_ACTOTHER:'fldBI866V7seEgYtK',
+  JC_OPCLASS:'fldHBL64nn0DFhQbF',
+  JC_PREVNOTES:'fldcwXuk2jxEcWb8G', JC_GENNOTES:'fldRiDATI9r7MkQHs',
+  JC_PRESCOPE:'fldtBfKYyJ1Cfmqgv', JC_ACTSCOPE:'fldg0BlmuHRNY0BK2',
+  JC_INSPBY:'flduLbQNH2M2pTcK5', JC_INSPDT:'flda9ZALcgTXd3GBe', JC_INSPCONF:'fld1l2ZbuenAsC2m3',
+  JC_QUOTES:'fldFmxBQ3mXE3OuM8', JC_TECH:'fldCbH4HWJXRjrgsN',
+  JC_VISITDT:'fldc21yNC3d7hll9Q', JC_INSTALLDT:'fldM4c9HuOYNVPvfF', JC_DELAY:'fldqJEFdLtCMG1d4N',
+  JC_REQBY:'fldYj77yjMYkYnqJ5', JC_REQDT:'fldyysb1e739yjgU7',
+  JC_PROCBY:'fldahhN87o28GGA0F', JC_PROCDT:'fldKsmjltdKuBlhNF',
+  JC_OPSBY:'fldsAHZQBzAKXqjQt', JC_OPSDT:'fldvngkuTGM44o351',
+  JC_FINBY:'fldrETdZX2XI7xErn', JC_FINDT:'fldaBfDscCnVY4TAV',
+  JC_FINALBY:'fldijAJzDhvKBvRl1', JC_FINALDT:'fldl1teMwvoEChUUz',
+  JC_CANAME:'fldJolRSnhxiQfIm5', JC_CACOMP:'fldH09tgqhcZY4OG7',
+  JC_CACONT:'fldhjSYu1nKaHJ0ph', JC_CAEMAIL:'fldMI1jqJl9PdJM7J', JC_CADATE:'fldH4Kf8VIkG7coLt',
+};
+
+// The option lists the paper offers, and the order it offers them in.
+const JC_ENTITIES = ['Tagex Energy','Solax Energy','PPA','Alpine','Direct Purchase'];
+const JC_ACTIONS_LIST = ['Site Inspection','Installation','Maintenance','Decommissioning',
+  'Testing & Commissioning','Warranty Work','Stock / Asset Allocation','Other'];
+const JC_OPCLASSES = ['Standard Operational Activity','Emergency / Critical Response'];
+const JC_INSP_CONFIRMS = ['Structural Integrity Visually Confirmed',
+  'Electrical Infrastructure Verified','Access & Safety Clearance Confirmed',
+  'Client Requirements Confirmed','Photographic Evidence Attached'];
+const JC_DECISIONS = ['Approved','Denied','Completed'];
+
+/**
+ * The detail screen's editable job card fields, grouped as the paper groups them.
+ *
+ * One list, used to draw the form AND to read it back, so a field cannot be shown and then
+ * quietly not saved -- which is what happens when markup and a save function are written twice.
+ */
+function jcDetailSections(){
+  return [
+    ['Approval', [
+      ['Director decision', JCF.JC_DDEC, 'select', JC_DECISIONS],
+      ['Signed by', JCF.JC_DDECBY, 'text'],
+      ['Date', JCF.JC_DDECDT, 'date'],
+    ]],
+    ['Job Card Details', [
+      ['Entity name', JCF.JC_ENTITY, 'select', JC_ENTITIES],
+      ['Ticket raised by', JCF.JC_RAISEDBY, 'text'],
+      ['Operational classification', JCF.JC_OPCLASS, 'select', JC_OPCLASSES],
+      ['Suggested site actions', JCF.JC_ACTIONS, 'multi', JC_ACTIONS_LIST],
+      ['Other action', JCF.JC_ACTOTHER, 'text'],
+    ]],
+    ['Notes and Scope', [
+      ['Pre-visit notes', JCF.JC_PREVNOTES, 'long'],
+      ['General notes', JCF.JC_GENNOTES, 'long'],
+      ['Pre-site visit \u2014 scope of work', JCF.JC_PRESCOPE, 'long'],
+      ['Actual site visit \u2014 scope of work', JCF.JC_ACTSCOPE, 'long'],
+    ]],
+    ['On-Site Inspection', [
+      ['Conducted by', JCF.JC_INSPBY, 'text'],
+      ['Date of inspection', JCF.JC_INSPDT, 'date'],
+      ['Confirmations', JCF.JC_INSPCONF, 'multi', JC_INSP_CONFIRMS],
+      ['Supplier quotes attached', JCF.JC_QUOTES, 'check'],
+    ]],
+    ['Responsible Personnel & Timeline', [
+      ['Technician / installer', JCF.JC_TECH, 'text'],
+      ['Site visit date', JCF.JC_VISITDT, 'date'],
+      ['Actual installation date', JCF.JC_INSTALLDT, 'date'],
+      ['Delay explanation', JCF.JC_DELAY, 'long'],
+    ]],
+    ['Signatures for Approvals', [
+      ['Requested by', JCF.JC_REQBY, 'text'], ['Requested on', JCF.JC_REQDT, 'date'],
+      ['Procurement', JCF.JC_PROCBY, 'text'], ['Procurement on', JCF.JC_PROCDT, 'date'],
+      ['Operational / executive', JCF.JC_OPSBY, 'text'], ['Operational on', JCF.JC_OPSDT, 'date'],
+      ['Financial oversight', JCF.JC_FINBY, 'text'], ['Financial on', JCF.JC_FINDT, 'date'],
+      ['Final completion', JCF.JC_FINALBY, 'text'], ['Final on', JCF.JC_FINALDT, 'date'],
+    ]],
+    ['Client Acceptance of Terms', [
+      ['Client name', JCF.JC_CANAME, 'text'],
+      ['Company', JCF.JC_CACOMP, 'text'],
+      ['Contact number', JCF.JC_CACONT, 'text'],
+      ['Email address', JCF.JC_CAEMAIL, 'text'],
+      ['Accepted on', JCF.JC_CADATE, 'date'],
+    ]],
+  ];
+}
+
+/** One editable control, wired to save itself. */
+function jcControl(id, label, fid, kind, options, value){
+  const act = `data-on="change" data-act="omJcSet" data-a1="${id}" data-a2="${fid}" data-a3="@val"`;
+  if(kind==='select'){
+    return `<select ${act}><option value="">\u2014</option>`
+      + (options||[]).map(o=>`<option ${o===value?'selected':''}>${esc(o)}</option>`).join('')
+      + '</select>';
+  }
+  if(kind==='long'){
+    return `<textarea rows="3" ${act} placeholder="\u2014">${esc(value||'')}</textarea>`;
+  }
+  if(kind==='date'){
+    return `<input type="date" value="${esc(value||'')}" ${act}>`;
+  }
+  if(kind==='check'){
+    return `<label class="om-jcchk"><input type="checkbox" ${value?'checked':''}`
+      + ` data-on="change" data-act="omJcSet" data-a1="${id}" data-a2="${fid}" data-a3="@checked">`
+      + `<span>${esc(label)}</span></label>`;
+  }
+  if(kind==='multi'){
+    const on=[].concat(value||[]).map(String);
+    return '<div class="om-jcmulti">'+(options||[]).map(o=>
+      `<label><input type="checkbox" ${on.indexOf(o)>=0?'checked':''}`
+      + ` data-on="change" data-act="omJcMulti" data-a1="${id}" data-a2="${fid}" data-a3="${esc(o)}">`
+      + `<span>${esc(o)}</span></label>`).join('')+'</div>';
+  }
+  return `<input type="text" value="${esc(value||'')}" ${act} placeholder="\u2014">`;
+}
+
+/** The whole editable block, or nothing at all for a role that may not edit job cards. */
+function jcDetailForm(rec){
+  if(!TX.can('job_cards','edit')) return '';
+  const f=rec.fields, id=rec.id;
+  return '<div class="om-slbl" style="margin-top:14px">Job Card \u2014 as printed</div>'
+    + '<div class="om-hint">These are the fields on the printed job card. Each one saves as you '
+    + 'leave it.</div>'
+    + jcDetailSections().map(([title, rows]) => '<div class="om-fcard"><div class="om-fttl">'
+      + esc(title)+'</div>'
+      + rows.map(([label, fid, kind, options]) => kind==='check'
+        ? `<div class="om-fld">${jcControl(id,label,fid,kind,options,f[fid])}</div>`
+        : `<div class="om-fld"><label>${esc(label)}</label>`
+          + jcControl(id,label,fid,kind,options,omFstr(f,fid)||f[fid])+'</div>').join('')
+      + '</div>').join('')
+    + '<div id="om-jcsetmsg"></div>';
+}
+
+/**
+ * Save one field on a job card.
+ *
+ * Written by id, and the record in the cache is updated with what came back rather than with
+ * what was sent -- a select Airtable rejected would otherwise look saved until a reload.
+ */
+async function omJcSet(id, fid, value){
+  const msg=document.getElementById('om-jcsetmsg');
+  const rec=omJcData.find(r=>r.id===id);
+  const v=(value===''||value===undefined)?null:value;
+  try{
+    const up=await omPatch(OM_T.JC, id, { [fid]: v });
+    if(rec&&up&&up.fields) rec.fields[fid]=up.fields[fid];
+    if(msg) msg.innerHTML='<div class="om-ok">\u2713 Saved.</div>';
+  }catch(e){
+    if(msg) msg.innerHTML='<div class="om-err">\u2715 Not saved: '+esc(TX.errorText(e))+'</div>';
+  }
+}
+
+/** Add or remove one option of a multi-select, leaving the others alone. */
+async function omJcMulti(id, fid, option){
+  const rec=omJcData.find(r=>r.id===id);
+  const now=[].concat((rec&&rec.fields[fid])||[]).map(x=>(x&&x.name)||x);
+  const next=now.indexOf(option)>=0 ? now.filter(x=>x!==option) : now.concat([option]);
+  await omJcSet(id, fid, next);
+}
+
 function omBuildDetail(rec,actLog){
   const f=rec.fields,id=rec.id;
   const stat=omFstr(f,OM_F.JC_STAT)||'—',pri=omFstr(f,OM_F.JC_PRI)||'Normal';
@@ -2737,9 +2930,10 @@ function omBuildDetail(rec,actLog){
       <button class="om-act ok"  data-act="omUpdStat" data-a1="${id}" data-a2="Completed">✓ Completed</button>
       <button class="om-act cl"  data-act="omUpdStat" data-a1="${id}" data-a2="Closed">🔒 Close</button>
       <button class="om-act bad" data-act="omLogNote" data-a1="${id}" data-a2="Escalating — urgent attention required" data-a3="Issue Raised">↑ Escalate</button>
+      ${TX.can('job_cards','export')?`<button class="om-act" data-act="omJcForm" data-a1="${id}">\ud83d\udcc4 Print job card</button>`:''}
     </div>
-    <div class="om-df"><label>Client</label><div style="font-size:13px;">${cli}</div></div>
-    <div class="om-df"><label>Responsible</label><div style="font-size:13px;">${resp}</div></div>
+    <div class="om-df"><label>Client name</label><div style="font-size:13px;">${cli}</div></div>
+    <div class="om-df"><label>Project manager</label><div style="font-size:13px;">${resp}</div></div>
     <div class="om-df"><label>Progress — drag to update</label>
       <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
         <div style="flex:1;"><div class="om-pbw"><div class="om-pbf" id="om-pb-${id}" style="width:${prog}%"></div></div>
@@ -2754,9 +2948,9 @@ function omBuildDetail(rec,actLog){
       <input type="date" value="${due!=='—'?due:''}" style="background:#0e0f11;border:1px solid var(--line2);border-radius:8px;color:var(--text);font-family:monospace;font-size:12px;padding:7px 10px;width:100%;outline:none;"
         data-on="change" data-act="omUpdDue" data-a1="${id}" data-a2="@val">
     </div>
-    <div class="om-df"><label>Issued</label><div style="font-family:monospace;font-size:11px;">${iss}</div></div>
-    ${omRow('Started',   omOpt(f, OM_F.JC_START))}
-    ${omRow('Completed', omOpt(f, OM_F.JC_DONE))}
+    <div class="om-df"><label>Actual date of issue</label><div style="font-family:monospace;font-size:11px;">${iss}</div></div>
+    ${omRow('Planned start date',    omOpt(f, OM_F.JC_START))}
+    ${omRow('Actual completion date', omOpt(f, OM_F.JC_DONE))}
     ${hold ? `<div class="om-df"><label>On hold &mdash; reason</label><div style="font-size:13px;color:#f0c000;font-weight:600;">\u23f8 ${hold}</div></div>` : ''}
     ${omRow('Compliance',     omOpt(f, OM_F.JC_COMPL))}
     ${omRow('Project health', omLight(f, OM_F.JC_HEALTH))}
@@ -2765,6 +2959,7 @@ function omBuildDetail(rec,actLog){
     ${omRow('Sign-offs',      omLinkCount(f, OM_F.JC_SIGN, 'sign-off'))}
     ${canCost ? omRow('Costing', omLinkCount(f, OM_F.JC_COST, 'entry')) : ''}
     <div class="om-df"><label>Record ID</label><div style="font-family:monospace;font-size:10px;color:var(--muted2);">${id}</div></div>
+    ${jcDetailForm(rec)}
     <hr style="border-color:var(--line);margin:12px 0;">
     <div class="om-slbl">Activity Log (${actLog.length})</div>
     <div class="om-tl">${aHtml}</div>
@@ -3080,6 +3275,13 @@ function omRenderNewJC(){
   omFillSelect('njc-type',NJC_TYPES,'');
   omFillSelect('njc-pri',NJC_PRIS,'Medium');
   omFillSelect('njc-stat',NJC_STATS,'New');
+  omFillSelect('njc-entity',JC_ENTITIES,'');
+  omFillSelect('njc-opclass',JC_OPCLASSES,'Standard Operational Activity');
+  const actBox=document.getElementById('njc-actions');
+  if(actBox && !actBox.children.length){
+    actBox.innerHTML=JC_ACTIONS_LIST.map(a=>
+      `<label><input type="checkbox" value="${esc(a)}"><span>${esc(a)}</span></label>`).join('');
+  }
   omFillSelect('njc-owner',OWNER_CATS,'');
   // dates
   document.getElementById('njc-iss').value=new Date().toISOString().slice(0,10);
@@ -3132,10 +3334,33 @@ async function omSubmitNewJC(){
     const pg=document.getElementById('njc-prog').value; if(pg!=='')f[OM_F.JC_PROG]=Number(pg)||0;
     const iss=document.getElementById('njc-iss').value; if(iss)f[OM_F.JC_ISS]=iss;
     const due=document.getElementById('njc-due').value; if(due)f[OM_F.JC_DUE]=due;
+
+    // The paper form's own fields, for the ones that are known when a job card is raised.
+    // The rest -- the inspection, the signatures, the client's acceptance -- are filled in as
+    // the job runs, on the detail screen.
+    const put=(elId,fid)=>{ const e=document.getElementById(elId);
+      const v=e?String(e.value||'').trim():''; if(v) f[fid]=v; };
+    put('njc-entity',   JCF.JC_ENTITY);
+    put('njc-raisedby', JCF.JC_RAISEDBY);
+    put('njc-opclass',  JCF.JC_OPCLASS);
+    put('njc-actother', JCF.JC_ACTOTHER);
+    put('njc-prevnotes',JCF.JC_PREVNOTES);
+    put('njc-gennotes', JCF.JC_GENNOTES);
+    put('njc-prescope', JCF.JC_PRESCOPE);
+    const acts=[...document.querySelectorAll('#njc-actions input:checked')].map(x=>x.value);
+    if(acts.length) f[JCF.JC_ACTIONS]=acts;
     const rec=await omPost(OM_T.JC,f);
-    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${ref}</strong></div>`;
+    // Offered here rather than only on the detail screen: printing it is the next thing
+    // somebody does after raising one, and sending them off to find it again is how a step
+    // gets skipped.
+    const canPrint = rec && rec.id && TX.can('job_cards','export');
+    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${esc(ref)}</strong></div>`
+      +(canPrint
+        ? `<div style="margin-top:8px"><button class="btn sm" data-act="omJcForm" data-a1="${esc(rec.id)}">\ud83d\udcc4 Download the job card</button></div>`
+        : '');
     await omLoadAll(true);
-    setTimeout(()=>omGoView('jc'),1300);
+    // The list is one tap away; leaving on a timer would take the button with it.
+    if(!canPrint) setTimeout(()=>omGoView('jc'),1300);
   }catch(e){ msg.innerHTML=`<div class="om-err">✕ ${e.message}</div>`; }
   btn.textContent='➕ Create Job Card in Airtable';
 }
@@ -3172,6 +3397,7 @@ async function omSubmitNewJC(){
     add('omTktStatus', typeof omTktStatus === 'function' ? omTktStatus : null);
     add('omBookVisit', typeof omBookVisit === 'function' ? omBookVisit : null);
     add('omTktReport', typeof omTktReport === 'function' ? omTktReport : null);
+    add('omJcForm', typeof omJcForm === 'function' ? omJcForm : null);
     add('omTktPullHistory', typeof omTktPullHistory === 'function' ? omTktPullHistory : null);
     add('omPullAll', typeof omPullAll === 'function' ? omPullAll : null);
     add('omPullNone', typeof omPullNone === 'function' ? omPullNone : null);
@@ -3193,6 +3419,8 @@ async function omSubmitNewJC(){
     add('omSetSort', typeof omSetSort === 'function' ? omSetSort : null);
     add('omSubmit', typeof omSubmit === 'function' ? omSubmit : null);
     add('omSubmitNewJC', typeof omSubmitNewJC === 'function' ? omSubmitNewJC : null);
+    add('omJcSet', typeof omJcSet === 'function' ? omJcSet : null);
+    add('omJcMulti', typeof omJcMulti === 'function' ? omJcMulti : null);
     add('omCloseDetail', typeof omCloseDetail === 'function' ? omCloseDetail : null);
     add('omOpenDetail', typeof omOpenDetail === 'function' ? omOpenDetail : null);
     add('omUpdStat', typeof omUpdStat === 'function' ? omUpdStat : null);

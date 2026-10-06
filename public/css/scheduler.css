@@ -295,6 +295,10 @@
     .mod-scheduler .om-pull-row{grid-template-columns:22px 1fr;}
     .mod-scheduler .om-pull-when,.mod-scheduler .om-pull-type{grid-column:2;}
   }
+  /* The paper job card's own controls: a row of ticks, and a single tick with its label. */
+  .mod-scheduler .om-jcmulti{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 10px;}
+  .mod-scheduler .om-jcmulti label,.mod-scheduler .om-jcchk{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12.5px;padding:3px 0;}
+  .mod-scheduler .om-jcmulti input,.mod-scheduler .om-jcchk input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex:none;}
   .mod-scheduler .om-chanopt{
     min-height:44px;display:flex;align-items:center;justify-content:center;
     padding:8px 6px;border:1px solid var(--line2);border-radius:8px;text-align:center;

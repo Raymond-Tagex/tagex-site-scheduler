@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PDF page rendering — browser harness</title>
+</head>
+<body style="font:13px monospace;padding:14px">
+<!--
+  Drives the REAL public/js/pdfpages.js against a REAL composited scan, in a real browser.
+  Nothing else can prove this: the whole point of the module is that the browser's renderer
+  composites layers a server-side image lift cannot.
+
+  The PDF is NOT in this repository — it is a client document. Serve it from somewhere and
+  point the page at it:
+
+      node scripts/ui-harness.js
+      node <scratchpad>/serve.js        # serves the PDF at :4455 with CORS
+      http://localhost:4321/test/pdfpages-harness.html?pdf=http://localhost:4455/sample.pdf
+
+  Without ?pdf= the rendering assertions are SKIPPED and say so — a skipped section must never
+  read as a passing one.
+-->
+<pre id="out"></pre>
+<div id="shots"></div>
+
+<script>window.TX = { $: (s) => document.querySelector(s) };</script>
+<script src="/js/pdfpages.js"></script>
+<script>
+const out = document.getElementById('out');
+let bad = 0;
+let ran = 0;
+const log = (x) => { out.textContent += x + '\n'; };
+const t = (name, got, want) => {
+  ran++;
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) bad++;
+  log((ok ? '  ok    ' : '  FAIL  ') + name
+    + (ok ? '' : '\n          got ' + JSON.stringify(got) + '\n          want ' + JSON.stringify(want)));
+};
+
+(async () => {
+  const P = TX.pdfPages;
+
+  log('WHICH PAGES GET READ');
+  // The front, in order, then a spread through the rest — the FICA check has to be able to see
+  // a bank statement bound into the back of a long agreement.
+  t('a short document is read whole', P.pagePlan(3, 3, 5), [1, 2, 3]);
+  t('a one-page document is one page', P.pagePlan(1, 3, 5), [1]);
+  t('an empty document asks for nothing', P.pagePlan(0, 3, 5), []);
+  const plan = P.pagePlan(38, 3, 5);
+  t('a long one takes the front first', plan.slice(0, 3), [1, 2, 3]);
+  t('then samples through the rest', plan.length, 8);
+  t('reaching the back of the document', plan[plan.length - 1] > 30, true);
+  t('in order, never repeating a page',
+    plan.every((n, i) => i === 0 || n > plan[i - 1]), true);
+  t('and never more than the ceiling', P.pagePlan(400, 3, 50).length <= P.MAX_PAGES, true);
+  t('which is what the module says it is', P.pagePlan(400, 3, 50).length, P.MAX_PAGES);
+
+  log('\nWHAT COUNTS AS A PDF');
+  t('by type', P.isPdf({ type: 'application/pdf', name: 'x' }), true);
+  t('by extension when the browser gave no type', P.isPdf({ type: '', name: 'A SCAN.PDF' }), true);
+  t('a photograph is not one', P.isPdf({ type: 'image/jpeg', name: 'roof.jpg' }), false);
+  t('nor a spreadsheet', P.isPdf({ type: '', name: 'bom.xlsx' }), false);
+
+  const src = new URLSearchParams(location.search).get('pdf');
+  if (!src) {
+    log('\nRENDERING A REAL SCAN');
+    log('  SKIPPED — no ?pdf= given. These assertions did not run.');
+    log('\n' + (bad ? bad + ' FAILED' : ran + ' passed, rendering skipped'));
+    document.title = bad ? 'pdf harness — FAIL' : 'pdf harness — PARTIAL';
+    window.__result = { bad, ran, skipped: true };
+    return;
+  }
+
+  log('\nRENDERING A REAL SCAN');
+  const file = await fetch(src).then((r) => r.blob());
+  log('  source: ' + src + ' (' + Math.round(file.size / 1024) + ' KB)');
+
+  const seen = [];
+  const t0 = Date.now();
+  const out1 = await P.render(file, { onProgress: (d, of) => seen.push(d + '/' + of) });
+  const ms = Date.now() - t0;
+
+  t('the document is read as its real page count', out1.total, 38);
+  t('and the pages planned are the pages rendered', out1.pages.length, P.pagePlan(38, 3, 5).length);
+  t('numbered as they are in the document',
+    out1.pages.map((p) => p.page), P.pagePlan(38, 3, 5));
+  t('progress was reported for each', seen.length, out1.pages.length);
+
+  // THE DEFECT THIS REPLACES. The server's image lift found 4 fragments in this document, of
+  // four different sizes, none of them a page. A rendered page is a page.
+  const dims = [];
+  for (const p of out1.pages) {
+    const url = URL.createObjectURL(p.blob);
+    const img = await new Promise((res, rej) => {
+      const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url;
+    });
+    dims.push(img.width + 'x' + img.height);
+    if (dims.length <= 3) {
+      img.style.cssText = 'width:200px;margin:4px;border:1px solid #999';
+      document.getElementById('shots').appendChild(img);
+    } else { URL.revokeObjectURL(url); }
+  }
+  t('every page comes out the same size, because they are pages',
+    [...new Set(dims)].length, 1);
+  t('at a size OCR can read', Number(dims[0].split('x')[0]) >= 1400, true);
+  t('none is empty', out1.pages.every((p) => p.blob.size > 20000), true);
+  t('and the whole lot fits in one request',
+    out1.pages.reduce((n, p) => n + p.blob.size, 0) < 3 * 1024 * 1024, true);
+  log('  ' + out1.pages.length + ' pages, ' + dims[0] + ', '
+    + Math.round(out1.pages.reduce((n, p) => n + p.blob.size, 0) / 1024) + ' KB total, ' + ms + 'ms');
+
+  // Only the front pages, for the field read.
+  const out2 = await P.render(file, { front: 2, sample: 0 });
+  t('asking for the front alone gives the front alone', out2.pages.map((p) => p.page), [1, 2]);
+
+  log('\n' + (bad ? bad + ' FAILED' : 'all ' + ran + ' passed'));
+  document.title = bad ? 'pdf harness — FAIL' : 'pdf harness — PASS';
+  window.__result = { bad, ran };
+})().catch((e) => {
+  log('\nCRASHED: ' + (e && e.stack || e));
+  document.title = 'pdf harness — FAIL';
+  window.__result = { bad: 999, crash: String(e && e.message || e) };
+});
+</script>
+</body>
+</html>
