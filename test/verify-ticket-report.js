@@ -458,6 +458,26 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
   t('a role that cannot read job cards still gets its list', [r.code, r.body.count], [200, 4]);
 }
 
+console.log('\n\x1b[1mTHE BROWSER HARNESSES PARSE\x1b[0m\n');
+{
+  // A harness page whose script does not parse does not FAIL -- it never starts, never posts
+  // back, and the runner waits on it forever. A redeclared name in the ticket harness's Print
+  // section did exactly that, and it read as a slow test rather than a broken one. Compiling
+  // every inline script here turns that into a failure in the node suite, in a second.
+  const fs = require('fs');
+  const vm = require('vm');
+  const dir = __dirname;
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.html')).sort()) {
+    const html = fs.readFileSync(path.join(dir, file), 'utf8');
+    const blocks = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    blocks.forEach((code, i) => {
+      let err = null;
+      try { new vm.Script(code, { filename: file + '#' + (i + 1) }); } catch (e) { err = e.message; }
+      t(file + ' inline script ' + (i + 1) + ' parses', err, null);
+    });
+  }
+}
+
 console.log('\n' + '='.repeat(70));
 if (fail === 0) console.log(`\x1b[32m\x1b[1m  ALL ${pass} ASSERTIONS PASSED\x1b[0m`);
 else {

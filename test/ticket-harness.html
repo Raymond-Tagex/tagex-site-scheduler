@@ -1796,7 +1796,7 @@ async function suite(log) {
       .find((e) => e.textContent.trim().startsWith(label)));
     await tick();
   };
-  const search = async (q) => {
+  const searchTkts = async (q) => {
     const box = $('om-tktsearch');
     box.value = q;
     box.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1807,7 +1807,7 @@ async function suite(log) {
   tap($('ombn-tickets')); await settle(10);
   t('and offered on the ticket list', shown(), true);
 
-  await search('');
+  await searchTkts('');
   await pickChip('Resolved');
   await pressPrint();
   t('it asks the report endpoint', (REQ[REQ.length - 1] || {}).url, '/api/ticket-report');
@@ -1818,14 +1818,14 @@ async function suite(log) {
   t('Open goes as Open', ((REQ[REQ.length - 1] || {}).body || {}).list, { status: 'OPEN' });
 
   await pickChip('All');
-  await search('inverter');
+  await searchTkts('inverter');
   const onScreen = [...document.querySelectorAll('#om-tktlist .om-jc')].map((e) => e.dataset.a1);
   await pressPrint();
   const sent = ((REQ[REQ.length - 1] || {}).body || {}).list || {};
   t('a search sends what it found', [sent.status, sent.search], ['ALL', 'inverter']);
   t('the ids of exactly the tickets on screen', sent.ids, onScreen);
   t('and there are some, so that means something', onScreen.length > 0, true);
-  await search('');
+  await searchTkts('');
 
   t('the button is usable again afterwards', printBtn().disabled, false);
 
