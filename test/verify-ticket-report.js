@@ -318,6 +318,146 @@ console.log('\n\x1b[1mTHE FILENAME\x1b[0m\n');
   t('and survives a ticket with no reference', /^ticket_Report_\d{8}\.pdf$/.test(R.reportFilename(d2)), true);
 }
 
+console.log('\n\x1b[1mTHE TICKET LIST\x1b[0m\n');
+{
+  // The server's statuses are a copy of the screen's. If one drifts, the printout disagrees
+  // with the chip it was printed from -- so they are compared, not trusted.
+  const fs = require('fs');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'mod-scheduler.js'), 'utf8');
+  const arr = (name) => JSON.parse('[' + new RegExp('const ' + name + '\\s*=\\s*\\[([^\\]]*)\\]').exec(src)[1]
+    .replace(/'/g, '"').replace(/\s+/g, ' ').replace(/,\s*$/, '') + ']');
+  t('the statuses are the screen’s', R.TICKET_STATUSES.slice(), arr('TICKET_STATUSES'));
+  t('and Open means what the Open chip means', R.OPEN_STATUSES.slice(), arr('OM_TKT_OPEN'));
+
+  t('Open takes an open status', R.inFilter('Awaiting Spares', 'OPEN'), true);
+  t('and not a closed one', R.inFilter('Closed', 'OPEN'), false);
+  t('a ticket with no status is New, as on screen', R.inFilter(undefined, 'New'), true);
+  t('and so it is Open', R.inFilter('', 'OPEN'), true);
+  t('a status chip takes only its status', R.inFilter('Resolved', 'Closed'), false);
+  t('All takes everything', R.inFilter('Cancelled', 'ALL'), true);
+  t('a select comes back as {name} and still matches', R.inFilter({ name: 'Closed' }, 'Closed'), true);
+
+  t('days open run to today while open', R.daysOpen('2026-09-01T08:00:00Z', null, '2026-09-11T07:00:00Z'), '9');
+  t('and stop when it closed', R.daysOpen('2026-09-01T08:00:00Z', '2026-09-03T09:00:00Z', '2026-10-01T00:00:00Z'), '2');
+  t('and are blank with no reported date', R.daysOpen(null, null, '2026-10-01T00:00:00Z'), '');
+
+  const row = (i, status) => ({
+    ref: 'TKT-2026-' + String(1000 - i).padStart(4, '0'), reportedAt: '2026-09-20T08:00:00Z', closedAt: null,
+    client: 'Grootvlei', jc: 'OM-2026-0157/INST/TE', subject: 'Inverter offline ' + i,
+    category: 'Inverter Fault', priority: 'High', status,
+  });
+  const many = Array.from({ length: 70 }, (_, i) => row(i, i % 3 ? 'Visit Scheduled' : 'New'));
+  const pdf = await R.ticketListPdf({ filter: 'OPEN', search: '', rows: many,
+    generatedBy: 'raymond@tagexenergy.co.za', generatedAt: '2026-10-08T09:30:00.000Z' });
+  const doc = await PDFDocument.load(pdf);
+  const { width, height } = doc.getPage(0).getSize();
+  t('prints landscape, so the subject has room', width > height, true);
+  // Streams that draw no text (fonts, the odd empty one) are not pages.
+  const pages = pagesOf(pdf).map(drawn).filter((p) => p.length);
+  t('the reader finds as many pages as the document has', pages.length, doc.getPageCount());
+  const text = pages.flat().join('\n');
+  t('the title names the chip', /SERVICE TICKETS — OPEN/.test(text), true);
+  t('and the count', text.includes('70 tickets'), true);
+  t('and what Open means', text.includes('Open tickets (New, Assigned'), true);
+  t('a count per status', /Visit Scheduled\n46/.test(text) && /New\n24/.test(text), true);
+  t('every ticket is on it', many.every((r) => text.includes(r.ref)), true);
+  t('it runs onto more than one page', pages.length > 1, true);
+  t('and the column headings repeat on every page',
+    pages.every((p) => p.includes('Ticket') && p.includes('Subject')), true);
+  t('and every page is numbered', pages.every((p, i) => p.includes(`Page ${i + 1} of ${pages.length}`)), true);
+  t('the days column counts from reported', text.includes('\n18\n'), true);
+
+  const one = await R.ticketListPdf({ filter: 'Closed', search: 'groot', rows: [],
+    generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
+  const t1 = pagesOf(one).map(drawn).flat().join('\n');
+  t('an empty chip says so rather than printing a blank page', t1.includes('No tickets match.'), true);
+  t('and a search is printed with it', t1.includes('Search: "groot"'), true);
+  t('the filename names the chip and the day',
+    R.listFilename({ filter: 'Awaiting Spares', generatedAt: '2026-10-08T09:30:00.000Z' }),
+    'Tickets_Awaiting-Spares_20261008.pdf');
+}
+
+console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
+{
+  process.env.AUTH_MODE = 'session';
+  const api = (m) => path.join(__dirname, '..', 'api', m);
+  const TICKETS = 'tbln5V2ynpBY9sIOc', JOBCARDS = 'tbl2wqnfM0eDa8M7P';
+  const tk = (id, ref, status, extra) => ({ id, createdTime: '2026-09-01T00:00:00.000Z',
+    fields: Object.assign({ 'Ticket Ref': ref, Subject: 'Fault ' + ref, Status: status,
+      'Job Card': ['recJC000000000001'], 'Reported At': '2026-09-20T08:00:00Z' }, extra) });
+  const ROWS = {
+    [TICKETS]: [
+      tk('recTKOPEN00000001', 'TKT-2026-0001', 'New'),
+      tk('recTKOPEN00000002', 'TKT-2026-0002', 'Visit Scheduled'),
+      tk('recTKCLOSED000003', 'TKT-2026-0003', 'Closed'),
+      tk('recTKNOSTATUS0004', 'TKT-2026-0004', undefined),
+    ],
+    [JOBCARDS]: [{ id: 'recJC000000000001', fields: { 'JC Reference': 'OM-2026-0174/MAINT/TE', 'Client Name': ['Grootvlei'] } }],
+  };
+  const AUDIT = [];
+  const stub = (file, exports) => {
+    const id = require.resolve(api(file));
+    require.cache[id] = { id, filename: id, loaded: true, exports };
+  };
+  stub('_lib/airtable.js', {
+    async list(baseId, tableId) { return JSON.parse(JSON.stringify(ROWS[tableId] || [])); },
+    async fieldMaps() { return { idToName: {}, nameToId: {} }; },
+  });
+  let WHO = null;
+  stub('_lib/session.js', {
+    async authenticate() { return WHO; }, clientIp: () => '127.0.0.1', userAgent: () => 'verify',
+  });
+  stub('_lib/audit.js', { audit: (e) => AUDIT.push(e), auditNow: async (e) => { AUDIT.push(e); } });
+  const P = require(api('_lib/permissions.js'));
+  const handler = require(api('ticket-report.js'));
+  const who = (perms) => ({ ok: true, email: 'ops@tagexenergy.co.za', userRecordId: 'recUSER0000000000',
+    sid: 'sid-' + Math.random(), perms: P.effectivePermissions(JSON.stringify(perms), null) });
+  const ALL = { view: true, create: true, edit: true, delete: false, export: true };
+  const ops = who({ tickets: ALL, job_cards: ALL });
+  const call = async (as, body) => {
+    WHO = as;
+    const res = { code: 0, body: null, headers: {},
+      setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; },
+      send(b) { this.body = JSON.parse(b); return this; } };
+    await handler({ method: 'POST', body, headers: {}, url: '/api/ticket-report' }, res);
+    return res;
+  };
+  const printed = (res) => pagesOf(Buffer.from(res.body.content, 'base64')).map(drawn).flat().join('\n');
+
+  let r = await call(ops, { list: { status: 'OPEN' } });
+  t('Open prints', r.code, 200);
+  let text = printed(r);
+  t('the open tickets, including one with no status', ['0001', '0002', '0004'].every((n) => text.includes('TKT-2026-' + n)), true);
+  t('and not the closed one', text.includes('TKT-2026-0003'), false);
+  t('with the job card and client from the job card', text.includes('OM-2026-0174/MAINT/TE') && text.includes('Grootvlei'), true);
+  t('and says how many', r.body.count, 3);
+  t('it is audited as an export', AUDIT.some((a) => a.action === 'Export' && a.result === 'Allowed' && /Open, 3 ticket/.test(a.newValue)), true);
+
+  r = await call(ops, { list: { status: 'Closed' } });
+  t('a single status prints only that status', [r.body.count, printed(r).includes('TKT-2026-0003')], [1, true]);
+
+  // The ids from a search only narrow. A closed ticket's id sent under Open is not printed:
+  // the chip is applied here, whatever the browser sent.
+  r = await call(ops, { list: { status: 'OPEN', search: 'fault', ids: ['recTKOPEN00000002', 'recTKCLOSED000003'] } });
+  text = printed(r);
+  t('a search prints only the tickets it found', text.includes('TKT-2026-0002') && !text.includes('TKT-2026-0001'), true);
+  t('and never one outside the chip', text.includes('TKT-2026-0003'), false);
+
+  r = await call(ops, { list: { status: 'Everything' } });
+  t('a chip that does not exist is refused', r.code, 400);
+  r = await call(ops, { list: { status: 'OPEN', ids: ['not-a-record'] } });
+  t('and so is a list of ids that are not record ids', r.code, 400);
+
+  const noExport = who({ tickets: { view: true, create: true, edit: true, delete: false, export: false } });
+  AUDIT.length = 0;
+  r = await call(noExport, { list: { status: 'OPEN' } });
+  t('a role without tickets:export is refused', r.code, 403);
+  t('and the refusal is audited', AUDIT.some((a) => a.result === 'Denied'), true);
+
+  r = await call(who({ tickets: ALL }), { list: { status: 'ALL' } });
+  t('a role that cannot read job cards still gets its list', [r.code, r.body.count], [200, 4]);
+}
+
 console.log('\n' + '='.repeat(70));
 if (fail === 0) console.log(`\x1b[32m\x1b[1m  ALL ${pass} ASSERTIONS PASSED\x1b[0m`);
 else {

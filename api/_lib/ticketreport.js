@@ -137,17 +137,22 @@ function safe(v) {
 }
 
 class Sheet {
-  constructor(doc, fonts) {
+  // The size is a parameter because the ticket LIST prints landscape: eight columns across a
+  // portrait page left the subject two words wide.
+  constructor(doc, fonts, size = A4) {
     this.doc = doc;
+    this.W = size.w;
+    this.H = size.h;
+    this.cw = size.w - 2 * M;
     this.f = fonts;
     this.pages = [];
     this.newPage();
   }
 
   newPage() {
-    this.page = this.doc.addPage([A4.w, A4.h]);
+    this.page = this.doc.addPage([this.W, this.H]);
     this.pages.push(this.page);
-    this.y = A4.h - M;
+    this.y = this.H - M;
     return this.page;
   }
 
@@ -163,7 +168,7 @@ class Sheet {
     this.y -= gap;
   }
 
-  para(s, { size = 9, font = this.f.reg, colour = INK, width = CW } = {}) {
+  para(s, { size = 9, font = this.f.reg, colour = INK, width = this.cw } = {}) {
     for (const line of wrap(safe(s), font, size, width)) {
       if (line === '') { this.y -= size * 0.6; continue; }
       this.text(line, { size, font, colour });
@@ -175,7 +180,7 @@ class Sheet {
     this.y -= 14;
     this.page.drawText(safe(s.toUpperCase()), { x: M, y: this.y, size: 9, font: this.f.bold, color: ACCENT });
     this.y -= 5;
-    this.page.drawLine({ start: { x: M, y: this.y }, end: { x: M + CW, y: this.y }, thickness: 0.7, color: RULE });
+    this.page.drawLine({ start: { x: M, y: this.y }, end: { x: M + this.cw, y: this.y }, thickness: 0.7, color: RULE });
     this.y -= 8;
   }
 
@@ -184,7 +189,7 @@ class Sheet {
     const v = str(value);
     if (!v) return;                    // an empty row says nothing; leave it out
     const labelW = 120;
-    const lines = wrap(safe(v), this.f.reg, 9, CW - labelW);
+    const lines = wrap(safe(v), this.f.reg, 9, this.cw - labelW);
     this.need(lines.length * 11);
     this.y -= 9;
     this.page.drawText(safe(label), { x: M, y: this.y, size: 9, font: this.f.bold, color: MUTED });
@@ -210,7 +215,7 @@ class Sheet {
         x += widths[i];
       });
       this.y -= 3;
-      this.page.drawLine({ start: { x: M, y: this.y }, end: { x: M + CW, y: this.y }, thickness: 0.5, color: RULE });
+      this.page.drawLine({ start: { x: M, y: this.y }, end: { x: M + this.cw, y: this.y }, thickness: 0.5, color: RULE });
       this.y -= 2;
     };
     drawHead();
@@ -228,7 +233,7 @@ class Sheet {
         x += widths[i];
       });
       this.y = top - h;
-      this.page.drawLine({ start: { x: M, y: this.y + 2 }, end: { x: M + CW, y: this.y + 2 }, thickness: 0.3, color: RULE });
+      this.page.drawLine({ start: { x: M, y: this.y + 2 }, end: { x: M + this.cw, y: this.y + 2 }, thickness: 0.3, color: RULE });
     }
     this.y -= 4;
   }
@@ -236,6 +241,22 @@ class Sheet {
   note(s) {
     this.text(s, { size: 8, colour: MUTED, gap: 3 });
   }
+}
+
+/** Company line, confidentiality and page numbers on every page, whatever its size. */
+function footer(s, fonts) {
+  const total = s.pages.length;
+  s.pages.forEach((page, i) => {
+    page.drawLine({ start: { x: M, y: M + 16 }, end: { x: M + s.cw, y: M + 16 }, thickness: 0.5, color: RULE });
+    const left = `VAT: ${CO.vat}` + (CO.reg ? `  ·  Reg: ${CO.reg}` : '');
+    page.drawText(safe(left), { x: M, y: M + 5, size: 7, font: fonts.reg, color: MUTED });
+    const mid = `${CO.name} — CONFIDENTIAL`;
+    const midW = fonts.reg.widthOfTextAtSize(mid, 7);
+    page.drawText(safe(mid), { x: M + (s.cw - midW) / 2, y: M + 5, size: 7, font: fonts.reg, color: MUTED });
+    const right = `Page ${i + 1} of ${total}`;
+    const rightW = fonts.reg.widthOfTextAtSize(right, 7);
+    page.drawText(right, { x: M + s.cw - rightW, y: M + 5, size: 7, font: fonts.reg, color: MUTED });
+  });
 }
 
 /**
@@ -379,26 +400,122 @@ async function ticketReportPdf(d) {
   });
   s.y -= 16;
 
-  // ── footer on every page ─────────────────────────────────────────────────
-  const total = s.pages.length;
-  s.pages.forEach((page, i) => {
-    page.drawLine({ start: { x: M, y: M + 16 }, end: { x: M + CW, y: M + 16 }, thickness: 0.5, color: RULE });
-    const left = `VAT: ${CO.vat}` + (CO.reg ? `  ·  Reg: ${CO.reg}` : '');
-    page.drawText(safe(left), { x: M, y: M + 5, size: 7, font: fonts.reg, color: MUTED });
-    const mid = `${CO.name} — CONFIDENTIAL`;
-    const midW = fonts.reg.widthOfTextAtSize(mid, 7);
-    page.drawText(safe(mid), { x: M + (CW - midW) / 2, y: M + 5, size: 7, font: fonts.reg, color: MUTED });
-    const right = `Page ${i + 1} of ${total}`;
-    const rightW = fonts.reg.widthOfTextAtSize(right, 7);
-    page.drawText(right, { x: M + CW - rightW, y: M + 5, size: 7, font: fonts.reg, color: MUTED });
-  });
+  footer(s, fonts);
 
   return Buffer.from(await doc.save());
 }
+
+// ── the ticket LIST ─────────────────────────────────────────────────────────
+//
+// What the Tickets screen shows under one status chip, on paper. The statuses are the screen's
+// own, copied here because the server decides what is printed: a list built from whatever the
+// browser claimed was "Open" could be made to print anything. A test holds the two copies equal.
+
+const TICKET_STATUSES = Object.freeze(['New', 'Assigned', 'In Progress', 'Awaiting Spares',
+  'Awaiting Client', 'Visit Scheduled', 'Second Visit Required', 'Second Visit Scheduled',
+  'Resolved', 'Closed', 'Cancelled']);
+const OPEN_STATUSES = Object.freeze(TICKET_STATUSES.slice(0, 8));
+
+const A4_LANDSCAPE = { w: A4.h, h: A4.w };
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The chip as a person would say it. */
+const filterLabel = (f) => (f === 'OPEN' ? 'Open' : f === 'ALL' ? 'All' : f);
+
+/** Whether a ticket belongs under a chip. A ticket with no status is New, as on screen. */
+function inFilter(status, filter) {
+  const st = str(status) || 'New';
+  if (filter === 'ALL') return true;
+  if (filter === 'OPEN') return OPEN_STATUSES.includes(st);
+  return st === filter;
+}
+
+/** Whole days from reported to closed, or to now while it is still open. Blank when unknown. */
+function daysOpen(reportedAt, closedAt, now) {
+  const from = Date.parse(reportedAt || '');
+  if (isNaN(from)) return '';
+  const to = closedAt ? Date.parse(closedAt) : Date.parse(now);
+  if (isNaN(to) || to < from) return '';
+  return String(Math.floor((to - from) / DAY_MS));
+}
+
+/**
+ * @param {object} d { filter, search, rows[], generatedBy, generatedAt }
+ *   rows: { ref, reportedAt, closedAt, client, jc, subject, category, priority, status }
+ * @returns {Promise<Buffer>}
+ */
+async function ticketListPdf(d) {
+  const doc = await PDFDocument.create();
+  const fonts = {
+    reg: await doc.embedFont(StandardFonts.Helvetica),
+    bold: await doc.embedFont(StandardFonts.HelveticaBold),
+  };
+  const s = new Sheet(doc, fonts, A4_LANDSCAPE);
+  const rows = d.rows || [];
+  const label = filterLabel(d.filter);
+
+  s.page.drawText(safe(CO.name), { x: M, y: s.y - 13, size: 13, font: fonts.bold, color: INK });
+  s.y -= 17;
+  s.page.drawText(safe(CO.addr), { x: M, y: s.y - 9, size: 8, font: fonts.reg, color: MUTED });
+  s.y -= 13;
+  s.page.drawText(safe('SERVICE TICKETS — ' + label.toUpperCase()), { x: M, y: s.y - 12, size: 12, font: fonts.bold, color: ACCENT });
+  const n = `${rows.length} ticket${rows.length === 1 ? '' : 's'}`;
+  const nW = fonts.bold.widthOfTextAtSize(n, 12);
+  s.page.drawText(n, { x: M + s.cw - nW, y: s.y - 12, size: 12, font: fonts.bold, color: INK });
+  s.y -= 17;
+  s.page.drawLine({ start: { x: M, y: s.y }, end: { x: M + s.cw, y: s.y }, thickness: 1, color: ACCENT });
+  s.y -= 4;
+  s.note(`Generated ${fmtDateTime(d.generatedAt)} SAST by ${d.generatedBy || 'unknown'}`);
+  s.note('Showing: ' + (d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
+    : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + label));
+  if (d.search) s.note(`Search: "${d.search}"`);
+
+  // A count per status first, so the page answers "how many" before anyone reads a row.
+  s.heading('By status');
+  const present = TICKET_STATUSES.filter((st) => rows.some((r) => (str(r.status) || 'New') === st));
+  if (!present.length) s.note('No tickets match.');
+  else {
+    s.table([
+      { head: 'Status', key: 'st', w: 160 },
+      { head: 'Tickets', key: 'n', w: 60 },
+    ], present.map((st) => ({ st, n: String(rows.filter((r) => (str(r.status) || 'New') === st).length) })));
+  }
+
+  s.heading('Tickets');
+  if (!rows.length) s.note('No tickets match.');
+  else {
+    const W = { ref: 70, rep: 56, days: 34, cli: 120, jc: 104, cat: 86, pri: 46, st: 82 };
+    W.subj = s.cw - Object.values(W).reduce((a, b) => a + b, 0);
+    s.table([
+      { head: 'Ticket', key: 'ref', w: W.ref },
+      { head: 'Reported', key: 'rep', w: W.rep },
+      { head: 'Days', key: 'days', w: W.days },
+      { head: 'Client', key: 'client', w: W.cli },
+      { head: 'Job card', key: 'jc', w: W.jc },
+      { head: 'Subject', key: 'subject', w: W.subj },
+      { head: 'Category', key: 'category', w: W.cat },
+      { head: 'Priority', key: 'priority', w: W.pri },
+      { head: 'Status', key: 'status', w: W.st },
+    ], rows.map((r) => ({
+      ref: r.ref, rep: fmtDate(r.reportedAt), days: daysOpen(r.reportedAt, r.closedAt, d.generatedAt),
+      client: r.client, jc: r.jc, subject: r.subject, category: r.category,
+      priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
+    })));
+    s.note('Days: from reported to closed, or to today while the ticket is still open.');
+  }
+
+  footer(s, fonts);
+  return Buffer.from(await doc.save());
+}
+
+const listFilename = (d) => `Tickets_${filterLabel(d.filter).replace(/[^A-Za-z0-9]+/g, '-')}_${stamp(d.generatedAt)}.pdf`;
 
 const reportFilename = (d) => {
   const ref = String((d.ticket && d.ticket['Ticket Ref']) || 'ticket').replace(/[^A-Za-z0-9-]/g, '');
   return `${ref}_Report_${stamp(d.generatedAt)}.pdf`;
 };
 
-module.exports = { ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str };
+module.exports = {
+  ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str,
+  ticketListPdf, listFilename, inFilter, daysOpen, filterLabel, TICKET_STATUSES, OPEN_STATUSES,
+};

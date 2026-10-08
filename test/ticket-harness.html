@@ -1778,6 +1778,74 @@ async function suite(log) {
   await backToTkt('TKT-2026-0012');
   t('so it is not offered', !!d().querySelector('[data-act="omTktPullHistory"]'), false);
 
+  log('\nPRINTING THE TICKET LIST');
+  // The PDF is built on the server and checked in verify-ticket-report.js. What only a browser
+  // can show is that the button is where the list is, and that it asks for what is on screen.
+  const REQ = [];
+  const realRequest = TX.request;
+  TX.request = async (url, body) => {
+    REQ.push({ url, body: JSON.parse(JSON.stringify(body)) });
+    if (window.FAIL_PRINT) throw new Error(window.FAIL_PRINT);
+    return { content: btoa('%PDF-1.4\n'), filename: 'Tickets.pdf', contentType: 'application/pdf', count: 2 };
+  };
+  const printBtn = () => $('tktPrintTop');
+  const shown = () => !!printBtn() && !printBtn().hidden;
+  const pressPrint = async () => { tap(printBtn()); await settle(8); };
+  const pickChip = async (label) => {
+    tap([...document.querySelectorAll('#om-tktchips .om-chip')]
+      .find((e) => e.textContent.trim().startsWith(label)));
+    await tick();
+  };
+  const search = async (q) => {
+    const box = $('om-tktsearch');
+    box.value = q;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    await tick();
+  };
+
+  t('the Print button is in the top bar', !!printBtn() && !!printBtn().closest('header.topbar'), true);
+  tap($('ombn-tickets')); await settle(10);
+  t('and offered on the ticket list', shown(), true);
+
+  await search('');
+  await pickChip('Resolved');
+  await pressPrint();
+  t('it asks the report endpoint', (REQ[REQ.length - 1] || {}).url, '/api/ticket-report');
+  t('for the chip that is selected, and nothing else', (REQ[REQ.length - 1] || {}).body, { list: { status: 'Resolved' } });
+
+  await pickChip('Open');
+  await pressPrint();
+  t('Open goes as Open', ((REQ[REQ.length - 1] || {}).body || {}).list, { status: 'OPEN' });
+
+  await pickChip('All');
+  await search('inverter');
+  const onScreen = [...document.querySelectorAll('#om-tktlist .om-jc')].map((e) => e.dataset.a1);
+  await pressPrint();
+  const sent = ((REQ[REQ.length - 1] || {}).body || {}).list || {};
+  t('a search sends what it found', [sent.status, sent.search], ['ALL', 'inverter']);
+  t('the ids of exactly the tickets on screen', sent.ids, onScreen);
+  t('and there are some, so that means something', onScreen.length > 0, true);
+  await search('');
+
+  t('the button is usable again afterwards', printBtn().disabled, false);
+
+  window.FAIL_PRINT = 'tickets:export required';
+  await pressPrint();
+  const toastNow = (document.getElementById('schedToast') || {}).textContent || '';
+  t('a refused print says so', /Print failed/.test(toastNow), true);
+  t('and the button comes back', printBtn().disabled, false);
+  window.FAIL_PRINT = null;
+
+  tap($('ombn-dash')); await settle(6);
+  t('it is not offered on the dashboard', shown(), false);
+  tap($('ombn-tickets')); await settle(6);
+  t('and comes back with the list', shown(), true);
+  tap(document.querySelector('[data-tab="calendar"]')); await settle(4);
+  t('nor on the calendar, which shares the top bar', shown(), false);
+  tap(document.querySelector('[data-tab="omtickets"]')); await settle(10);
+  t('and returning to the tickets tab brings it back', shown(), true);
+  TX.request = realRequest;
+
   return bad;
 }
 
@@ -2256,6 +2324,18 @@ const MUTANTS = [
   ['the note box is not offered at all',
    '      ${canEdit?`\n      <div class="om-fcard"><div class="om-fttl">Add a note</div>',
    '      ${false?`\n      <div class="om-fcard"><div class="om-fttl">Add a note</div>'],
+
+  ['the Print button shows on every tab',
+   "  b.hidden=!(tab&&!tab.classList.contains('hidden')&&omCurrentView==='tickets');",
+   '  b.hidden=false;'],
+
+  ['Print ignores the chip that is selected',
+   '    const list={ status:omTktFilter };',
+   "    const list={ status:'ALL' };"],
+
+  ['Print sends the search but not what it found',
+   '    if(q){ list.search=q; list.ids=omFilteredTkts().map(r=>r.id); }',
+   '    if(q){ list.search=q; }'],
 
   ['a category is no longer required',
    "if(!cat||!subj) return fail('Category and Subject are required');",

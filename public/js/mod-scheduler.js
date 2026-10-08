@@ -1339,6 +1339,7 @@ function switchTab(tab){
   el.app.querySelector("main").classList.toggle("om-mode",tab==="omtickets");
   if(tab==="dashboard") renderDashboard();
   if(tab==="omtickets"){ if(!omLoaded){ omLoaded=true; omLoadAll(); } else omGoView(omCurrentView); }
+  omSyncPrintBtn();
 }
 function shiftCursor(dir){
   if(curView==="month") cursor.setMonth(cursor.getMonth()+dir);
@@ -2403,23 +2404,52 @@ async function omJcForm(id){
   if(btn){ btn.disabled=false; btn.textContent=was; }
 }
 
+/** Hand a PDF the server built to the browser as a download. */
+function omDownloadPdf(r,fallbackName){
+  // base64 -> bytes. A PDF is binary; anything that treats it as text corrupts it.
+  const bin=atob(r.content);
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  const url=URL.createObjectURL(new Blob([bytes],{type:r.contentType||'application/pdf'}));
+  const a=document.createElement('a');
+  a.href=url; a.download=r.filename||fallbackName;
+  document.body.appendChild(a); a.click(); a.remove();
+  // Revoked on a later turn of the loop: revoking immediately cancels the download in
+  // some browsers before it has started.
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
+}
+
+/**
+ * Print the tickets under the chip that is selected, as a PDF the server builds.
+ *
+ * The chip goes as a name; the server applies it to what it reads itself. With a search typed,
+ * the ids on screen go too, and the server prints only those of them that are under the chip.
+ */
+async function omTktPrintList(){
+  const btn=document.getElementById('tktPrintTop');
+  const was=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
+  try{
+    const q=omTktSearchQ.trim();
+    const list={ status:omTktFilter };
+    if(q){ list.search=q; list.ids=omFilteredTkts().map(r=>r.id); }
+    const r=await TX.request('/api/ticket-report',{ list });
+    omDownloadPdf(r,'tickets.pdf');
+    toast((r.count===1?'1 ticket':(r.count||0)+' tickets')+' \u2014 PDF downloaded','ok');
+  }catch(e){
+    toast('Print failed: '+TX.errorText(e),'bad');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent=was; }
+  }
+}
+
 async function omTktReport(id){
   const btn=document.querySelector('[data-act="omTktReport"]');
   const was=btn?btn.textContent:'';
   if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
   try{
     const r=await TX.request('/api/ticket-report',{ ticketId:id });
-    // base64 -> bytes. A PDF is binary; anything that treats it as text corrupts it.
-    const bin=atob(r.content);
-    const bytes=new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
-    const url=URL.createObjectURL(new Blob([bytes],{type:r.contentType||'application/pdf'}));
-    const a=document.createElement('a');
-    a.href=url; a.download=r.filename||'ticket-report.pdf';
-    document.body.appendChild(a); a.click(); a.remove();
-    // Revoked on a later turn of the loop: revoking immediately cancels the download in
-    // some browsers before it has started.
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
+    omDownloadPdf(r,'ticket-report.pdf');
     toast('Report downloaded','ok');
   }catch(e){
     toast('Report failed: '+TX.errorText(e),'bad');
@@ -3218,6 +3248,18 @@ function omGoView(name){
   if(name==='newjc') omRenderNewJC();
   if(name==='new')   omSetReportedNow();
   if(name==='tickets') omShowTickets();
+  omSyncPrintBtn();
+}
+
+/**
+ * The Print button sits in the top bar, which every tab shares, so it is only offered while the
+ * ticket LIST is on screen -- on the calendar it would print something nobody is looking at.
+ * Removed outright (data-requires) for a role without tickets:export.
+ */
+function omSyncPrintBtn(){
+  const b=document.getElementById('tktPrintTop'); if(!b)return;
+  const tab=document.getElementById('view-omtickets');
+  b.hidden=!(tab&&!tab.classList.contains('hidden')&&omCurrentView==='tickets');
 }
 
 // ── Helpers ──
@@ -3397,6 +3439,7 @@ async function omSubmitNewJC(){
     add('omTktStatus', typeof omTktStatus === 'function' ? omTktStatus : null);
     add('omBookVisit', typeof omBookVisit === 'function' ? omBookVisit : null);
     add('omTktReport', typeof omTktReport === 'function' ? omTktReport : null);
+    add('omTktPrintList', typeof omTktPrintList === 'function' ? omTktPrintList : null);
     add('omJcForm', typeof omJcForm === 'function' ? omJcForm : null);
     add('omTktPullHistory', typeof omTktPullHistory === 'function' ? omTktPullHistory : null);
     add('omPullAll', typeof omPullAll === 'function' ? omPullAll : null);

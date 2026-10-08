@@ -1,4 +1,8 @@
 // POST /api/ticket-report — the Service Ticket Report for one ticket, as a PDF.
+// POST /api/ticket-report { list: { status, ids? , search? } } — the ticket LIST, as a PDF.
+//
+// The list shares this endpoint rather than taking a new one: the deployment counts against
+// the Hobby plan's twelve functions, and both are the same export right on the same table.
 //
 // THE CLIENT SENDS A RECORD ID AND NOTHING ELSE.
 //
@@ -20,6 +24,7 @@ const P = require('./_lib/permissions.js');
 const R = require('./_lib/ticketreport.js');
 
 const BASE = 'OM';
+const MAX_LIST_IDS = 5000;
 const MAX_VISITS = 200;
 const MAX_SPARES = 500;
 const MAX_ACTS = 500;
@@ -69,6 +74,8 @@ module.exports = async function handler(req, res) {
   let body;
   try { body = await H.readBody(req); }
   catch (e) { return H.fail(res, 400, e.code || 'bad_request', e.message); }
+
+  if (body.list) return listReport(auth, ctx, body.list, res);
 
   const ticketId = String(body.ticketId || '').trim();
   if (!/^rec[A-Za-z0-9]{14}$/.test(ticketId)) {
@@ -180,3 +187,82 @@ module.exports = async function handler(req, res) {
       'The report could not be compiled: ' + String(e.message || e).slice(0, 200));
   }
 };
+
+/**
+ * The tickets under one status chip, as the Tickets screen lists them.
+ *
+ * THE SERVER DECIDES WHICH TICKETS ARE PRINTED. The browser names the chip; the status test is
+ * applied here, to rows read here, through the role's own read rules. When a search is active
+ * the browser also sends the ids it is showing -- matching the screen's search exactly would
+ * mean re-implementing it twice -- and those only ever NARROW the list: an id outside the chip,
+ * or one the role cannot read, is simply not printed.
+ */
+async function listReport(auth, ctx, list, res) {
+  const filter = String((list && list.status) || '').trim();
+  if (!['OPEN', 'ALL', ...R.TICKET_STATUSES].includes(filter)) {
+    return H.fail(res, 400, 'bad_request', 'Choose which tickets to print.');
+  }
+  let only = null;
+  if (list.ids != null) {
+    if (!Array.isArray(list.ids) || list.ids.length > MAX_LIST_IDS
+      || !list.ids.every((x) => typeof x === 'string' && /^rec[A-Za-z0-9]{14}$/.test(x))) {
+      return H.fail(res, 400, 'bad_request', 'The ticket list sent is not valid.');
+    }
+    only = new Set(list.ids);
+  }
+  // Printed as typed, so it is cut short and stripped of anything that is not text.
+  const search = String(list.search || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80);
+
+  try {
+    const tickets = (await readAll(auth, 'tickets', 'ticket'))
+      .filter((x) => R.inFilter(x.fields.Status, filter))
+      .filter((x) => !only || only.has(x.id));
+
+    // Job cards give each ticket its reference and client, as on screen. A role that cannot
+    // read them still gets its list, with those two columns empty.
+    const jcs = {};
+    try {
+      for (const j of await readAll(auth, 'job_cards')) jcs[j.id] = j.fields;
+    } catch (e) { /* no job card access */ }
+
+    const rows = tickets.map((x) => {
+      const f = x.fields;
+      const jc = jcs[ids(f['Job Card'])[0]] || {};
+      return {
+        ref: R.str(f['Ticket Ref']),
+        reportedAt: f['Reported At'] || null,
+        closedAt: f['Closed At'] || null,
+        client: R.str(jc['Client Name']),
+        jc: R.str(jc['JC Reference']),
+        subject: R.str(f.Subject),
+        category: R.str(f['Fault Category']),
+        priority: R.str(f.Priority),
+        status: R.str(f.Status),
+      };
+    // Newest first, the order the screen lists them in.
+    }).sort((a, b) => b.ref.localeCompare(a.ref));
+
+    const payload = {
+      filter, search, rows, generatedBy: auth.email, generatedAt: new Date().toISOString(),
+    };
+    const pdf = await R.ticketListPdf(payload);
+
+    await A.auditNow({
+      ...ctx, action: 'Export', result: 'Allowed', field: 'Ticket list',
+      newValue: `Service ticket list: ${R.filterLabel(filter)}, ${rows.length} ticket(s)`
+        + (search ? `, search "${search}"` : ''),
+    });
+
+    return H.ok(res, {
+      filename: R.listFilename(payload),
+      contentType: 'application/pdf',
+      content: pdf.toString('base64'),
+      bytes: pdf.length,
+      count: rows.length,
+    });
+  } catch (e) {
+    if (e.status) return H.fail(res, e.status, e.reason || 'error', e.message);
+    return H.fail(res, 500, 'report_failed',
+      'The ticket list could not be compiled: ' + String(e.message || e).slice(0, 200));
+  }
+}
