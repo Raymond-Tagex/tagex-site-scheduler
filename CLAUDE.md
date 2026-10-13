@@ -86,6 +86,26 @@ window actually drawing: pdf.js renders nothing in a hidden or backgrounded tab.
 **A test that passes for the wrong reason is worse than no test.** Put the bug back and check
 the test fails.
 
+## One trunk: `claude/delivery-status-mismatches-hq3pfj`
+
+**This repository is worked by several Claude sessions at once**, and each branches off
+whatever it last saw. That is how work gets dropped and how a decision gets quietly reversed by
+somebody acting in good faith.
+
+- **Start from `claude/delivery-status-mismatches-hq3pfj`.** It is the default branch and the
+  trunk, whatever its name suggests. Fetch before you branch — it has usually moved.
+- **Finish by merging back into it,** through a pull request. That is what has been happening
+  here (#1, #2, #3) and it is why this repository has not lost anything; the sister repository,
+  tagex-delivery, merged straight onto its trunk and did.
+- **A branch that is pushed and left is a branch that is not deployed.** `vercel --prod` ships
+  the local working directory, so anything only on a side branch is invisible to the next
+  release.
+- **Read before you rewrite.** A function carrying a comment that explains a decision had that
+  decision made on purpose, and usually measured. Changing it is fine; reversing it without
+  noticing is not. Say so in the commit message when you do.
+- **Leave the reason in the code, not in the chat.** A convention agreed in conversation is
+  invisible to the next session. This file is the one place every session reads.
+
 ## Working here
 
 - **Verify against live Airtable before changing code.** Field names, select choices and record
