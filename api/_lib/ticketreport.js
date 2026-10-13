@@ -440,71 +440,178 @@ function daysOpen(reportedAt, closedAt, now) {
 }
 
 /**
+ * The ticket list ALWAYS prints on ONE landscape page: the text is set as large as the page allows
+ * (up to MAX_PT) and shrinks only as far as the number of tickets forces it to. The print date is
+ * large at the top right, so a sheet on a wall says at a glance how old it is.
+ *
  * @param {object} d { filter, search, rows[], generatedBy, generatedAt }
  *   rows: { ref, reportedAt, closedAt, client, jc, subject, category, priority, status }
  * @returns {Promise<Buffer>}
  */
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "Thu 08 Oct 2026" in SAST: the month in words so nobody reads 08/10 as August. */
+function bigDate(iso) {
+  const t = Date.parse(iso || '');
+  if (isNaN(t)) return '';
+  const d = new Date(t + SAST_MS);
+  return `${DAYS[d.getUTCDay()]} ${p2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 async function ticketListPdf(d) {
   const doc = await PDFDocument.create();
   const fonts = {
     reg: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
   };
-  const s = new Sheet(doc, fonts, A4_LANDSCAPE);
+  const LM = 28;                                   // tighter margin than the ticket report: one page has to hold it all
+  const HEADER = 66;                               // company, title and the big date, down to the orange rule
+  let W; let H; let cw; let page;                  // set once the orientation is chosen (see "fit")
   const rows = d.rows || [];
   const label = filterLabel(d.filter);
+  const put = (t, x, y, size, font = fonts.reg, color = INK) => page.drawText(safe(t), { x, y, size, font, color });
+  const right = (t, y, size, font = fonts.reg, color = INK) => put(t, LM + cw - font.widthOfTextAtSize(safe(t), size), y, size, font, color);
 
-  s.page.drawText(safe(CO.name), { x: M, y: s.y - 13, size: 13, font: fonts.bold, color: INK });
-  s.y -= 17;
-  s.page.drawText(safe(CO.addr), { x: M, y: s.y - 9, size: 8, font: fonts.reg, color: MUTED });
-  s.y -= 13;
-  s.page.drawText(safe('SERVICE TICKETS — ' + label.toUpperCase()), { x: M, y: s.y - 12, size: 12, font: fonts.bold, color: ACCENT });
-  const n = `${rows.length} ticket${rows.length === 1 ? '' : 's'}`;
-  const nW = fonts.bold.widthOfTextAtSize(n, 12);
-  s.page.drawText(n, { x: M + s.cw - nW, y: s.y - 12, size: 12, font: fonts.bold, color: INK });
-  s.y -= 17;
-  s.page.drawLine({ start: { x: M, y: s.y }, end: { x: M + s.cw, y: s.y }, thickness: 1, color: ACCENT });
-  s.y -= 4;
-  s.note(`Generated ${fmtDateTime(d.generatedAt)} SAST by ${d.generatedBy || 'unknown'}`);
-  s.note('Showing: ' + (d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
-    : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + label));
-  if (d.search) s.note(`Search: "${d.search}"`);
-
-  // A count per status first, so the page answers "how many" before anyone reads a row.
-  s.heading('By status');
+  const showing = 'Showing: ' + (d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
+    : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + label) + (d.search ? `    Search: "${d.search}"` : '');
   const present = TICKET_STATUSES.filter((st) => rows.some((r) => (str(r.status) || 'New') === st));
-  if (!present.length) s.note('No tickets match.');
-  else {
-    s.table([
-      { head: 'Status', key: 'st', w: 160 },
-      { head: 'Tickets', key: 'n', w: 60 },
-    ], present.map((st) => ({ st, n: String(rows.filter((r) => (str(r.status) || 'New') === st).length) })));
-  }
+  const counts = present.map((st) => [st, String(rows.filter((r) => (str(r.status) || 'New') === st).length)]);
 
-  s.heading('Tickets');
-  if (!rows.length) s.note('No tickets match.');
-  else {
-    const W = { ref: 70, rep: 56, days: 34, cli: 120, jc: 104, cat: 86, pri: 46, st: 82 };
-    W.subj = s.cw - Object.values(W).reduce((a, b) => a + b, 0);
-    s.table([
-      { head: 'Ticket', key: 'ref', w: W.ref },
-      { head: 'Reported', key: 'rep', w: W.rep },
-      { head: 'Days', key: 'days', w: W.days },
-      { head: 'Client', key: 'client', w: W.cli },
-      { head: 'Job card', key: 'jc', w: W.jc },
-      { head: 'Subject', key: 'subject', w: W.subj },
-      { head: 'Category', key: 'category', w: W.cat },
-      { head: 'Priority', key: 'priority', w: W.pri },
-      { head: 'Status', key: 'status', w: W.st },
-    ], rows.map((r) => ({
-      ref: r.ref, rep: fmtDate(r.reportedAt), days: daysOpen(r.reportedAt, r.closedAt, d.generatedAt),
-      client: r.client, jc: r.jc, subject: r.subject, category: r.category,
-      priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
-    })));
-    s.note('Days: from reported to closed, or to today while the ticket is still open.');
-  }
+  // fixed: sized to their longest value so a ticket or job card number is never split; the rest wrap
+  // and share what is left (p = share).
+  const COLS = [
+    { head: 'Ticket', key: 'ref', fixed: true, bold: true }, { head: 'Reported', key: 'rep', fixed: true }, { head: 'Days', key: 'days', fixed: true },
+    { head: 'Client', key: 'client', p: 18 }, { head: 'Job card', key: 'jc', fixed: true }, { head: 'Subject', key: 'subject', p: 38 },
+    { head: 'Category', key: 'category', p: 16 }, { head: 'Priority', key: 'priority', fixed: true }, { head: 'Status', key: 'status', p: 14 },
+  ];
+  const data = rows.map((r) => ({
+    ref: r.ref, rep: fmtDate(r.reportedAt), days: daysOpen(r.reportedAt, r.closedAt, d.generatedAt),
+    client: r.client, jc: r.jc, subject: r.subject, category: r.category,
+    priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
+  }));
 
-  footer(s, fonts);
+  // status counts as chips, wrapped onto as many lines as they need at size sp
+  const chipLines = (sp) => {
+    const out = [[]]; let x = 0;
+    for (const [st, c] of counts) {
+      const w = fonts.reg.widthOfTextAtSize(safe(st), sp) + 4 + fonts.bold.widthOfTextAtSize(c, sp);
+      if (x && x + w > cw) { out.push([]); x = 0; }
+      out[out.length - 1].push([st, c]); x += w + sp * 2;
+    }
+    return counts.length ? out : [];
+  };
+
+  // ── fit: the largest size at which everything (summary, headings, every row) fits above the footer ──
+  const bottom = LM + 26;                          // the footer line sits below this
+  const MAX_PT = 12;
+  const PAD = 7;
+  const widthsAt = (pt) => {
+    const fixed = COLS.map((c) => (c.fixed ? Math.max(fonts.bold.widthOfTextAtSize(c.head, pt),
+      ...data.map((r) => (c.bold ? fonts.bold : fonts.reg).widthOfTextAtSize(safe(str(r[c.key])), pt))) + PAD : 0));
+    const left = cw - fixed.reduce((a, b) => a + b, 0);
+    const shares = COLS.reduce((a, c) => a + (c.p || 0), 0);
+    return { ok: left >= cw * 0.4, w: COLS.map((c, i) => (c.fixed ? fixed[i] : (c.p / shares) * left)) };
+  };
+  let widths = null;
+  const layout = (pt, oneLine) => {
+    const lh = pt * 1.22;
+    const fit = widthsAt(pt);
+    if (!fit.ok) return { need: Infinity };      // numbers would crowd out the subject: go smaller
+    widths = fit.w;
+    const cells = data.map((row) => COLS.map((c, i) => {
+      const lines = wrap(safe(str(row[c.key])), c.bold ? fonts.bold : fonts.reg, pt, widths[i] - 5);
+      if (!oneLine || lines.length <= 1) return lines;
+      // last resort for very long lists: one line per ticket, the overflow cut with an ellipsis
+      let t = lines[0];
+      while (t && fonts.reg.widthOfTextAtSize(t + '…', pt) > widths[i] - 5) t = t.slice(0, -1);
+      return [t + '…'];
+    }));
+    const rowH = cells.map((cs) => Math.max(1, ...cs.map((l) => l.length)) * lh + pt * 0.45);
+    const sumPt = Math.min(pt, 11);
+    const head = sumPt * 1.5 + chipLines(sumPt).length * sumPt * 1.5 + sumPt * 0.4 + pt * 1.7;
+    const need = head + (data.length ? rowH.reduce((a, b) => a + b, 0) : pt * 2) + 12;
+    return { pt, lh, cells, rowH, sumPt, need, oneLine };
+  };
+  const search = () => {
+    const avail = H - LM - HEADER - bottom;
+    for (let pt = MAX_PT; pt >= 6; pt -= 0.25) { const t = layout(pt, false); if (t.need <= avail) return t; }
+    for (let pt = 7; pt >= 2.5; pt -= 0.25) { const t = layout(pt, true); if (t.need <= avail || pt <= 2.5) return t; }
+    return null;
+  };
+  // Landscape gives the subject room; a long list gets more rows down a portrait page. Take whichever
+  // allows the larger text (landscape on a tie).
+  let best = null;
+  for (const size of [A4_LANDSCAPE, A4]) {
+    W = size.w; H = size.h; cw = W - 2 * LM;
+    const t = search();
+    if (!best || t.pt > best.L.pt) best = { size, L: t };
+  }
+  W = best.size.w; H = best.size.h; cw = W - 2 * LM;
+  const L = layout(best.L.pt, best.L.oneLine);     // leaves widths set for the size and page chosen
+  page = doc.addPage([W, H]);
+
+  // ── header: company and title on the left, the BIG print date on the right ──
+  let y = H - LM;
+  put(CO.name, LM, y - 15, 15, fonts.bold);
+  put(CO.addr, LM, y - 28, 9, fonts.reg, MUTED);
+  const title = 'SERVICE TICKETS — ' + label.toUpperCase();
+  const n = `${rows.length} ticket${rows.length === 1 ? '' : 's'}`;
+  const dateW = fonts.bold.widthOfTextAtSize(bigDate(d.generatedAt), 30);
+  // the title gives way to the date on a narrow (portrait) page, never the other way round
+  const ts = Math.min(17, 17 * (cw - dateW - 20) / fonts.bold.widthOfTextAtSize(safe(title + '    ' + n), 17));
+  put(title, LM, y - 50, ts, fonts.bold, ACCENT);
+  put(n, LM + fonts.bold.widthOfTextAtSize(safe(title), ts) + ts * 0.8, y - 50, ts, fonts.bold);
+  right('PRINTED', y - 9, 9, fonts.bold, MUTED);
+  right(bigDate(d.generatedAt), y - 40, 30, fonts.bold);
+  right(`${fmtTime(d.generatedAt)} SAST  ·  ${d.generatedBy || 'unknown'}`, y - 54, 9, fonts.reg, MUTED);
+  y -= 62;
+  page.drawLine({ start: { x: LM, y }, end: { x: LM + cw, y }, thickness: 1.2, color: ACCENT });
+  y -= 4;
+
+
+  // ── summary: what is shown, and a count per status ──
+  const sp = L.sumPt;
+  y -= sp * 1.2;
+  put(showing, LM, y, Math.min(sp, sp * cw / fonts.reg.widthOfTextAtSize(safe(showing), sp)), fonts.reg, MUTED);
+  y -= sp * 0.3;
+  for (const line of chipLines(sp)) {
+    y -= sp * 1.5;
+    let cx = LM;
+    for (const [st, c] of line) {
+      const w1 = fonts.reg.widthOfTextAtSize(safe(st), sp);
+      put(st, cx, y, sp, fonts.reg, INK); put(c, cx + w1 + 4, y, sp, fonts.bold, ACCENT);
+      cx += w1 + 4 + fonts.bold.widthOfTextAtSize(c, sp) + sp * 2;
+    }
+  }
+  y -= sp * 0.4;
+
+  // ── the table ──
+  const pt = L.pt;
+  y -= pt * 1.3;
+  let x = LM;
+  COLS.forEach((c, i) => { put(c.head, x, y, pt, fonts.bold, MUTED); x += widths[i]; });
+  y -= pt * 0.4;
+  page.drawLine({ start: { x: LM, y }, end: { x: LM + cw, y }, thickness: 0.6, color: RULE });
+  if (!data.length) { put('No tickets match.', LM, y - pt * 1.4, pt, fonts.reg, MUTED); }
+  L.cells.forEach((cs, r) => {
+    const top = y;
+    x = LM;
+    cs.forEach((lines, i) => {
+      lines.forEach((line, j) => put(line, x, top - pt * 1.05 - j * L.lh, pt, COLS[i].bold ? fonts.bold : fonts.reg));
+      x += widths[i];
+    });
+    y = top - L.rowH[r];
+    page.drawLine({ start: { x: LM, y: y + 1 }, end: { x: LM + cw, y: y + 1 }, thickness: 0.3, color: RULE });
+  });
+
+  // ── footer ──
+  page.drawLine({ start: { x: LM, y: LM + 14 }, end: { x: LM + cw, y: LM + 14 }, thickness: 0.5, color: RULE });
+  put('Days: from reported to closed, or to today while the ticket is still open.', LM, LM + 18, 7, fonts.reg, MUTED);
+  put(`VAT: ${CO.vat}` + (CO.reg ? `  ·  Reg: ${CO.reg}` : ''), LM, LM + 4, 7, fonts.reg, MUTED);
+  const mid = `${CO.name} — CONFIDENTIAL`;
+  put(mid, LM + (cw - fonts.reg.widthOfTextAtSize(mid, 7)) / 2, LM + 4, 7, fonts.reg, MUTED);
+  right('Page 1 of 1', LM + 4, 7, fonts.reg, MUTED);
+
   return Buffer.from(await doc.save());
 }
 
