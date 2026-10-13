@@ -2076,6 +2076,42 @@ console.log('\n\x1b[1mEVERY JOB CARD AND CLIENT PICKER IS SEARCHABLE\x1b[0m\n');
   t('the visit modal scans the markup it builds', /TX\.pick\.scan\(wrap\)/.test(sched), true);
 }
 
+console.log('\n\x1b[1mTICKETS: MONITORING NEEDS WHO AND UNTIL WHEN (server)\x1b[0m\n');
+{
+  const G = L('_lib/guards.js');
+  // A fixed "now": 12 Oct 2026, 23:30 UTC, which is already 13 Oct in South Africa.
+  const NOW = Date.UTC(2026, 9, 12, 23, 30);
+  const ID = { fldmYRxOOgzKwRMy2: 'Status', fldq0yZPi0ywnkqvo: 'Monitored By', fldOv23s3OHXaeZOs: 'Monitoring Ends' };
+  const g = (fields, existing, extra) => G.guardTicketMonitoring(Object.assign({
+    tableSymbol: 'tickets', subSymbol: 'ticket', fields, existing, idToName: ID, now: NOW }, extra || {}));
+  const resolved = { fields: { Status: 'Resolved' } };
+  t('the end date is a South African day', G.saToday(NOW), '2026-10-13');
+  t('moving to Monitoring with nobody named is refused',
+    g({ fldmYRxOOgzKwRMy2: 'Monitoring', fldOv23s3OHXaeZOs: '2026-10-20' }, resolved).reason, 'monitoring_details_missing');
+  t('and with no end date', g({ fldmYRxOOgzKwRMy2: 'Monitoring', fldq0yZPi0ywnkqvo: 'Stephen' }, resolved).reason,
+    'monitoring_details_missing');
+  t('and with an end date already gone',
+    g({ fldmYRxOOgzKwRMy2: 'Monitoring', fldq0yZPi0ywnkqvo: 'Stephen', fldOv23s3OHXaeZOs: '2026-10-12' }, resolved).reason,
+    'monitoring_end_past');
+  t('today itself is fine: monitoring runs to the end of the day',
+    g({ fldmYRxOOgzKwRMy2: 'Monitoring', fldq0yZPi0ywnkqvo: 'Stephen', fldOv23s3OHXaeZOs: '2026-10-13' }, resolved).ok, true);
+  t('written by name it is read the same', g({ Status: 'Monitoring', 'Monitored By': 'Stephen', 'Monitoring Ends': '2026-10-20' },
+    resolved, { idToName: null }).ok, true);
+  t('who and until when may already be on the ticket',
+    g({ fldmYRxOOgzKwRMy2: 'Monitoring' }, { fields: { Status: 'Resolved', 'Monitored By': 'Stephen', 'Monitoring Ends': '2026-10-20' } }).ok, true);
+  t('a ticket already under Monitoring is not re-judged by a later edit',
+    g({ fldmYRxOOgzKwRMy2: 'Monitoring' }, { fields: { Status: 'Monitoring' } }).ok, true);
+  t('creating a ticket straight into Monitoring is held to the same rule',
+    g({ fldmYRxOOgzKwRMy2: 'Monitoring' }, null).ok, false);
+  t('other statuses are not its business', g({ fldmYRxOOgzKwRMy2: 'Closed' }, resolved).ok, true);
+  t('nor other tables', g({ Status: 'Monitoring' }, null, { tableSymbol: 'delivery_notes', subSymbol: null }).ok, true);
+  t('nor the spares lines under tickets', g({ Status: 'Monitoring' }, null, { subSymbol: 'spares' }).ok, true);
+  const atSrc = fs.readFileSync(path.join(__dirname, '..', 'api', 'at.js'), 'utf8');
+  t('the proxy applies it on create and on update', (atSrc.match(/G\.guardTicketMonitoring\(/g) || []).length, 2);
+  t('on update, only after the scope check', atSrc.indexOf('G.guardTicketMonitoring({\n      tableSymbol, subSymbol: resolved.sub || null, fields, existing,')
+    > atSrc.indexOf("denialReason: 'scope_excluded'"), true);
+}
+
 console.log('\n' + '='.repeat(70));
 if (fail === 0) console.log(`\x1b[32m\x1b[1m  ALL ${pass} ASSERTIONS PASSED\x1b[0m`);
 else {

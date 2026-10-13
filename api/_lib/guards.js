@@ -374,8 +374,60 @@ function guardDeliveryNeedsSlip({ tableSymbol, op, fields }) {
   };
 }
 
+// ── Tickets: Monitoring needs who and until when ─────────────────────────────
+//
+// A ticket under Monitoring is flagged in the scheduler as still being watched -- by a named
+// person, until a date. Moved there without either, the flag would name nobody and never run
+// out. The screen asks for both; this refuses the write without them, so a direct POST cannot
+// either. Only the MOVE is checked: a ticket already under Monitoring is not re-judged by every
+// later edit, and the end date passing is what the red flag is for, not a reason to refuse.
+//
+// The client writes by field id; rules here are in names, so the caller passes idToName.
+
+/** Today's date in South Africa, YYYY-MM-DD: an end date is a whole local day. */
+function saToday(now) {
+  return new Date(now || Date.now()).toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' });
+}
+
+/**
+ * @param {object} a
+ * @param {string} a.tableSymbol
+ * @param {string|null} a.subSymbol
+ * @param {object} a.fields     what is being written, keyed by field id or name
+ * @param {object|null} a.existing  the ticket as it is now (null on create), keyed by name
+ * @param {object|null} a.idToName
+ * @param {number} [a.now]
+ * @returns {{ok:boolean, status?:number, reason?:string, detail?:string}}
+ */
+function guardTicketMonitoring({ tableSymbol, subSymbol, fields, existing, idToName, now }) {
+  if (tableSymbol !== 'tickets' || (subSymbol && subSymbol !== 'ticket')) return { ok: true };
+  const byName = {};
+  for (const [k, v] of Object.entries(fields || {})) byName[(idToName && idToName[k]) || k] = v;
+  const sel = (v) => String((v && typeof v === 'object') ? v.name : (v == null ? '' : v));
+  if (sel(byName.Status) !== 'Monitoring') return { ok: true };
+  const was = existing ? sel((existing.fields || {}).Status) : '';
+  if (was === 'Monitoring') return { ok: true };
+
+  const pick = (name) => (name in byName ? byName[name] : (existing && existing.fields || {})[name]);
+  const by = String(pick('Monitored By') || '').trim();
+  const ends = String(pick('Monitoring Ends') || '').slice(0, 10);
+  if (!/[A-Za-z].*[A-Za-z]/.test(by) || !/^\d{4}-\d{2}-\d{2}$/.test(ends)) {
+    return {
+      ok: false, status: 409, reason: 'monitoring_details_missing',
+      detail: 'A ticket goes to Monitoring with who is monitoring it and the date monitoring ends.',
+    };
+  }
+  if (ends < saToday(now)) {
+    return {
+      ok: false, status: 409, reason: 'monitoring_end_past',
+      detail: `Monitoring cannot end on ${ends}: that date has passed.`,
+    };
+  }
+  return { ok: true };
+}
 
 module.exports = {
+  guardTicketMonitoring, saToday,
   adminRoleIds, countActiveAdmins, isAdminUserRecord,
   guardUserUpdate, guardUserDelete, guardRoleUpdate, guardPickingSlipLock, guardDeliveryFromSlip, guardDeliveryClose, guardDeliveryNeedsSlip, requiresPickingSlip, invalidateRoleCache, esc,
 };

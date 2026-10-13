@@ -250,6 +250,7 @@
   .mod-scheduler .om-sb{font-family:monospace;font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;}
   .mod-scheduler .s-new{background:rgba(170,85,247,.14);color:#7e22ce;} .mod-scheduler .s-prog{background:rgba(240,165,0,.14);color:var(--accent-ink);}
   .mod-scheduler .s-mon{background:rgba(249,115,22,.14);color:#9a3412;} .mod-scheduler .s-done{background:rgba(62,207,142,.14);color:var(--ok);}
+  .mod-scheduler .s-watch{background:rgba(20,184,166,.14);color:#0f766e;}
   .mod-scheduler .s-closed{background:rgba(139,145,156,.12);color:var(--muted);} .mod-scheduler .s-other{background:rgba(74,163,255,.14);color:var(--info);}
   .mod-scheduler .om-pb{font-family:monospace;font-size:9px;font-weight:600;padding:2px 7px;border-radius:3px;}
   .mod-scheduler .p-crit{background:rgba(239,93,93,.14);color:var(--bad);} .mod-scheduler .p-high{background:rgba(240,165,0,.14);color:var(--warn);}
@@ -401,3 +402,14 @@
     outline:none;resize:vertical;
   }
   .mod-scheduler .om-fcard textarea:focus{border-color:var(--accent-ink);}
+
+/* Monitoring: the flag on a ticket still being watched, amber while it runs and red once its
+   end date has passed; and the count of them beside the Tickets button. */
+.mod-scheduler .om-flag{font-family:monospace;font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.02em;text-transform:uppercase;}
+.mod-scheduler .om-flag.mon{background:rgba(240,165,0,.16);color:var(--accent-ink);border:1px solid rgba(240,165,0,.45);}
+.mod-scheduler .om-flag.ended{background:rgba(239,93,93,.16);color:var(--bad);border:1px solid rgba(239,93,93,.5);}
+.mod-scheduler .om-monbadge{background:#f0a500;color:#0a0a0b;border-radius:10px;padding:0 5px;font-size:10px;margin-left:3px;}
+.mod-scheduler .om-monbadge.ended{background:#ef4444;color:#fff;}
+.mod-scheduler .om-mongrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+.mod-scheduler .om-mongrid label{display:flex;flex-direction:column;gap:4px;font-family:monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+.mod-scheduler .om-mongrid input{font-family:inherit;font-size:13px;text-transform:none;letter-spacing:normal;}

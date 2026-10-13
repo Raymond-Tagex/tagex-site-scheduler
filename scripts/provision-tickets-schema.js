@@ -57,6 +57,8 @@ const WANT_CHOICES = [
   ['Activity Log', 'Action Type', ['Ticket Logged', 'Ticket Status Change', 'Spares Requested']],
   // "Second Visit Scheduled" was doing duty for every booked visit, including first ones.
   ['Tickets',      'Status',      ['Visit Scheduled']],
+  // After Resolved: the fix is in and being watched. Goes between Resolved and Closed.
+  ['Tickets',      'Status',      ['Monitoring']],
 ];
 
 // Fields to ADD if absent.
