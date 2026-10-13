@@ -43,7 +43,8 @@ module.exports = async function handler(req, res) {
   catch (e) { return H.fail(res, 400, e.code || 'bad_request', e.message); }
 
   const action = String(body.action || '');
-  const isAdmin = auth.role['Can Manage Users'] === true;
+  // Admin, and the Stock Controller with it: the roles REQUIRE_ADMIN_MFA holds to MFA.
+  const isAdmin = S.mfaRole(auth.role);
   const enabled = auth.user['MFA Enabled'] === true && !!auth.user['MFA Secret'];
 
   const audit = (result, reason, note) => A.auditNow({
