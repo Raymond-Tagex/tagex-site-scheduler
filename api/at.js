@@ -309,6 +309,13 @@ module.exports = async function handler(req, res) {
       }
 
       if (op === 'create') {
+        const monCreate = G.guardTicketMonitoring({
+          tableSymbol, subSymbol: resolved.sub || null, fields, existing: null, idToName,
+        });
+        if (!monCreate.ok) {
+          await A.auditNow({ ...ctx, action: 'Create', result: 'Denied', denialReason: monCreate.reason });
+          return H.fail(res, monCreate.status, monCreate.reason, monCreate.detail);
+        }
         const created = await at.create(baseId, tableId, [fields], { returnFieldsByFieldId: !!params.returnFieldsByFieldId });
         const rec = created[0];
         await A.auditNow({
@@ -401,6 +408,15 @@ module.exports = async function handler(req, res) {
     if (!lock.ok) {
       await A.auditNow({ ...ctx, action: 'Update', result: 'Denied', denialReason: lock.reason, recordId });
       return H.fail(res, lock.status, lock.reason, lock.detail);
+    }
+
+    // A ticket is moved to Monitoring only with who and until when. See guards.js.
+    const monGuard = G.guardTicketMonitoring({
+      tableSymbol, subSymbol: resolved.sub || null, fields, existing, idToName,
+    });
+    if (!monGuard.ok) {
+      await A.auditNow({ ...ctx, action: 'Update', result: 'Denied', denialReason: monGuard.reason, recordId });
+      return H.fail(res, monGuard.status, monGuard.reason, monGuard.detail);
     }
     if (lock.overridden) {
       // An authorised change after signing must leave a mark — rule 12.

@@ -303,6 +303,8 @@ async function ticketReportPdf(d) {
   s.fact('Error code', t['Error Code']);
   s.fact('Priority', t.Priority);
   s.fact('Status', t.Status);
+  s.fact('Monitored by', t['Monitored By']);
+  s.fact('Monitoring ends', t['Monitoring Ends']);
   // Only if the reader is allowed it: the caller strips what the role may not read, so its
   // absence here means exactly that.
   if ('Cost Recoverable' in t) s.fact('Cost recoverable', t['Cost Recoverable']);
@@ -413,7 +415,7 @@ async function ticketReportPdf(d) {
 
 const TICKET_STATUSES = Object.freeze(['New', 'Assigned', 'In Progress', 'Awaiting Spares',
   'Awaiting Client', 'Visit Scheduled', 'Second Visit Required', 'Second Visit Scheduled',
-  'Resolved', 'Closed', 'Cancelled']);
+  'Resolved', 'Monitoring', 'Closed', 'Cancelled']);
 const OPEN_STATUSES = Object.freeze(TICKET_STATUSES.slice(0, 8));
 
 const A4_LANDSCAPE = { w: A4.h, h: A4.w };

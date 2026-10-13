@@ -1442,6 +1442,9 @@ const TK = {
   priority:'fldYfWPp2iFUWsXjF', status:'fldmYRxOOgzKwRMy2',
   visits:'fld8vQQgOFxSsv1yR', spares:'fldt4q3WAnxrV9jLX', activity:'fldHl7YtoVS0jnYQe',
   resolution:'fldhnFgGkhtQ6IsvG', closedAt:'fldeAsdC8J55Xy18Q', createdBy:'fld2DdtjAurZvtJT6',
+  // Who is watching the system after the fix, and until when. Both are required to move a
+  // ticket to Monitoring -- here and in api/_lib/guards.js.
+  monBy:'fldq0yZPi0ywnkqvo', monEnds:'fldOv23s3OHXaeZOs',
   // Technicians may neither read nor write this, and Warehouse may not read it. The proxy
   // strips it either way; nothing below should render it without checking.
   costRecoverable:'fldto6cIG5jPuSzXI',
@@ -1452,9 +1455,12 @@ const TKS = {
   srcId:'fldUzuuhDJJJVu7Yg', qtyReq:'fldueqeUg4G4UZIUg', qtyIssued:'fldEPJRO7xMblgpmZ',
   status:'fldVKfpzjnkmhc2aU', notes:'fldRNOalW10kQeiqU',
 };
+// Monitoring sits between Resolved and Closed: the fix is in and is being watched before the
+// ticket is closed. It is NOT open (it is not counted on the Tickets badge) and NOT terminal
+// (its visits are left alone, and a spare asked for while watching puts it back to work).
 const TICKET_STATUSES = ['New','Assigned','In Progress','Awaiting Spares','Awaiting Client',
-  'Visit Scheduled','Second Visit Required','Second Visit Scheduled','Resolved','Closed',
-  'Cancelled'];
+  'Visit Scheduled','Second Visit Required','Second Visit Scheduled','Resolved','Monitoring',
+  'Closed','Cancelled'];
 
 const tktCreate = async (fields) => ((await TX.api({ op:'create', base:'OM', table:'tickets', sub:'ticket',
   fields, params:{ returnFieldsByFieldId:true } })).records || [])[0];
@@ -1680,7 +1686,7 @@ function omTktStCls(s){
     'Awaiting Spares':'s-mon', 'Awaiting Client':'s-mon',
     'Visit Scheduled':'s-other',
     'Second Visit Required':'s-other', 'Second Visit Scheduled':'s-other',
-    'Resolved':'s-done',
+    'Resolved':'s-done', 'Monitoring':'s-watch',
     'Closed':'s-closed', 'Cancelled':'s-closed',
   }[s] || 's-other';
 }
@@ -1699,6 +1705,33 @@ async function omLoadTickets(force){
 
 const OM_TKT_OPEN = ['New','Assigned','In Progress','Awaiting Spares','Awaiting Client',
   'Visit Scheduled','Second Visit Required','Second Visit Scheduled'];
+
+// ── Tickets: monitoring ────────────────────────────────────────────────────
+//
+// A ticket under Monitoring carries a flag wherever it is shown -- on its card, on its page and
+// as a count beside Tickets -- so nobody forgets a system is still being watched. Once the end
+// date has passed the flag turns red: monitoring is over, and the ticket wants closing or the
+// date extending. The end date is a whole day, South African time: ending "2026-10-20" means
+// it is still running on the 20th.
+const omSaToday=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Johannesburg'});
+
+/** {by, ends, ended} for a ticket under Monitoring; null for any other status. */
+function omTktMon(rec){
+  const f=rec.fields;
+  if((omFstr(f,TK.status)||'New')!=='Monitoring') return null;
+  const ends=String(f[TK.monEnds]||'').slice(0,10);
+  return { by:omFstr(f,TK.monBy), ends, ended:!!ends && ends<omSaToday() };
+}
+
+function omTktMonFlag(rec){
+  const m=omTktMon(rec); if(!m) return '';
+  return m.ended
+    ? `<span class="om-flag ended" title="Monitoring ended on ${esc(m.ends)}. Close the ticket, or extend the end date.">\ud83d\udc41 Monitoring ended ${esc(m.ends)} \u2014 close or extend</span>`
+    : `<span class="om-flag mon" title="This ticket is still being monitored.">\ud83d\udc41 Monitoring until ${esc(m.ends||'?')}${m.by?' \u00b7 '+esc(m.by):''}</span>`;
+}
+
+/** A name somebody typed: two letters at least, so a stray key is not a person. */
+const omMonName=(v)=>/[A-Za-z].*[A-Za-z]/.test(String(v||'').trim());
 
 /** The job card a ticket hangs off, when the role can see it. */
 function omTktJc(rec){
@@ -1719,6 +1752,7 @@ function omTktCard(rec){
       <span class="om-sb ${omTktStCls(st)}">${esc(st)}</span>
       <span class="om-pb ${omPrCls(pri)}">${esc(pri)}</span>
       ${chan?`<span class="om-own">${esc(chan)}</span>`:''}
+      ${omTktMonFlag(rec)}
     </div>
     <div class="om-jcfoot">
       <div style="font-family:monospace;font-size:9px;color:var(--muted)">
@@ -1775,6 +1809,14 @@ function omUpdateTktBadge(){
   const b=document.getElementById('om-tktbadge'); if(!b)return;
   const open=omTktData.filter(r=>OM_TKT_OPEN.includes(omFstr(r.fields,TK.status)||'New')).length;
   b.textContent=open; b.style.display=open?'':'none';
+  // Beside it, the tickets still being monitored -- red when any of them has run past its end.
+  const m=document.getElementById('om-monbadge'); if(!m)return;
+  const mons=omTktData.map(omTktMon).filter(Boolean);
+  const ended=mons.filter(x=>x.ended).length;
+  m.textContent='\ud83d\udc41 '+mons.length;
+  m.style.display=mons.length?'':'none';
+  m.classList.toggle('ended',ended>0);
+  m.title=mons.length+' ticket(s) under monitoring'+(ended?', '+ended+' past the end date':'');
 }
 
 async function omShowTickets(){
@@ -2046,6 +2088,8 @@ function omBuildTicket(rec,acts,spares){
     ['Category', omFstr(f,TK.category)],
     ['Asset', omFstr(f,TK.asset)],
     ['Error code', omFstr(f,TK.errCode)],
+    ['Monitored by', omFstr(f,TK.monBy)],
+    ['Monitoring ends', String(f[TK.monEnds]||'').slice(0,10)],
   ].filter(([,v])=>v).map(([k,v])=>
     `<div class="om-fact"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
 
@@ -2098,6 +2142,7 @@ function omBuildTicket(rec,acts,spares){
       </div>
       <span class="om-sb ${omTktStCls(st)}">${esc(st)}</span>
       <span class="om-pb ${omPrCls(pri)}">${esc(pri)}</span>
+      ${omTktMonFlag(rec)}
     </div>
     <div class="om-dbody">
       <div class="om-acts">
@@ -2143,6 +2188,21 @@ function omBuildTicket(rec,acts,spares){
         <div id="om-tktnotemsg"></div>
         <button class="btn ghost sm" data-act="omTktAddNote" data-a1="${esc(rec.id)}" style="margin-top:8px">Add note</button>
       </div>`:''}
+      <div class="om-fcard"><div class="om-fttl">Monitoring</div>
+        ${canEdit?`
+        <div class="om-mongrid">
+          <label>Monitored by<input type="text" id="om-tktmonby" value="${esc(omFstr(f,TK.monBy))}" placeholder="Who is watching the system"></label>
+          <label>Monitoring ends<input type="date" id="om-tktmonends" value="${esc(String(f[TK.monEnds]||'').slice(0,10))}" min="${esc(omSaToday())}"></label>
+        </div>
+        <div class="om-hint">${st==='Monitoring'
+          ?'Change who is monitoring, or extend the end date, then Save changes. The flag turns red once the end date has passed.'
+          :'Fill these in, then press Monitoring under Status. The ticket is flagged until it is closed, and the flag turns red once the end date has passed.'}</div>
+        <div id="om-tktmonmsg"></div>
+        ${st==='Monitoring'?`<button class="btn ghost sm" data-act="omTktSaveMonitoring" data-a1="${esc(rec.id)}" style="margin-top:8px">Save changes</button>`:''}
+        `:(omFstr(f,TK.monBy)||f[TK.monEnds]
+          ?`<div class="om-tltx">${esc(omFstr(f,TK.monBy)||'\u2014')} until ${esc(String(f[TK.monEnds]||'').slice(0,10)||'\u2014')}</div>`
+          :'<div class="om-hint">Not monitored.</div>')}
+      </div>
       <div class="om-fcard"><div class="om-fttl">Status \u2014 now ${esc(st)}</div>
         <div class="om-acts">${statusBtns}</div><div id="om-tktmsg"></div></div>
       <div class="om-fcard"><div class="om-fttl">Activity</div>${actRows}</div>
@@ -2717,9 +2777,29 @@ async function omTktStatus(id,next){
     if(omUsableText(typed)){ extra={[TK.resolution]:omResolutionWith(saved,typed)}; logged=typed; }
   }
 
+  // Monitoring needs who and until when, written with the status so the flag never shows a
+  // ticket under monitoring by nobody. The server refuses it without them as well.
+  let because='changed by hand';
+  if(next==='Monitoring'){
+    const mon=omTktMonInputs(rec);
+    if(mon.problem){
+      if(msg) msg.innerHTML='<div class="om-err">\u26a0 '+esc(mon.problem)+'</div>';
+      const el=document.getElementById(mon.focus); if(el) el.focus();
+      return;
+    }
+    extra=Object.assign(extra||{},{[TK.monBy]:mon.by,[TK.monEnds]:mon.ends});
+    because+='; monitored by '+mon.by+' until '+mon.ends;
+  }
+  // Ending monitoring early is allowed, but not by a slip of the finger.
+  const mon=omTktMon(rec);
+  if(mon && !mon.ended && ['Closed','Cancelled'].includes(next)){
+    if(!window.confirm((omFstr(rec.fields,TK.ref)||'This ticket')+' is being monitored until '
+      +(mon.ends||'an open date')+'. '+next+' it anyway?')) return;
+  }
+
   if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving\u2026</div>';
   try{
-    const r=await omMoveTicket(rec,next,'changed by hand',extra);
+    const r=await omMoveTicket(rec,next,because,extra);
     // What was typed in the box went onto the ticket with the status; it belongs in the
     // activity as well, the same as it would had Save been pressed first.
     if(logged){
@@ -2749,6 +2829,57 @@ async function omTktStatus(id,next){
     // The calendar is on screen in another tab of the same page; it must not go on showing a
     // visit this just settled.
     if(r.visits){ try{ refreshAllViews(); }catch(e){} }
+  }catch(e){
+    if(msg) msg.innerHTML='<div class="om-err">\u2715 '+esc(e.message)+'</div>';
+  }
+}
+
+/**
+ * What the Monitoring block holds: typed values first, else what the ticket already carries.
+ * @returns {{by:string, ends:string, problem?:string, focus?:string}}
+ */
+function omTktMonInputs(rec){
+  const byBox=document.getElementById('om-tktmonby'), endBox=document.getElementById('om-tktmonends');
+  const by=String((byBox&&byBox.value)||omFstr(rec.fields,TK.monBy)||'').trim();
+  const ends=String((endBox&&endBox.value)||rec.fields[TK.monEnds]||'').slice(0,10);
+  if(!omMonName(by)) return { by, ends, problem:'Say who is doing the monitoring.', focus:'om-tktmonby' };
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(ends)) return { by, ends, problem:'Give the date monitoring ends.', focus:'om-tktmonends' };
+  if(ends<omSaToday()) return { by, ends, problem:'The end date has already passed \u2014 give one from today on.', focus:'om-tktmonends' };
+  return { by, ends };
+}
+
+/** Change who is monitoring, or extend the end date, on a ticket already under Monitoring. */
+async function omTktSaveMonitoring(id){
+  const rec=omTktData.find(r=>r.id===id); if(!rec)return;
+  const msg=document.getElementById('om-tktmonmsg');
+  const mon=omTktMonInputs(rec);
+  if(mon.problem){
+    if(msg) msg.innerHTML='<div class="om-err">\u26a0 '+esc(mon.problem)+'</div>';
+    const el=document.getElementById(mon.focus); if(el) el.focus();
+    return;
+  }
+  if(mon.by===omFstr(rec.fields,TK.monBy) && mon.ends===String(rec.fields[TK.monEnds]||'').slice(0,10)){
+    if(msg) msg.innerHTML='<div class="om-hint">Nothing has changed.</div>';
+    return;
+  }
+  if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving\u2026</div>';
+  try{
+    const up=await tktUpdate(rec.id,{[TK.monBy]:mon.by,[TK.monEnds]:mon.ends});
+    if(up) Object.assign(rec.fields,up.fields);
+    let logError='';
+    try{
+      await omPost(OM_T.ACT,{
+        [OM_F.AL_NOTE]:'['+(omFstr(rec.fields,TK.ref)||'')+'] Monitoring: by '+mon.by+' until '+mon.ends,
+        [OM_F.AL_JC]:[].concat(rec.fields[TK.jc]||[]),
+        [OM_F.AL_TICKET]:[rec.id],
+        [OM_F.AL_TYPE]:'Comment',
+      });
+    }catch(e){ logError=e.message; }
+    omUpdateTktBadge();
+    await omOpenTicket(id);
+    const m2=document.getElementById('om-tktmonmsg');
+    if(m2) m2.innerHTML='<div class="om-ok">\u2713 Monitoring by '+esc(mon.by)+' until '+esc(mon.ends)+'</div>'
+      +(logError?'<div class="om-err">\u26a0 Not written to the activity log: '+esc(logError)+'</div>':'');
   }catch(e){
     if(msg) msg.innerHTML='<div class="om-err">\u2715 '+esc(e.message)+'</div>';
   }
@@ -3437,6 +3568,7 @@ async function omSubmitNewJC(){
     add('omOpenTicket', typeof omOpenTicket === 'function' ? omOpenTicket : null);
     add('omCloseTicket', typeof omCloseTicket === 'function' ? omCloseTicket : null);
     add('omTktStatus', typeof omTktStatus === 'function' ? omTktStatus : null);
+    add('omTktSaveMonitoring', typeof omTktSaveMonitoring === 'function' ? omTktSaveMonitoring : null);
     add('omBookVisit', typeof omBookVisit === 'function' ? omBookVisit : null);
     add('omTktReport', typeof omTktReport === 'function' ? omTktReport : null);
     add('omTktPrintList', typeof omTktPrintList === 'function' ? omTktPrintList : null);

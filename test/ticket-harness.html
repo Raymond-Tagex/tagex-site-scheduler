@@ -40,7 +40,7 @@ const FID = {
   priority:'fldYfWPp2iFUWsXjF', status:'fldmYRxOOgzKwRMy2', createdBy:'fld2DdtjAurZvtJT6',
   visits:'fld8vQQgOFxSsv1yR', resolution:'fldhnFgGkhtQ6IsvG',
   alNote:'fldcciRgQcM8gPwBR', alJc:'fldq3dlkkE6lRd9za', alType:'fld3Im7LzAcn6ckQe',
-  alTicket:'fldReqf27Knw3N1nk',
+  alTicket:'fldReqf27Knw3N1nk', monBy:'fldq0yZPi0ywnkqvo', monEnds:'fldOv23s3OHXaeZOs',
   jcRef:'fld0epAfApDO5Cxyv', jcTitle:'fldaNMYaVBdw4rxho', jcClient:'fldd22cBqRMjzsPet',
   jcClientName:'fldsgE29yrzxXwn4d', jcSite:'fldUhpNu8fh16J0Gb', jcStatus:'fldNoL4FzEHcT027I',
   jcOver:'fldNMeufuo0dWXDDA',
@@ -663,7 +663,7 @@ async function suite(log) {
     .find((c) => /^Status/.test((c.querySelector('.om-fttl') || {}).textContent || ''));
   const statusBtns = () => [...statusCard().querySelectorAll('button')]
     .map((b) => b.textContent.trim());
-  t('every status is on screen, including the one it is in', statusBtns().length, 11);
+  t('every status is on screen, including the one it is in', statusBtns().length, 12);
   const now = [...statusCard().querySelectorAll('.om-now')];
   t('the current one is marked', now.length, 1);
   t('and it is the right one', now[0].textContent.replace(/[^A-Za-z ]/g, '').trim(), 'In Progress');
@@ -1846,6 +1846,108 @@ async function suite(log) {
   t('and returning to the tickets tab brings it back', shown(), true);
   TX.request = realRequest;
 
+  log('\nMONITORING A TICKET AFTER THE FIX');
+  // Dates are whole days in South Africa, as the app counts them.
+  const saDay = (offset) => {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone:'Africa/Johannesburg' });
+    const [y, m, dd] = today.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, dd + offset)).toISOString().slice(0, 10);
+  };
+  const IN_A_WEEK = saDay(7), IN_TWO = saDay(14), YESTERDAY = saDay(-1);
+  await backToTkt('TKT-2026-0006');                       // Resolved
+  const names = statusBtns().map((x) => x.replace(/^\u2713\s*/, ''));
+  t('Monitoring is a status, between Resolved and Closed',
+    names.slice(names.indexOf('Resolved'), names.indexOf('Resolved') + 3), ['Resolved', 'Monitoring', 'Closed']);
+  const monBy = () => document.getElementById('om-tktmonby');
+  const monEnds = () => document.getElementById('om-tktmonends');
+  t('the ticket has a block for who monitors it and until when', [!!monBy(), !!monEnds() && monEnds().type], [true, 'date']);
+  const pressMon = () => [...d().querySelectorAll('[data-act="omTktStatus"]')]
+    .find((b) => b.textContent.trim() === 'Monitoring')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  window.SENT = [];
+  pressMon(); await settle(12);
+  t('Monitoring with nobody named is refused', /Say who is doing the monitoring/.test(d().textContent), true);
+  monBy().value = 'Stephen';
+  pressMon(); await settle(12);
+  t('and with no end date', /Give the date monitoring ends/.test(d().textContent), true);
+  monEnds().value = YESTERDAY;
+  pressMon(); await settle(12);
+  t('and with an end date already gone', /already passed/.test(d().textContent), true);
+  t('none of which saved anything', window.SENT.length, 0);
+
+  const openBefore = document.getElementById('om-tktbadge').textContent;
+  monEnds().value = IN_A_WEEK;
+  pressMon(); await settle(20);
+  const monUpd = window.SENT.filter((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('it is one write: the status with who and until when',
+    monUpd.map((x) => [x.fields[FID.status], x.fields[FID.monBy], x.fields[FID.monEnds]]),
+    [['Monitoring', 'Stephen', IN_A_WEEK]]);
+  t('and nothing else is stamped closed', 'fldeAsdC8J55Xy18Q' in monUpd[0].fields, false);
+  const monLog = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('the activity says who and until when',
+    /Resolved \u2192 Monitoring .*monitored by Stephen until /.test(monLog.fields[FID.alNote])
+      && monLog.fields[FID.alNote].includes(IN_A_WEEK), true);
+  const flag = () => d().querySelector('.om-dhead .om-flag');
+  t('the ticket is flagged at the top', !!flag() && flag().classList.contains('mon'), true);
+  t('saying until when, and by whom', /Monitoring until/.test(flag().textContent)
+    && flag().textContent.includes(IN_A_WEEK) && /Stephen/.test(flag().textContent), true);
+  const monBadge = () => document.getElementById('om-monbadge');
+  t('a count of monitored tickets sits beside Tickets', [monBadge().style.display, monBadge().textContent.replace(/\D/g, '')], ['', '1']);
+  t('and it is not red while monitoring runs', monBadge().classList.contains('ended'), false);
+  t('a monitored ticket is not counted as open', document.getElementById('om-tktbadge').textContent, openBefore);
+
+  window.SENT = [];
+  monEnds().value = IN_TWO;
+  d().querySelector('[data-act="omTktSaveMonitoring"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(20);
+  const ext = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('the end date can be extended without moving the ticket',
+    [ext && ext.fields[FID.monEnds], ext && (FID.status in ext.fields)], [IN_TWO, false]);
+  const extLog = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
+  t('and the activity says so', /Monitoring: by Stephen until /.test(extLog.fields[FID.alNote]) && extLog.fields[FID.alNote].includes(IN_TWO), true);
+
+  await backToTkt('TKT-2026-0006');
+  const cardFlag = () => [...document.querySelectorAll('#om-tktlist .om-jc')]
+    .find((e) => e.textContent.includes('TKT-2026-0006')).querySelector('.om-flag');
+  await backToTkt('TKT-2026-0006');
+  document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(8);
+  tap([...document.querySelectorAll('#om-tktchips .om-chip')].find((e) => e.textContent.trim().startsWith('All')));
+  await tick();
+  t('the list card carries the flag too', !!cardFlag() && cardFlag().classList.contains('mon'), true);
+  tap([...document.querySelectorAll('#om-tktchips .om-chip')].find((e) => e.textContent.trim().startsWith('Monitoring')));
+  await tick();
+  t('and Monitoring has its own chip', [...document.querySelectorAll('#om-tktlist .om-jc .om-jcref')].map((e) => e.textContent.trim()), ['TKT-2026-0006']);
+
+  // Closing it while monitoring still runs asks first.
+  await backToTkt('TKT-2026-0006');
+  document.getElementById('om-tktres').value = 'Comms card replaced; monitoring for a week to be sure.';
+  const realConfirm = window.confirm;
+  let asked = '';
+  window.confirm = (q) => { asked = q; return false; };
+  window.SENT = [];
+  [...d().querySelectorAll('[data-act="omTktStatus"]')].find((b) => b.textContent.trim() === 'Closed')
+    .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(12);
+  t('closing before monitoring ends asks first', /being monitored until/.test(asked) && asked.includes(IN_TWO), true);
+  t('and a No leaves it as it was', window.SENT.length, 0);
+  window.confirm = realConfirm;
+
+  // Past the end date the flag turns red, on the card and the count.
+  // The list holds the same record objects the stub hands out, so the date is moved there and
+  // the list re-drawn by opening it, as a person would.
+  const tb = TICKETS.find((r) => r.id === 'recTKTb');
+  const kept = tb.fields[FID.monEnds];
+  tb.fields[FID.monEnds] = YESTERDAY;
+  document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(8);
+  tap([...document.querySelectorAll('#om-tktchips .om-chip')].find((e) => e.textContent.trim().startsWith('All')));
+  await tick();
+  t('once the end date has passed the flag turns red', !!cardFlag() && cardFlag().classList.contains('ended'), true);
+  t('and says to close or extend', /ended .*close or extend/i.test(cardFlag().textContent), true);
+  t('and so does the count beside Tickets', monBadge().classList.contains('ended'), true);
+  tb.fields[FID.monEnds] = kept;
+
   return bad;
 }
 
@@ -1872,6 +1974,25 @@ if (IS_RUNNER) {
 
 // ── mutants: each one a bug this file is supposed to catch ──────────────────
 const MUTANTS = [
+  ['Monitoring is let through with nobody named',
+   "if(!omMonName(by)) return { by, ends, problem:'Say who is doing the monitoring.', focus:'om-tktmonby' };",
+   '// MUTANT: anybody'],
+
+  ['who and until when are left out of the move to Monitoring',
+   'extra=Object.assign(extra||{},{[TK.monBy]:mon.by,[TK.monEnds]:mon.ends});', '// MUTANT: not written'],
+
+  ['the flag stays amber after monitoring has ended',
+   "return { by:omFstr(f,TK.monBy), ends, ended:!!ends && ends<omSaToday() };",
+   "return { by:omFstr(f,TK.monBy), ends, ended:false };"],
+
+  ['closing early is not asked about',
+   "if(mon && !mon.ended && ['Closed','Cancelled'].includes(next)){",
+   "if(false){"],
+
+  ['the flag is left off the list card',
+   "      ${chan?`<span class=\"om-own\">${esc(chan)}</span>`:''}\n      ${omTktMonFlag(rec)}",
+   "      ${chan?`<span class=\"om-own\">${esc(chan)}</span>`:''}"],
+
   ['the source channel goes back to being optional',
    "if(!omChannel) return fail('Choose how this was reported');", '// MUTANT: not required'],
 
@@ -1984,8 +2105,8 @@ const MUTANTS = [
    'const OM_TKT_OPEN = [\'New\',\'Assigned\',\'In Progress\',\'Awaiting Spares\',\'Awaiting Client\',\n  \'Second Visit Required\',\'Second Visit Scheduled\'];'],
 
   ['the new status is not offered by hand',
-   '  \'Visit Scheduled\',\'Second Visit Required\',\'Second Visit Scheduled\',\'Resolved\',\'Closed\',\n  \'Cancelled\'];',
-   '  \'Second Visit Required\',\'Second Visit Scheduled\',\'Resolved\',\'Closed\',\n  \'Cancelled\'];'],
+   '  \'Visit Scheduled\',\'Second Visit Required\',\'Second Visit Scheduled\',\'Resolved\',\'Monitoring\',\n  \'Closed\',\'Cancelled\'];',
+   '  \'Second Visit Required\',\'Second Visit Scheduled\',\'Resolved\',\'Monitoring\',\n  \'Closed\',\'Cancelled\'];'],
 
   ['a ticket raised from the calendar hides that its visit is booked',
    '      [TK.status]:\'Visit Scheduled\',',
