@@ -99,6 +99,19 @@ function yPositions(stream) {
 
 const pagesOf = (buf) => streams(buf).filter((s) => /Tj|re|l\s|m\s/.test(s));
 
+/** The font size a given string was drawn at (each pdf-lib drawText is its own BT ... ET block). */
+function fontSizeOfRef(buf, text) {
+  const hex = Buffer.from(text, 'latin1').toString('hex').toUpperCase();
+  for (const st of streams(buf)) {
+    for (const block of st.split('ET')) {
+      if (!block.toUpperCase().includes('<' + hex + '>') && !block.includes('(' + text + ')')) continue;
+      const m = /([\d.]+)\s+Tf/.exec(block);
+      if (m) return parseFloat(m[1]);
+    }
+  }
+  return 0;
+}
+
 // ── fixtures ────────────────────────────────────────────────────────────────
 const LONG = Array.from({ length: 420 }, (_, i) => 'word' + i).join(' ');
 
@@ -351,7 +364,7 @@ console.log('\n\x1b[1mTHE TICKET LIST\x1b[0m\n');
     generatedBy: 'raymond@tagexenergy.co.za', generatedAt: '2026-10-08T09:30:00.000Z' });
   const doc = await PDFDocument.load(pdf);
   const { width, height } = doc.getPage(0).getSize();
-  t('prints landscape, so the subject has room', width > height, true);
+  t('a page is A4 either way round', [Math.round(width), Math.round(height)].sort().join('x'), '595x842');
   // Streams that draw no text (fonts, the odd empty one) are not pages.
   const pages = pagesOf(pdf).map(drawn).filter((p) => p.length);
   t('the reader finds as many pages as the document has', pages.length, doc.getPageCount());
@@ -361,16 +374,24 @@ console.log('\n\x1b[1mTHE TICKET LIST\x1b[0m\n');
   t('and what Open means', text.includes('Open tickets (New, Assigned'), true);
   t('a count per status', /Visit Scheduled\n46/.test(text) && /New\n24/.test(text), true);
   t('every ticket is on it', many.every((r) => text.includes(r.ref)), true);
-  t('it runs onto more than one page', pages.length > 1, true);
-  t('and the column headings repeat on every page',
-    pages.every((p) => p.includes('Ticket') && p.includes('Subject')), true);
-  t('and every page is numbered', pages.every((p, i) => p.includes(`Page ${i + 1} of ${pages.length}`)), true);
+  t('70 tickets still print on ONE page', doc.getPageCount(), 1);
+  t('with the column headings', text.includes('Ticket') && text.includes('Subject'), true);
+  t('and numbered as the only page', text.includes('Page 1 of 1'), true);
+  t('the print date is on it, large', text.includes('PRINTED') && text.includes('Thu 08 Oct 2026'), true);
   t('the days column counts from reported', text.includes('\n18\n'), true);
 
   const one = await R.ticketListPdf({ filter: 'Closed', search: 'groot', rows: [],
     generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
   const t1 = pagesOf(one).map(drawn).flat().join('\n');
   t('an empty chip says so rather than printing a blank page', t1.includes('No tickets match.'), true);
+  const few = await R.ticketListPdf({ filter: 'OPEN', search: '', rows: many.slice(0, 5),
+    generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
+  const huge = await R.ticketListPdf({ filter: 'ALL', search: '', rows: Array.from({ length: 400 }, (_, i) => row(i, 'Closed')),
+    generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
+  t('a short list prints larger than a long one', fontSizeOfRef(few, many[0].ref) > fontSizeOfRef(pdf, many[0].ref), true);
+  t('a short list prints at least 10 pt', fontSizeOfRef(few, many[0].ref) >= 10, true);
+  { const pg = (await PDFDocument.load(few)).getPage(0).getSize(); t('and landscape, so the subject has room', pg.width > pg.height, true); }
+  t('even 400 tickets stay on one page', (await PDFDocument.load(huge)).getPageCount(), 1);
   t('and a search is printed with it', t1.includes('Search: "groot"'), true);
   t('the filename names the chip and the day',
     R.listFilename({ filter: 'Awaiting Spares', generatedAt: '2026-10-08T09:30:00.000Z' }),
