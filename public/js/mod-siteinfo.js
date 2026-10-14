@@ -125,21 +125,20 @@
 
     const params = { pageSize: 100, sort: [{ field: F.name, direction: 'asc' }] };
     try {
-      const [ci, om] = await Promise.all([
-        TX.list('CI', 'site_information', params).catch(() => ({ records: [] })),
-        TX.list('OM', 'site_information', params).catch(() => ({ records: [] })),
-      ]);
-      SITES = [
-        ...(ci.records || []).map((r) => Object.assign({}, r, { _base: 'CI' })),
-        ...(om.records || []).map((r) => Object.assign({}, r, { _base: 'OM' })),
-      ].filter((r) => r.fields[F.name]);
+      // A base that cannot be read (no permission, or RES not provisioned) lists as empty rather
+      // than hiding the sites of the others.
+      const pages = await Promise.all(TX.OPS_BASES.map((b) =>
+        TX.list(b.key, 'site_information', params).catch(() => ({ records: [] }))));
+      SITES = pages.flatMap((p, i) => (p.records || [])
+        .map((r) => Object.assign({}, r, { _base: TX.OPS_BASES[i].key })))
+        .filter((r) => r.fields[F.name]);
       renderList();
     } catch (e) {
       if (host) host.innerHTML = '<div class="si-empty err">⚠ ' + esc(TX.errorText(e)) + '</div>';
     }
   }
 
-  /** Job cards, for linking a site to the work raised against it. Cached: both bases, once. */
+  /** Job cards, for linking a site to the work raised against it. Cached: every base, once. */
   async function loadJobCards() {
     if (JOBCARDS.length) return JOBCARDS;
     const params = {
@@ -148,14 +147,12 @@
       pageSize: 100,
       sort: [{ field: 'JC Reference', direction: 'desc' }],
     };
-    const [ci, om] = await Promise.all([
-      TX.list('CI', 'job_cards', params).catch(() => ({ records: [] })),
-      TX.list('OM', 'job_cards', params).catch(() => ({ records: [] })),
-    ]);
-    JOBCARDS = [
-      ...(ci.records || []).map((r) => ({ id: r.id, base: 'CI', ref: String(r.fields['JC Reference'] || ''), title: String(r.fields.Title || ''), client: String(r.fields['Client Name'] || '') })),
-      ...(om.records || []).map((r) => ({ id: r.id, base: 'OM', ref: String(r.fields['JC Reference'] || ''), title: String(r.fields.Title || ''), client: String(r.fields['Client Name'] || '') })),
-    ].filter((j) => j.ref);
+    const pages = await Promise.all(TX.OPS_BASES.map((b) =>
+      TX.list(b.key, 'job_cards', params).catch(() => ({ records: [] }))));
+    JOBCARDS = pages.flatMap((p, i) => (p.records || []).map((r) => ({
+      id: r.id, base: TX.OPS_BASES[i].key, ref: String(r.fields['JC Reference'] || ''),
+      title: String(r.fields.Title || ''), client: String(r.fields['Client Name'] || ''),
+    }))).filter((j) => j.ref);
     return JOBCARDS;
   }
 
@@ -199,7 +196,7 @@
         + '<div class="si-row-main">'
         + '<div class="si-row-top"><span class="si-name">' + esc(f[F.name]) + '</span>'
         + '<span class="si-badge ' + statusClass(status) + '">' + esc(status) + '</span>'
-        + '<span class="si-chip">' + esc(r._base === 'OM' ? 'O&M' : 'C&I') + '</span></div>'
+        + '<span class="si-chip">' + esc(TX.baseLabel(r._base)) + '</span></div>'
         + '<div class="si-row-meta">' + esc(f[F.clientName] || 'No client')
         + (f[F.jcNumber] ? ' · ' + esc(f[F.jcNumber]) : '')
         + (f[F.subSol] ? ' · SUB/SOL ' + esc(f[F.subSol]) : '')
@@ -309,7 +306,7 @@
 
     $('#siDetailName').textContent = f[F.name] || '';
     $('#siDetailSub').textContent = [f[F.clientName], sel(f[F.category]),
-      base === 'OM' ? 'O&M' : 'C&I'].filter(Boolean).join(' · ');
+      TX.baseLabel(base)].filter(Boolean).join(' · ');
 
     const tabs = '<nav class="si-tabs" role="tablist">' + TABS.map(([k, label]) => (
       '<button type="button" role="tab" class="' + (k === TAB ? 'active' : '')
@@ -911,7 +908,7 @@
       [F.name]: name,
       [F.id]: 'SITE-' + String(seq).padStart(4, '0'),
       [F.clientName]: client,
-      [F.sourceBase]: base === 'OM' ? 'O&M' : 'C&I',
+      [F.sourceBase]: TX.baseLabel(base),
       [F.createdBy]: TX.userEmail(),
       [F.createdAt]: new Date().toISOString(),
       [F.history]: new Date().toISOString().slice(0, 16).replace('T', ' ')

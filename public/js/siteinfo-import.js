@@ -157,7 +157,7 @@
       + 'like FICA, identity, banking or financial data are refused and cannot be mapped.</div>'
       + '<div class="si-form">'
       + '<div class="si-f"><label for="impBase">Import into</label>'
-      + '<select id="impBase"><option value="OM">O&amp;M</option><option value="CI">C&amp;I</option></select></div>'
+      + '<select id="impBase">' + TX.baseOptions(BASE) + '</select></div>'
       + '<div class="si-f si-wide"><label for="impFile">CSV file</label>'
       + '<input id="impFile" type="file" accept=".csv,text/csv"></div>'
       + '</div>'
@@ -285,7 +285,7 @@
       const now = new Date().toISOString();
       const fields = Object.assign({}, r.fields, {
         [F.id]: 'SITE-' + String(existing + ok + 1).padStart(4, '0'),
-        [F.sourceBase]: BASE === 'OM' ? 'O&M' : 'C&I',
+        [F.sourceBase]: TX.baseLabel(BASE),
         [F.createdBy]: TX.userEmail(),
         [F.createdAt]: now,
         [F.history]: now.slice(0, 16).replace('T', ' ') + ' · ' + (TX.userEmail() || 'unknown')
@@ -300,7 +300,7 @@
     }
 
     $('#impBody').innerHTML = '<div class="si-msg ' + (failed.length ? 'warn' : 'ok') + '">'
-      + ok + ' site(s) imported into ' + (BASE === 'OM' ? 'O&M' : 'C&I') + '.'
+      + ok + ' site(s) imported into ' + TX.baseLabel(BASE) + '.'
       + (failed.length ? '<br>' + failed.length + ' failed:<br>'
         + failed.map((f) => esc(f)).join('<br>') : '')
       + '</div>';
