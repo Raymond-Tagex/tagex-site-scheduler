@@ -18,7 +18,7 @@ const BASES = {
   OM:  'app0tq4y9wH10h6Up', // TAGEX – O&M Platform
   // Residential. A structure-only duplicate of O&M, so every table and field id is O&M's
   // (see mirrorOmToRes below). Absent here = RES does not resolve anywhere: deny by default.
-  RES: '__RES_BASE_ID__',   // TAGEX – RES Platform
+  RES: 'appY81aumN7ocxMNC', // TAGEX – RES Platform
   IAM: 'appVrQ4Nuwb9gk6Ip', // TAGEX – Identity & Access (Workspace 2, Directors only)
   // The stock catalogue lives in its own base. It is a supplier/product master, not an
   // operations base: it carries no job cards, no delivery notes and no personal data, so the
