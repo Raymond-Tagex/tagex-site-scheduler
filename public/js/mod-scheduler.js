@@ -32,6 +32,49 @@
 // it resolves ids against the live schema before applying field rules, so a denied field is
 // stripped whichever way the record is keyed.
 
+// ── which base ─────────────────────────────────────────────────────────────────
+// The scheduler works in ONE base at a time: O&M, or RES (its structure-only duplicate, with the
+// same table and field ids, so everything below works unchanged). C&I has its own scheduler.
+//
+// Fixed for the life of the page. Changing it stores the choice and RELOADS: visits, people, job
+// cards, tickets and spares are cached all through this file, and a reload is the one way to be
+// sure a record id read in one base is never written into the other. The server re-checks the
+// base on every request regardless (tables.js SCHEDULER_BASES).
+const SCHED_BASE_KEY = 'tagex_sched_base';
+const SCHED_BASES = TX.OPS_BASES.filter((b) => b.key === 'OM' || b.key === 'RES');
+const SCHED_BASE = (() => {
+  try {
+    const v = localStorage.getItem(SCHED_BASE_KEY);
+    if (SCHED_BASES.some((b) => b.key === v)) return v;
+  } catch (e) { /* storage blocked: the default is fine */ }
+  return 'OM';
+})();
+const SCHED_LABEL = TX.baseLabel(SCHED_BASE);
+
+function wireBasePicker() {
+  const sel = document.getElementById('schedBase');
+  if (sel) {
+    sel.innerHTML = SCHED_BASES.map((b) => '<option value="' + b.key + '"'
+      + (b.key === SCHED_BASE ? ' selected' : '') + '>' + TX.esc(b.label) + '</option>').join('');
+    sel.addEventListener('change', () => {
+      try { localStorage.setItem(SCHED_BASE_KEY, sel.value); } catch (e) { /* see below */ }
+      // Storage blocked means the reload would come back on the old base; say so, don't loop.
+      let stored = null;
+      try { stored = localStorage.getItem(SCHED_BASE_KEY); } catch (e) { /* blocked */ }
+      if (stored !== sel.value) {
+        sel.value = SCHED_BASE;
+        toast('Could not switch base: this browser is blocking site storage.', 'bad');
+        return;
+      }
+      location.reload();
+    });
+  }
+  const tab = document.querySelector('#schedApp [data-tab="omtickets"]');
+  if (tab) tab.textContent = SCHED_LABEL + ' Tickets';
+  const ibox = document.getElementById('njcBaseNote');
+  if (ibox) ibox.textContent = SCHED_LABEL;
+}
+
 // Airtable table ids -> the proxy's symbolic names. The client may never send a raw tbl… id;
 // the proxy rejects the request before it authenticates if it sees one.
 const SYM = {
@@ -50,7 +93,7 @@ function symbolFor(table) {
 }
 
 async function atGet(table, fields) {
-  const r = await TX.list('OM', symbolFor(table), {
+  const r = await TX.list(SCHED_BASE, symbolFor(table), {
     fields: (fields && fields.length) ? fields : undefined,
     pageSize: 100,
     returnFieldsByFieldId: true,
@@ -62,7 +105,7 @@ async function atCreate(table, fields /* , typecast */) {
   // typecast is deliberately ignored — the proxy validates against the live schema instead,
   // and rejects an invalid value by name rather than silently coercing it.
   const r = await TX.api({
-    op: 'create', base: 'OM', table: symbolFor(table), fields,
+    op: 'create', base: SCHED_BASE, table: symbolFor(table), fields,
     params: { returnFieldsByFieldId: true },
   });
   return (r.records || [])[0];
@@ -70,7 +113,7 @@ async function atCreate(table, fields /* , typecast */) {
 
 async function atUpdate(table, id, fields /* , typecast */) {
   const r = await TX.api({
-    op: 'update', base: 'OM', table: symbolFor(table), recordId: id, fields,
+    op: 'update', base: SCHED_BASE, table: symbolFor(table), recordId: id, fields,
     params: { returnFieldsByFieldId: true },
   });
   return (r.records || [])[0];
@@ -79,7 +122,7 @@ async function atUpdate(table, id, fields /* , typecast */) {
 // ── tickets module ──
 async function omPost(tableId, fields) {
   const r = await TX.api({
-    op: 'create', base: 'OM', table: symbolFor(tableId), fields,
+    op: 'create', base: SCHED_BASE, table: symbolFor(tableId), fields,
     params: { returnFieldsByFieldId: true },
   });
   return (r.records || [])[0];
@@ -87,14 +130,14 @@ async function omPost(tableId, fields) {
 
 async function omPatch(tableId, recId, fields) {
   const r = await TX.api({
-    op: 'update', base: 'OM', table: symbolFor(tableId), recordId: recId, fields,
+    op: 'update', base: SCHED_BASE, table: symbolFor(tableId), recordId: recId, fields,
     params: { returnFieldsByFieldId: true },
   });
   return (r.records || [])[0];
 }
 
 async function omFetchAll(tableId, fieldIds, byId) {
-  const r = await TX.list('OM', symbolFor(tableId), {
+  const r = await TX.list(SCHED_BASE, symbolFor(tableId), {
     fields: (fieldIds && fieldIds.length) ? fieldIds : undefined,
     pageSize: 100,
     returnFieldsByFieldId: !!byId,
@@ -103,7 +146,7 @@ async function omFetchAll(tableId, fieldIds, byId) {
 }
 
 async function omFetchFiltered(tableId) {
-  const r = await TX.list('OM', symbolFor(tableId), {
+  const r = await TX.list(SCHED_BASE, symbolFor(tableId), {
     pageSize: 100, returnFieldsByFieldId: true,
   });
   const all = r.records || [];
@@ -113,12 +156,11 @@ async function omFetchFiltered(tableId) {
 
 /* ============================================================
    TAGEX O&M — Site Visit Scheduler
-   Base: app0tq4y9wH10h6Up  ·  Table: Site Visits (tblny4UUKq8OIHQlw)
+   Base: SCHED_BASE (O&M or RES)  ·  Table: Site Visits (tblny4UUKq8OIHQlw)
    Live Airtable REST read/write. SAST (UTC+2, no DST).
    ============================================================ */
 "use strict";
 
-const BASE = "app0tq4y9wH10h6Up";
 const T = {
   visits: "tblny4UUKq8OIHQlw",
   jobcards: "tbl2wqnfM0eDa8M7P",
@@ -1018,7 +1060,7 @@ async function saveVisit(wrap){
           [].concat(sp.fields[TKS.ticket]||[]).includes(modalTicketId)
           && !([].concat(sp.fields[TKS.visit]||[]).length));
         for(const sp of loose){
-          await TX.api({ op:'update', base:'OM', table:'tickets', sub:'spares',
+          await TX.api({ op:'update', base: SCHED_BASE, table:'tickets', sub:'spares',
             recordId:sp.id, fields:{ [TKS.visit]:[rec.id] } });
           adopted++;
         }
@@ -1397,7 +1439,6 @@ function wireScheduler(){
 // Shares the session with the parent app. Prefixed with om_ to avoid collisions.
 // ═══════════════════════════════════════════════════════════
 
-const OM_BASE = 'app0tq4y9wH10h6Up';
 const OM_T = {
   JC:  'tbl2wqnfM0eDa8M7P',
   ACT: 'tblWSJlbiGWlZ6yGL',
@@ -1462,15 +1503,15 @@ const TICKET_STATUSES = ['New','Assigned','In Progress','Awaiting Spares','Await
   'Visit Scheduled','Second Visit Required','Second Visit Scheduled','Resolved','Monitoring',
   'Closed','Cancelled'];
 
-const tktCreate = async (fields) => ((await TX.api({ op:'create', base:'OM', table:'tickets', sub:'ticket',
+const tktCreate = async (fields) => ((await TX.api({ op:'create', base: SCHED_BASE, table:'tickets', sub:'ticket',
   fields, params:{ returnFieldsByFieldId:true } })).records || [])[0];
-const tktUpdate = async (id, fields) => ((await TX.api({ op:'update', base:'OM', table:'tickets', sub:'ticket',
+const tktUpdate = async (id, fields) => ((await TX.api({ op:'update', base: SCHED_BASE, table:'tickets', sub:'ticket',
   recordId:id, fields, params:{ returnFieldsByFieldId:true } })).records || [])[0];
-const tktAll = async () => (await TX.list('OM','tickets',
+const tktAll = async () => (await TX.list(SCHED_BASE, 'tickets',
   { pageSize:100, returnFieldsByFieldId:true }, { sub:'ticket' })).records || [];
-const spareCreate = async (fields) => ((await TX.api({ op:'create', base:'OM', table:'tickets', sub:'spares',
+const spareCreate = async (fields) => ((await TX.api({ op:'create', base: SCHED_BASE, table:'tickets', sub:'spares',
   fields, params:{ returnFieldsByFieldId:true } })).records || [])[0];
-const spareAll = async () => (await TX.list('OM','tickets',
+const spareAll = async () => (await TX.list(SCHED_BASE, 'tickets',
   { pageSize:100, returnFieldsByFieldId:true }, { sub:'spares' })).records || [];
 
 let omJcData=[], omCliData=[], omPplData=[], omTktData=[];
@@ -1498,7 +1539,7 @@ async function omLoadAll(silent){
     if(omCurrentView==='jc') omRenderList(omFilteredJCs());
     if(omCurrentView==='triage') omRenderTriage();
     omPopJCDropdown();
-  }catch(e){ omSetDot('err'); toast('O&M: '+e.message,'bad'); }
+  }catch(e){ omSetDot('err'); toast(SCHED_LABEL+': '+e.message,'bad'); }
 }
 
 async function omRefresh(){
@@ -1507,8 +1548,8 @@ async function omRefresh(){
     await omLoadAll(true);
     if(omCurrentView==='jc') omRenderList(omFilteredJCs());
     if(omCurrentView==='triage') omRenderTriage();
-    toast('O&M data refreshed','ok');
-  }catch(e){ toast('O&M refresh failed: '+e.message,'bad'); }
+    toast(SCHED_LABEL+' data refreshed','ok');
+  }catch(e){ toast(SCHED_LABEL+' refresh failed: '+e.message,'bad'); }
 }
 
 // ── Field helpers ──
@@ -1598,7 +1639,7 @@ function omRenderDash(){
   document.getElementById('om-s-prog').textContent=inprog;
   document.getElementById('om-s-done').textContent=done;
   document.getElementById('om-s-over').textContent=over;
-  document.getElementById('om-dash-status').innerHTML=`<div style="display:flex;align-items:center;gap:7px;font-family:monospace;font-size:9px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:12px;"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;"></span>O&amp;M live · ${total} job cards · ${omCliData.length} clients</div>`;
+  document.getElementById('om-dash-status').innerHTML=`<div style="display:flex;align-items:center;gap:7px;font-family:monospace;font-size:9px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-bottom:12px;"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block;"></span>${TX.esc(SCHED_LABEL)} live · ${total} job cards · ${omCliData.length} clients</div>`;
   const crits=omJcData.filter(r=>omOver(r)||omFstr(r.fields,OM_F.JC_PRI)==='Critical');
   document.getElementById('om-dash-crit').innerHTML=crits.length?crits.slice(0,5).map(omJcCard).join(''):'<div class="om-trie">✓ No critical issues</div>';
   const recent=[...omJcData].filter(r=>r.fields[OM_F.JC_ISS]).sort((a,b)=>new Date(b.fields[OM_F.JC_ISS])-new Date(a.fields[OM_F.JC_ISS])).slice(0,5);
@@ -1922,10 +1963,10 @@ async function omRaiseTicketForVisit(visitRec, m, startISO){
 // hand; nothing else may.
 const TKT_TERMINAL=['Resolved','Closed','Cancelled'];
 
-const tktGet = async (id) => ((await TX.api({ op:'get', base:'OM', table:'tickets', sub:'ticket',
+const tktGet = async (id) => ((await TX.api({ op:'get', base: SCHED_BASE, table:'tickets', sub:'ticket',
   recordId:id, params:{ returnFieldsByFieldId:true } })).records || [])[0];
 
-const visitGet = async (id) => ((await TX.api({ op:'get', base:'OM', table:'site_visits',
+const visitGet = async (id) => ((await TX.api({ op:'get', base: SCHED_BASE, table:'site_visits',
   recordId:id, params:{ returnFieldsByFieldId:true } })).records || [])[0];
 
 // A visit that has already been dealt with is never touched again.
@@ -2445,7 +2486,7 @@ async function omJcForm(id){
   const was=btn?btn.textContent:'';
   if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
   try{
-    const r=await TX.request('/api/jobcard-form',{ jobCardId:id });
+    const r=await TX.request('/api/jobcard-form',{ jobCardId:id, base:SCHED_BASE });
     // base64 -> bytes. A PDF is binary; anything that treats it as text corrupts it.
     const bin=atob(r.content);
     const bytes=new Uint8Array(bin.length);
@@ -2493,7 +2534,7 @@ async function omTktPrintList(){
     const q=omTktSearchQ.trim();
     const list={ status:omTktFilter };
     if(q){ list.search=q; list.ids=omFilteredTkts().map(r=>r.id); }
-    const r=await TX.request('/api/ticket-report',{ list });
+    const r=await TX.request('/api/ticket-report',{ list, base:SCHED_BASE });
     omDownloadPdf(r,'tickets.pdf');
     toast((r.count===1?'1 ticket':(r.count||0)+' tickets')+' \u2014 PDF downloaded','ok');
   }catch(e){
@@ -2508,7 +2549,7 @@ async function omTktReport(id){
   const was=btn?btn.textContent:'';
   if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
   try{
-    const r=await TX.request('/api/ticket-report',{ ticketId:id });
+    const r=await TX.request('/api/ticket-report',{ ticketId:id, base:SCHED_BASE });
     omDownloadPdf(r,'ticket-report.pdf');
     toast('Report downloaded','ok');
   }catch(e){
@@ -3183,7 +3224,7 @@ async function omAddNote(jcId){const el=document.getElementById('om-note-in');co
 function omPopJCDropdown(){
   const sel=document.getElementById('om-jcsel');
   if(!sel)return;
-  sel.innerHTML='<option value="">— Select Job Card (O&M) —</option>';
+  sel.innerHTML='<option value="">— Select Job Card ('+TX.esc(SCHED_LABEL)+') —</option>';
   [...omJcData].sort((a,b)=>(b.fields[OM_F.JC_REF]||'').localeCompare(a.fields[OM_F.JC_REF]||'')).forEach(r=>{
     const ref=r.fields[OM_F.JC_REF]||r.id,ttl=omFstr(r.fields,OM_F.JC_TITLE),stat=omFstr(r.fields,OM_F.JC_STAT),cli=omCli(r.fields),own=omFstr(r.fields,OM_F.JC_OWNER);
     const opt=document.createElement('option');
@@ -3406,18 +3447,21 @@ function omUpdateBadge(){
   if(open>0){b.style.display='inline';b.textContent=open>99?'99+':open;}else b.style.display='none';
 }
 // ═══════════════════════════════════════════════════════════
-// NEW JOB CARD (create in O&M base)
+// NEW JOB CARD (create in the scheduler's base)
 // ═══════════════════════════════════════════════════════════
 const NJC_TYPES=['Reactive','Preventative','Project','Other','Maintenance','Repair','Inspection','Testing','Replacement','Renovation','Upgrade','Cleaning','Installation ','SSEG','Residential','De-Commissioning'];
 const NJC_PRIS=['Critical','High','Medium','Low','Planned Maintenance'];
 const NJC_STATS=['New','In Progress','Quotation Pending','COC Pending','Approved','Completed','Monitoring','Closed','Cancelled'];
 let omNJCMeta={next:1,width:4,year:String(new Date().getFullYear())};
 
-// Derive next reference + code lists from existing job cards (same pattern as base: OM-YYYY-NNNN/TYPE/ENTITY)
+// Derive next reference + code lists from existing job cards (pattern: OM-YYYY-NNNN/TYPE/ENTITY).
+// The prefix is the base's, so RES cards read RES-YYYY-NNNN and are numbered from RES's own cards
+// rather than looking like O&M ones.
+const NJC_PREFIX=SCHED_BASE==='RES'?'RES':'OM';
 function omParseRefs(){
   let maxSeq=0,width=4,year=String(new Date().getFullYear());
   const types=new Set(),ents=new Set();
-  const re=/^OM-(\d{4})-(\d+)\/([^/]+)\/(.+)$/i;
+  const re=new RegExp('^'+NJC_PREFIX+'-(\\d{4})-(\\d+)\\/([^/]+)\\/(.+)$','i');
   omJcData.forEach(r=>{
     const ref=(r.fields[OM_F.JC_REF]||'').trim(); const m=ref.match(re);
     if(m){ const n=parseInt(m[2],10); if(n>maxSeq)maxSeq=n; width=Math.max(width,m[2].length); types.add(m[3].trim()); ents.add(m[4].trim()); year=m[1]; }
@@ -3428,7 +3472,7 @@ function omRefBuild(){
   const t=(document.getElementById('njc-rtype').value||'').trim();
   const e=(document.getElementById('njc-rent').value||'').trim();
   const seq=String(omNJCMeta.next).padStart(omNJCMeta.width,'0');
-  document.getElementById('njc-ref').value=`OM-${omNJCMeta.year}-${seq}/${t}/${e}`;
+  document.getElementById('njc-ref').value=`${NJC_PREFIX}-${omNJCMeta.year}-${seq}/${t}/${e}`;
 }
 function omFillSelect(id,opts,def){
   const s=document.getElementById(id); if(!s)return;
@@ -3669,6 +3713,7 @@ async function omSubmitNewJC(){
 
     booted = true;
     try {
+      wireBasePicker();
       wireScheduler();
       bindDispatch(document.getElementById('schedApp'));
       await loadAll();

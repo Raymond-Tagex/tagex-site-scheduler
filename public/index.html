@@ -203,8 +203,11 @@
       <nav class="tabs">
         <button data-tab="calendar" class="active">Calendar</button>
         <button data-tab="dashboard">Workload</button>
-        <button data-tab="omtickets">O&amp;M Tickets</button>
+        <button data-tab="omtickets">Tickets</button>
       </nav>
+      <!-- Which base the scheduler works in. Populated and wired by js/mod-scheduler.js; a change
+           reloads the page so nothing cached from one base reaches the other. -->
+      <select class="f" id="schedBase" title="Which base the scheduler and tickets work in" aria-label="Base"></select>
       <div class="grow"></div>
       <button class="btn ghost sm" id="tktPrintTop" type="button" data-act="omTktPrintList" data-requires="tickets:export" title="A PDF of the tickets under the status selected below" hidden>Print</button>
       <button class="btn sm" id="newVisitTop" type="button" data-requires="site_visits:create">+ Schedule Site Visit</button>
@@ -382,7 +385,7 @@
       </div>
 
       <div class="om-view" id="om-view-newjc" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;max-width:680px;">
-        <div class="om-ibox">Creates a new <strong>Job Card</strong> in the O&amp;M base. The reference auto-increments from existing cards; you can add a new client inline.</div>
+        <div class="om-ibox">Creates a new <strong>Job Card</strong> in the <span id="njcBaseNote">O&amp;M</span> base. The reference auto-increments from existing cards; you can add a new client inline.</div>
         <div class="om-fcard">
           <div class="om-fttl">Job Card Reference</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">

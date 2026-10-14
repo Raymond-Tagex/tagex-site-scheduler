@@ -56,7 +56,7 @@ for (const [m, entry] of Object.entries(T.FIELD_ALIASES)) {
   if (entry.OM) t(`field aliases for ${m} are O&M's`, same(entry.RES, entry.OM));
 }
 
-// ── 2. the bases ────────────────────────────────────────────────────────────
+// ── 3. the bases ────────────────────────────────────────────────────────────
 function pat() {
   for (const f of ['.env.local', '.env']) {
     const p = path.join(ROOT, f);
@@ -74,7 +74,51 @@ async function schema(baseId, token) {
   return Object.fromEntries((d.tables || []).map((x) => [x.id, x]));
 }
 
+// ── 2. the scheduler endpoints (offline) ────────────────────────────────────
+// The job card form reads every table from the base the scheduler names. A stubbed Airtable
+// records which base each read hit. (The ticket report has the same checks in its own suite.)
+async function endpoints() {
+  console.log('\n\x1b[1mTHE JOB CARD FORM, BY BASE\x1b[0m');
+  process.env.AUTH_MODE = 'session';
+  const api = (m) => path.join(ROOT, 'api', m);
+  const stub = (file, exports) => {
+    const id = require.resolve(api(file));
+    require.cache[id] = { id, filename: id, loaded: true, exports };
+  };
+  const READ = [];
+  stub('_lib/airtable.js', {
+    async list(baseId) { READ.push(baseId); return []; },
+    async fieldMaps() { return { idToName: {}, nameToId: {} }; },
+  });
+  const P = require(api('_lib/permissions.js'));
+  const perms = P.effectivePermissions(JSON.stringify({ job_cards: { view: true, export: true } }), null);
+  stub('_lib/session.js', {
+    async authenticate() { return { ok: true, email: 'ops@x', userRecordId: 'recUSER0000000000', sid: 'sid-res', perms }; },
+    clientIp: () => '127.0.0.1', userAgent: () => 'verify',
+  });
+  stub('_lib/audit.js', { audit: () => {}, auditNow: async () => {} });
+  const handler = require(api('jobcard-form.js'));
+  const call = async (body) => {
+    READ.length = 0;
+    const res = { code: 0, headers: {}, setHeader(k, v) { this.headers[k] = v; },
+      status(c) { this.code = c; return this; }, send() { return this; }, end() { return this; } };
+    await handler({ method: 'POST', body, headers: {}, url: '/api/jobcard-form' }, res);
+    return res;
+  };
+  const JC = 'recJC000000000001';
+  await call({ jobCardId: JC });
+  t('no base named reads O&M only', READ.length > 0 && READ.every((b) => b === T.BASES.OM), READ.join(','));
+  await call({ jobCardId: JC, base: 'RES' });
+  t('base RES reads RES only', READ.length > 0 && READ.every((b) => b === T.BASES.RES), READ.join(','));
+  for (const bad of ['CI', 'IAM', 'res']) {
+    const r = await call({ jobCardId: JC, base: bad });
+    t(`base "${bad}" is refused before anything is read`, r.code === 400 && READ.length === 0, `HTTP ${r.code}, ${READ.length} reads`);
+  }
+}
+
 (async () => {
+  await endpoints();
+
   console.log('\n\x1b[1mTHE BASES (live)\x1b[0m');
   const token = pat();
   if (!token) {

@@ -72,6 +72,12 @@ added to RES too, by hand in Airtable; `test/verify-res-mirror.js` compares the 
 fails when they drift. The browser's list of bases is `TX.OPS_BASES` in `core.js`; the server's is
 `OPS_BASES` in `tables.js`.
 
+**The scheduler and tickets work in one base at a time: O&M or RES** (`SCHEDULER_BASES`; C&I has
+its own scheduler). The choice is per browser (`tagex_sched_base` in localStorage) and **changing
+it reloads the page**, so nothing cached from one base can be written into the other. Every call in
+`mod-scheduler.js` names `SCHED_BASE`, never a literal; `/api/jobcard-form` and `/api/ticket-report`
+take `base` and refuse anything but O&M or RES (none named = O&M).
+
 ## Why things are vendored
 
 `vercel.json` sets `script-src 'self'`, so no CDN scripts. The OCR language data and pdf.js are

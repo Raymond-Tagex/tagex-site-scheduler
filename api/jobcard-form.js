@@ -20,15 +20,14 @@ const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 const F = require('./_lib/jobcardform.js');
 
-const BASE = 'OM';
 const MAX_VISITS = 60;
 
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 const first = (v) => (Array.isArray(v) ? v.find((x) => typeof x === 'string' && x) || '' : (v || ''));
 
-/** One table's rows, already stripped of whatever this role may not read. */
-async function readAll(auth, moduleKey, sub) {
-  const r = T.resolve(BASE, moduleKey, sub);
+/** One table's rows, from the scheduler's base, already stripped of whatever this role may not read. */
+async function readAll(auth, base, moduleKey, sub) {
+  const r = T.resolve(base, moduleKey, sub);
   if (!r.ok) throw Object.assign(new Error(r.detail), { status: r.status, reason: r.reason });
   const rule = auth.perms && auth.perms[moduleKey];
   const rows = await at.list(r.baseId, r.tableId, {});
@@ -68,9 +67,12 @@ module.exports = async function handler(req, res) {
   if (!/^rec[A-Za-z0-9]+$/.test(jobCardId)) {
     return H.fail(res, 400, 'bad_request', 'A job card record id is required.');
   }
+  const base = T.schedulerBase(body.base);
+  if (!base) return H.fail(res, 400, 'bad_request', 'Unknown base.');
+  ctx.baseSymbol = base;
 
   try {
-    const jcs = await readAll(auth, 'job_cards');
+    const jcs = await readAll(auth, base, 'job_cards');
     const jobcard = jcs.find((r) => r.id === jobCardId);
     // Not "no such record": a job card outside this role's scope was stripped by readAll, and
     // saying which of the two it was would tell the caller a record exists.
@@ -86,7 +88,7 @@ module.exports = async function handler(req, res) {
     // still gets a job card, with that section blank rather than an error.
     let costing = {};
     try {
-      const rows = await readAll(auth, 'costing');
+      const rows = await readAll(auth, base, 'costing');
       const mine = rows.filter((r) => ids(r.fields['Job Card']).includes(jobCardId));
       // The form has one Summary of Costs grid, so several costing rows are added together.
       mine.forEach((r) => {
@@ -98,7 +100,7 @@ module.exports = async function handler(req, res) {
 
     let visits = [];
     try {
-      const rows = await readAll(auth, 'site_visits');
+      const rows = await readAll(auth, base, 'site_visits');
       visits = rows
         .filter((r) => ids(r.fields['Job Card']).includes(jobCardId))
         .slice(0, MAX_VISITS)
@@ -112,7 +114,7 @@ module.exports = async function handler(req, res) {
 
     let ticketRefs = [];
     try {
-      const rows = await readAll(auth, 'tickets', 'ticket');
+      const rows = await readAll(auth, base, 'tickets', 'ticket');
       ticketRefs = rows
         .filter((r) => ids(r.fields['Job Card']).includes(jobCardId))
         .map((r) => String(r.fields['Ticket Ref'] || '')).filter(Boolean);

@@ -341,6 +341,20 @@ mirrorOmToRes(SCOPE_FIELDS);
 /** The operations bases -- the ones holding sites, job cards and delivery notes. */
 const OPS_BASES = Object.freeze(['CI', 'OM', 'RES']);
 
+// The bases the scheduler and tickets work in. Not C&I: its scheduler is a separate
+// application, and tickets resolve only in O&M and its duplicate.
+const SCHEDULER_BASES = Object.freeze(['OM', 'RES']);
+
+/**
+ * The scheduler base a request names. Nothing named is O&M, so a browser still running the
+ * page from before RES existed keeps working; anything else named is refused (null), never
+ * guessed.
+ */
+function schedulerBase(value) {
+  if (value === undefined || value === null || value === '') return 'OM';
+  return SCHEDULER_BASES.includes(value) ? value : null;
+}
+
 // ─────────────────────────────────────────────────────────────
 // SENSITIVITY LADDER
 // A role's sensitivity_max caps which Documents it may see. Unclassified documents are
@@ -599,6 +613,8 @@ function expandFieldRules(rule, module, baseSymbol) {
 module.exports = {
   BASES,
   OPS_BASES,
+  SCHEDULER_BASES,
+  schedulerBase,
   TABLES,
   NOT_PROVISIONED,
   VIRTUAL_MODULES,
