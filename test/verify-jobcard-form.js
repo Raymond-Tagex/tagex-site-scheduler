@@ -363,6 +363,46 @@ const FULL = {
       [...printed].filter((f) => !want.includes(f)), []);
   }
 
+  console.log('\n\x1b[1mTHE APPROVAL STRIP IS COLOURED AS THE TEMPLATE COLOURS IT\x1b[0m\n');
+  {
+    // The cell shading in the template: 92D050, FF0000, 00B0F0.
+    t('Approved green, Denied red, Completed blue',
+      F.DECISIONS, [['Approved', '92D050'], ['Denied', 'FF0000'], ['Completed', '00B0F0']]);
+    const raw = Buffer.from(bytes).toString('latin1');
+    let page1 = '';
+    for (const m of raw.matchAll(/stream\r?\n/g)) {
+      const from = m.index + m[0].length;
+      try {
+        const body = zlib.inflateSync(Buffer.from(raw.slice(from, raw.indexOf('endstream', from)), 'latin1')).toString('latin1');
+        if (body.includes(' Tj')) { page1 = body; break; }
+      } catch (e) { /* not a content stream */ }
+    }
+    const fillOp = (h) => [0, 2, 4].map((i) => String(parseInt(h.slice(i, i + 2), 16) / 255)).join(' ') + ' rg';
+    const at = F.DECISIONS.map(([, h]) => page1.indexOf(fillOp(h)));
+    t('each colour fills a cell on page one', at.every((i) => i >= 0), true);
+    t('in the strip’s order', at.slice(1).every((i, k) => i > at[k]), true);
+    // Each word sits in its own colour: the fill comes before its word, and after the previous one.
+    const word = (w) => page1.indexOf('<' + Buffer.from(w.toUpperCase(), 'latin1').toString('hex').toUpperCase() + '> Tj');
+    t('and each word is drawn on its own colour',
+      F.DECISIONS.map(([w], k) => word(w) > at[k] && (k === 2 || word(w) < at[k + 1])), [true, true, true]);
+  }
+
+  console.log('\n\x1b[1mTHE TAGEX LOGO HEADS THE FORM, AS ON THE DELIVERY NOTE\x1b[0m\n');
+  {
+    const raw = Buffer.from(bytes).toString('latin1');
+    const png = fs.readFileSync(F.LOGO_FILE);
+    t('the logo file is in the repository, and is a PNG', png.slice(1, 4).toString(), 'PNG');
+    t('it is embedded in the form', /\/Subtype \/Image/.test(raw), true);
+    t('at the logo’s own size, so it is the logo and not some other picture',
+      [png.readUInt32BE(16), png.readUInt32BE(20)].every((n, i) => raw.includes((i ? '/Height ' : '/Width ') + n)), true);
+    t('and the company is named under it', all.includes('TAGEX ENERGY (PTY) Ltd'), true);
+    // Read from disk at run time, so Vercel has to be told to ship it with the function.
+    const vj = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
+    t('vercel.json bundles it with both functions that print forms',
+      ['api/jobcard-form.js', 'api/ticket-report.js'].map((f) =>
+        /api\/_lib\/assets/.test(((vj.functions || {})[f] || {}).includeFiles || '')), [true, true]);
+  }
+
   console.log('\n\x1b[1mEACH LOGISTICS SECTION IS BOXED ON ITS OWN\x1b[0m\n');
   {
     // Marked up by the business: the four sections ran together as one list of blanks, and

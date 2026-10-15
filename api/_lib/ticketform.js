@@ -26,6 +26,8 @@ const CATEGORIES = ['Inverter Fault', 'Battery Fault', 'Grid / Eskom Fault',
   'Preventative Maintenance', 'Emergency Callout', 'Warranty Claim', 'General Support'];
 const PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'];
 
+const TICKET_HEADING = 11;
+
 const first = (v) => (Array.isArray(v) ? str(v[0]) : str(v));
 
 /**
@@ -40,7 +42,12 @@ async function ticketFormPdf(d) {
   const ref = str(t['Ticket Ref']);
   const { doc, form: s } = await J.newForm('TAGEX Service Ticket ' + ref);
   const CW = J.CW;
+  // Section bands larger than the job card's: asked for by the business, so a ticket's few long
+  // sections are found at a glance.
+  s.headingSize = TICKET_HEADING;
 
+  s.letterhead(ref, ['Job Card: ' + (str(jc['JC Reference']) || '-'),
+    'Printed: ' + fmtDate(new Date().toISOString())]);
   s.title('SERVICE TICKET');
 
   // ── identity: the same lines, in the same order, as the head of the job card ──
@@ -108,4 +115,4 @@ function ticketFormFilename(ref) {
   return clean + '-form-' + new Date().toISOString().slice(0, 10) + '.pdf';
 }
 
-module.exports = { ticketFormPdf, ticketFormFilename, CHANNELS, CATEGORIES, PRIORITIES };
+module.exports = { TICKET_HEADING, ticketFormPdf, ticketFormFilename, CHANNELS, CATEGORIES, PRIORITIES };
