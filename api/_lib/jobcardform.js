@@ -76,10 +76,9 @@ function logo() {
 }
 const LOGO_H = 36;                          // points: the delivery note's 34px header, a touch up
 
-const CO = Object.freeze({
-  name: 'TAGEX ENERGY (PTY) Ltd',
-  addr: '412 Heidelberg Street, Tulisa Park, Alberton',
-});
+// One address, kept in ticketreport.js. This file had its own copy, which is how the forms and
+// the delivery note came to print two different addresses.
+const { CO } = require('./ticketreport.js');
 
 // Verbatim from the template. Word ran the sub-clauses together inside one paragraph; they are
 // split here so they read as clauses, but not a word is changed.

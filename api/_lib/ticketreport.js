@@ -30,7 +30,9 @@ const BAD = rgb(0.84, 0.18, 0.18);
 // is printed only when it is filled in — never invented, and never shown as a placeholder.
 const CO = Object.freeze({
   name: 'TAGEX ENERGY (PTY) Ltd',
-  addr: '412 Heidelberg Street, Tulisa Park, Alberton',
+  // As the delivery note prints it, which the business confirmed is the correct address. It was
+  // "Heidelberg Street, Tulisa Park, Alberton" here, and the forms disagreed with the delivery note.
+  addr: '412 Heidelberg Road, Tulisa Park, JHB 2197',
   vat: '4550259271',
   reg: '',
 });

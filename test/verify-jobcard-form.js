@@ -396,6 +396,9 @@ const FULL = {
     t('at the logo’s own size, so it is the logo and not some other picture',
       [png.readUInt32BE(16), png.readUInt32BE(20)].every((n, i) => raw.includes((i ? '/Height ' : '/Width ') + n)), true);
     t('and the company is named under it', all.includes('TAGEX ENERGY (PTY) Ltd'), true);
+    // The delivery note's address, confirmed by the business as the correct one.
+    t('at the address the delivery note prints', all.includes('412 Heidelberg Road, Tulisa Park, JHB 2197'), true);
+    t('and not the old one', all.includes('Heidelberg Street'), false);
     // Read from disk at run time, so Vercel has to be told to ship it with the function.
     const vj = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
     t('vercel.json bundles it with both functions that print forms',
