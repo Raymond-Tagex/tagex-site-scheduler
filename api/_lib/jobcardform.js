@@ -39,6 +39,10 @@ const MUTED = rgb(0.42, 0.45, 0.5);
 const RULE = rgb(0.72, 0.74, 0.78);
 const BAND = rgb(0.93, 0.94, 0.96);
 const ACCENT = rgb(0.16, 0.42, 0.28);
+// The border round each logistics section. Darker than RULE, which is every ruled line on the
+// sheet: a box drawn in the same grey as the writing lines inside it does not separate anything.
+const BOX = rgb(0.30, 0.34, 0.40);
+const BOX_PAD = 6;
 
 const CO = Object.freeze({
   name: 'TAGEX ENERGY (PTY) Ltd',
@@ -280,6 +284,7 @@ class Form {
     this.doc = doc;
     this.f = fonts;
     this.pages = [];
+    this.boxes = [];                           // where boxed() drew, for the test suite
     this.newPage();
   }
 
@@ -388,6 +393,33 @@ class Form {
     const sw = cell.sfx ? this.width(cell.sfx, size) + 2 : 0;
     this.line(lx, this.y - 1.5, end - sw, this.y - 1.5);
     if (cell.sfx) this.write(cell.sfx, end - sw + 2, this.y, size);
+  }
+
+  /**
+   * Draw a section inside a border, as one piece on one page.
+   *
+   * The height is worked out before drawing so the whole section can be moved to a new page
+   * first: a box split over two pages would lose its top or bottom edge, and with it the thing
+   * that tells one section from the next. Every box is the same width, just outside the text
+   * margin, so the sections line up down the sheet.
+   *
+   * @param {number} h      the height the section's contents will take
+   * @param {Function} draw draws the contents, from the current line down
+   */
+  boxed(h, draw) {
+    this.need(h + 2 * BOX_PAD + 6);
+    this.y -= 6;
+    const top = this.y;
+    const page = this.page;
+    draw();
+    this.y -= BOX_PAD + 2;
+    // The estimate is generous, so this cannot happen -- and if it ever did, an unclosed box on
+    // two pages would be worse than none, so none is drawn.
+    if (this.page === page) {
+      this.rect(M - BOX_PAD, this.y, CW + 2 * BOX_PAD, top - this.y, { bc: BOX, bw: 1 });
+      this.boxes.push({ page: this.pages.length - 1, x: M - BOX_PAD, y: this.y,
+        w: CW + 2 * BOX_PAD, h: top - this.y });
+    }
   }
 
   /** A Yes / No pair beside a label. Returns nothing; draws on the current line. */
@@ -702,21 +734,28 @@ async function jobCardFormPdf(d) {
   // The warehouse costing is the Warehouse column of Costing: if any of it is filled in, it is
   // attached to this job card in the only sense the record knows.
   const warehouse = COST_ROWS.some(([, k]) => (num(c[k + ' (Warehouse)']) || 0) !== 0);
-  [['BOM Attached', !!d.bomCount], ['Supplier Quotes Attached', !!f['Supplier Quotes Attached']],
-    ['Warehouse Costing Attached', warehouse]].forEach(([l, on]) => {
-    s.need(16); s.y -= 14; s.yesNo(M, l, on);
-  });
+  const attached = [['BOM Attached', !!d.bomCount],
+    ['Supplier Quotes Attached', !!f['Supplier Quotes Attached']],
+    ['Warehouse Costing Attached', warehouse]];
+  const staffNames = str(c['Staff Names']).split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
+
+  // How tall a block will be, so boxed() can keep it on one page. Every row() and yesNo() line
+  // is 14; a field whose value wraps adds 11 a line; the title takes 18.
+  const blockHeight = (b) => 18 + 28 + b.lines.reduce((h, line) => {
+    if (line !== 'staff') return h + 14;
+    if (!staffNames.length) return h + 28;
+    const lw = s.width('Staff Names:', 8.5, fonts.bold) + 4;
+    return h + 14 + 11 * (wrap(safe(staffNames.join(', ')), fonts.reg, 8.5, CW - lw - 8).length - 1);
+  }, 0);
 
   // Each block prints what was recorded against this job card, and a ruled line for anything
   // that was not -- the form is still something somebody writes on at site.
-  LOGISTICS.forEach((b) => {
-    s.need(40);
+  const drawBlock = (b) => {
     s.y -= 18;
     s.write(b.name, M, s.y, 9, fonts.bold);
     b.lines.forEach((line) => {
       if (line === 'staff') {
-        const names = str(c['Staff Names']).split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
-        if (names.length) { s.field('Staff Names:', names.join(', ')); return; }
+        if (staffNames.length) { s.field('Staff Names:', staffNames.join(', ')); return; }
         // Eight blanks on two lines, as the paper has them.
         const blanks = new Array(STAFF_SLOTS / 2).fill({ l: '' });
         s.row([{ l: 'Staff Names:', w: 0.2, only: true }].concat(blanks), []);
@@ -727,6 +766,17 @@ async function jobCardFormPdf(d) {
     });
     s.row([{ l: b.totalLabel, pre: 'R' }], [money(costRow(c, b.total).total)]);
     s.row([{ l: 'Approved by Management:', yes: b.approved }], [c[b.approved]]);
+  };
+
+  // ONE BOX PER SECTION, so somebody filling it in can tell where Transportation ends and
+  // Accommodation begins -- run together, the four read as one long list of blanks. The three
+  // "attached" questions share the first box with Transportation, as the business marked it up.
+  LOGISTICS.forEach((b, i) => {
+    const lead = i === 0 ? attached.length * 14 : 0;
+    s.boxed(lead + blockHeight(b), () => {
+      if (i === 0) attached.forEach(([l, on]) => { s.y -= 14; s.yesNo(M, l, on); });
+      drawBlock(b);
+    });
   });
 
   s.heading('Unforseen Costs');
@@ -788,7 +838,10 @@ async function jobCardFormPdf(d) {
   });
 
   s.footer(ref, d.generatedBy);
-  return doc.save();
+  const bytes = await doc.save();
+  // Where the section boxes landed, for the test suite. Not part of the PDF.
+  Object.defineProperty(bytes, 'boxes', { value: s.boxes, enumerable: false });
+  return bytes;
 }
 
 /** "JC-OM-2026-0169-MAINT-TE-2026-09-30.pdf" — safe on every filesystem. */

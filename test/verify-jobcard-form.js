@@ -71,6 +71,29 @@ function yPositions(bytes) {
   return ys;
 }
 
+/** Every drawn string with the page and height it was drawn at. */
+function placed(bytes) {
+  const raw = Buffer.from(bytes).toString('latin1');
+  const out = [];
+  let page = -1;
+  for (const m of raw.matchAll(/stream\r?\n/g)) {
+    const from = m.index + m[0].length;
+    const to = raw.indexOf('endstream', from);
+    if (to < 0) continue;
+    let body;
+    try { body = zlib.inflateSync(Buffer.from(raw.slice(from, to), 'latin1')).toString('latin1'); }
+    catch (e) { continue; }
+    const re = /1 0 0 1 ([\d.]+) ([\d.]+) Tm\s*(?:<([0-9A-Fa-f\s]+)>|\(((?:\\.|[^\\)])*)\))\s*Tj/g;
+    const found = [...body.matchAll(re)];
+    if (!found.length) continue;
+    page += 1;
+    const dec = (buf) => new TextDecoder('windows-1252').decode(buf);
+    found.forEach((g) => out.push({ page, y: Number(g[2]),
+      text: g[3] ? dec(Buffer.from(g[3].replace(/\s+/g, ''), 'hex')) : dec(Buffer.from(g[4], 'latin1')) }));
+  }
+  return out;
+}
+
 const FULL = {
   jobcard: {
     'JC Reference': 'OM-2026-0169/MAINT/TE',
@@ -338,6 +361,41 @@ const FULL = {
     t('and every one of them is printed', want.filter((f) => !printed.has(f)), []);
     t('and the form prints nothing that was never provisioned',
       [...printed].filter((f) => !want.includes(f)), []);
+  }
+
+  console.log('\n\x1b[1mEACH LOGISTICS SECTION IS BOXED ON ITS OWN\x1b[0m\n');
+  {
+    // Marked up by the business: the four sections ran together as one list of blanks, and
+    // nobody filling it in could see where Transportation ended and Accommodation began.
+    const check = async (label, data) => {
+      const b = await F.jobCardFormPdf(data);
+      const boxes = b.boxes || [];
+      const text = placed(b);
+      t(label + ': one box per section', boxes.length, F.LOGISTICS.length);
+      // The box holding a line is the one on its page whose top and bottom it sits between.
+      const boxOf = (s) => {
+        const at = text.find((x) => x.text === s);
+        return at ? boxes.findIndex((bx) => bx.page === at.page && at.y > bx.y && at.y < bx.y + bx.h) : -2;
+      };
+      t(label + ': each section’s heading is inside its own box',
+        F.LOGISTICS.map((blk) => boxOf(blk.name)), F.LOGISTICS.map((blk, i) => i));
+      t(label + ': and so is its Approved line, so nothing of it hangs outside',
+        F.LOGISTICS.map((blk, i) => {
+          const at = text.filter((x) => x.text === 'Approved by Management:')[i];
+          return at ? boxes.findIndex((bx) => bx.page === at.page && at.y > bx.y && at.y < bx.y + bx.h) : -2;
+        }), F.LOGISTICS.map((blk, i) => i));
+      t(label + ': the three "attached" questions share the first box, as marked up',
+        ['BOM Attached', 'Supplier Quotes Attached', 'Warehouse Costing Attached'].map(boxOf), [0, 0, 0]);
+      t(label + ': the boxes do not overlap',
+        boxes.slice(1).every((bx, i) => bx.page > boxes[i].page || bx.y + bx.h <= boxes[i].y), true);
+      t(label + ': and every box is the same width, so they line up',
+        new Set(boxes.map((bx) => bx.x + ':' + bx.w)).size, 1);
+    };
+    await check('filled in', FULL);
+    await check('blank', { jobcard: { 'JC Reference': 'OM-2026-0170/MAINT/TE' } });
+    // A long list of staff wraps; the box has to grow with it rather than cut through it.
+    const many = Array.from({ length: 30 }, (x, i) => 'Technician Number ' + (i + 1)).join('\n');
+    await check('thirty staff names', { ...FULL, costing: { ...FULL.costing, 'Staff Names': many } });
   }
 
   console.log('\n\x1b[1mTHE VISIT TABLES COME FROM SITE VISITS\x1b[0m\n');
