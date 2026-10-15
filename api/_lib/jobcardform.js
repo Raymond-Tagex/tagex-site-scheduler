@@ -43,6 +43,10 @@ const ACCENT = rgb(0.16, 0.42, 0.28);
 // sheet: a box drawn in the same grey as the writing lines inside it does not separate anything.
 const BOX = rgb(0.30, 0.34, 0.40);
 const BOX_PAD = 6;
+// A logistics section's own title. Bigger than the 8.5pt labels under it and in the form's
+// accent colour, so the eye finds where each section starts without reading the labels.
+const BLOCK_TITLE = 12;
+const BLOCK_TITLE_DROP = 21;
 
 const CO = Object.freeze({
   name: 'TAGEX ENERGY (PTY) Ltd',
@@ -740,8 +744,8 @@ async function jobCardFormPdf(d) {
   const staffNames = str(c['Staff Names']).split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
 
   // How tall a block will be, so boxed() can keep it on one page. Every row() and yesNo() line
-  // is 14; a field whose value wraps adds 11 a line; the title takes 18.
-  const blockHeight = (b) => 18 + 28 + b.lines.reduce((h, line) => {
+  // is 14; a field whose value wraps adds 11 a line; the title takes BLOCK_TITLE_DROP.
+  const blockHeight = (b) => BLOCK_TITLE_DROP + 28 + b.lines.reduce((h, line) => {
     if (line !== 'staff') return h + 14;
     if (!staffNames.length) return h + 28;
     const lw = s.width('Staff Names:', 8.5, fonts.bold) + 4;
@@ -751,8 +755,8 @@ async function jobCardFormPdf(d) {
   // Each block prints what was recorded against this job card, and a ruled line for anything
   // that was not -- the form is still something somebody writes on at site.
   const drawBlock = (b) => {
-    s.y -= 18;
-    s.write(b.name, M, s.y, 9, fonts.bold);
+    s.y -= BLOCK_TITLE_DROP;
+    s.write(b.name, M, s.y, BLOCK_TITLE, fonts.bold, ACCENT);
     b.lines.forEach((line) => {
       if (line === 'staff') {
         if (staffNames.length) { s.field('Staff Names:', staffNames.join(', ')); return; }
@@ -770,14 +774,12 @@ async function jobCardFormPdf(d) {
 
   // ONE BOX PER SECTION, so somebody filling it in can tell where Transportation ends and
   // Accommodation begins -- run together, the four read as one long list of blanks. The three
-  // "attached" questions share the first box with Transportation, as the business marked it up.
-  LOGISTICS.forEach((b, i) => {
-    const lead = i === 0 ? attached.length * 14 : 0;
-    s.boxed(lead + blockHeight(b), () => {
-      if (i === 0) attached.forEach(([l, on]) => { s.y -= 14; s.yesNo(M, l, on); });
-      drawBlock(b);
-    });
+  // "attached" questions are a box of their own: the business first marked them up inside
+  // Transportation's box, then corrected that -- they are about the job's paperwork, not travel.
+  s.boxed(attached.length * 14, () => {
+    attached.forEach(([l, on]) => { s.y -= 14; s.yesNo(M, l, on); });
   });
+  LOGISTICS.forEach((b) => s.boxed(blockHeight(b), () => drawBlock(b)));
 
   s.heading('Unforseen Costs');
   s.block('', 2);

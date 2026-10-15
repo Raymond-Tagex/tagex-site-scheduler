@@ -83,13 +83,13 @@ function placed(bytes) {
     let body;
     try { body = zlib.inflateSync(Buffer.from(raw.slice(from, to), 'latin1')).toString('latin1'); }
     catch (e) { continue; }
-    const re = /1 0 0 1 ([\d.]+) ([\d.]+) Tm\s*(?:<([0-9A-Fa-f\s]+)>|\(((?:\\.|[^\\)])*)\))\s*Tj/g;
+    const re = /(?:\/\S+ ([\d.]+) Tf\s+[\d.]+ TL\s+)?1 0 0 1 ([\d.]+) ([\d.]+) Tm\s*(?:<([0-9A-Fa-f\s]+)>|\(((?:\\.|[^\\)])*)\))\s*Tj/g;
     const found = [...body.matchAll(re)];
     if (!found.length) continue;
     page += 1;
     const dec = (buf) => new TextDecoder('windows-1252').decode(buf);
-    found.forEach((g) => out.push({ page, y: Number(g[2]),
-      text: g[3] ? dec(Buffer.from(g[3].replace(/\s+/g, ''), 'hex')) : dec(Buffer.from(g[4], 'latin1')) }));
+    found.forEach((g) => out.push({ page, y: Number(g[3]), size: g[1] ? Number(g[1]) : null,
+      text: g[4] ? dec(Buffer.from(g[4].replace(/\s+/g, ''), 'hex')) : dec(Buffer.from(g[5], 'latin1')) }));
   }
   return out;
 }
@@ -371,21 +371,29 @@ const FULL = {
       const b = await F.jobCardFormPdf(data);
       const boxes = b.boxes || [];
       const text = placed(b);
-      t(label + ': one box per section', boxes.length, F.LOGISTICS.length);
+      // The "attached" questions first, in a box of their own, then one per section.
+      t(label + ': one box for the attachments and one per section', boxes.length, F.LOGISTICS.length + 1);
       // The box holding a line is the one on its page whose top and bottom it sits between.
       const boxOf = (s) => {
         const at = text.find((x) => x.text === s);
         return at ? boxes.findIndex((bx) => bx.page === at.page && at.y > bx.y && at.y < bx.y + bx.h) : -2;
       };
       t(label + ': each section’s heading is inside its own box',
-        F.LOGISTICS.map((blk) => boxOf(blk.name)), F.LOGISTICS.map((blk, i) => i));
+        F.LOGISTICS.map((blk) => boxOf(blk.name)), F.LOGISTICS.map((blk, i) => i + 1));
+      // Bigger than every label under it, so a section's start is seen, not read.
+      const sizeOf = (s) => (text.find((x) => x.text === s) || {}).size;
+      t(label + ': each section’s heading is set larger than its labels',
+        F.LOGISTICS.map((blk) => sizeOf(blk.name) > sizeOf('Approved by Management:')), F.LOGISTICS.map(() => true));
       t(label + ': and so is its Approved line, so nothing of it hangs outside',
         F.LOGISTICS.map((blk, i) => {
           const at = text.filter((x) => x.text === 'Approved by Management:')[i];
           return at ? boxes.findIndex((bx) => bx.page === at.page && at.y > bx.y && at.y < bx.y + bx.h) : -2;
-        }), F.LOGISTICS.map((blk, i) => i));
-      t(label + ': the three "attached" questions share the first box, as marked up',
+        }), F.LOGISTICS.map((blk, i) => i + 1));
+      // Corrected by the business: these are about the job's paperwork, not Transportation.
+      t(label + ': the three "attached" questions have a box of their own, apart from Transportation',
         ['BOM Attached', 'Supplier Quotes Attached', 'Warehouse Costing Attached'].map(boxOf), [0, 0, 0]);
+      t(label + ': and Transportation’s box holds nothing else',
+        boxOf('Transportation Details') !== boxOf('BOM Attached'), true);
       t(label + ': the boxes do not overlap',
         boxes.slice(1).every((bx, i) => bx.page > boxes[i].page || bx.y + bx.h <= boxes[i].y), true);
       t(label + ': and every box is the same width, so they line up',
