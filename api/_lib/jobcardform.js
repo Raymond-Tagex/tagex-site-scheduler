@@ -27,6 +27,8 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const { wrap, str, fmtDate, safe } = require('./ticketreport.js');
 
@@ -43,15 +45,40 @@ const ACCENT = rgb(0.16, 0.42, 0.28);
 // sheet: a box drawn in the same grey as the writing lines inside it does not separate anything.
 const BOX = rgb(0.30, 0.34, 0.40);
 const BOX_PAD = 6;
+const WHITE = rgb(1, 1, 1);
+
+// The director's approval strip, filled as the template fills it: the cell shading in
+// TAGEX JOB CARD TEMPLATE SEP2026.docx is 92D050, FF0000 and 00B0F0. The colour is the cue --
+// a glance says which decision was taken, before anybody reads which box is ticked.
+const hex = (h) => rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255,
+  parseInt(h.slice(4, 6), 16) / 255);
+const DECISIONS = Object.freeze([
+  ['Approved', '92D050'],
+  ['Denied', 'FF0000'],
+  ['Completed', '00B0F0'],
+]);
 // A logistics section's own title. Bigger than the 8.5pt labels under it and in the form's
 // accent colour, so the eye finds where each section starts without reading the labels.
 const BLOCK_TITLE = 12;
 const BLOCK_TITLE_DROP = 21;
 
-const CO = Object.freeze({
-  name: 'TAGEX ENERGY (PTY) Ltd',
-  addr: '412 Heidelberg Street, Tulisa Park, Alberton',
-});
+// The TAGEX logo, the same file the delivery note prints (tagex-delivery public/img/tagex-logo.png)
+// and the same artwork as the template's header. It is read from disk here and bundled with the
+// functions that print forms by includeFiles in vercel.json -- a form that fetched it from a URL
+// would print without it whenever the site was slow, and a CDN is ruled out by the CSP anyway.
+const LOGO_FILE = path.join(__dirname, 'assets', 'tagex-logo.png');
+let logoBytes;
+function logo() {
+  if (logoBytes === undefined) {
+    try { logoBytes = fs.readFileSync(LOGO_FILE); } catch (e) { logoBytes = null; }
+  }
+  return logoBytes;
+}
+const LOGO_H = 36;                          // points: the delivery note's 34px header, a touch up
+
+// One address, kept in ticketreport.js. This file had its own copy, which is how the forms and
+// the delivery note came to print two different addresses.
+const { CO } = require('./ticketreport.js');
 
 // Verbatim from the template. Word ran the sub-clauses together inside one paragraph; they are
 // split here so they read as clauses, but not a word is changed.
@@ -327,7 +354,8 @@ class Form {
   /** A drawn box, ticked or not, with its label beside it. Returns the width it used. */
   tick(x, y, label, on, size = 8.5) {
     const s = 8;
-    this.rect(x, y - 1, s, s, { bc: on ? INK : RULE, bw: on ? 1 : 0.7 });
+    // White inside, so a box reads as a box on the coloured approval cells too.
+    this.rect(x, y - 1, s, s, { bc: on ? INK : RULE, bw: on ? 1 : 0.7, fill: WHITE });
     if (on) {
       this.line(x + 1.6, y + 3, x + 3.2, y + 0.8, 1.1, INK);
       this.line(x + 3.2, y + 0.8, x + 6.6, y + 6, 1.1, INK);
@@ -364,12 +392,20 @@ class Form {
 
   // A heading is kept with room for the lines under it: one stranded at the foot of a page,
   // with its section on the next, reads as a section with nothing in it.
+  //
+  // headingSize is the band's type size. The job card keeps 8.5pt, the paper's own; the ticket
+  // form sets it larger, because its sections are few and long and need to be found at a glance.
   heading(s) {
-    this.need(64);
-    this.y -= 20;
-    this.rect(M, this.y - 3, CW, 15, { fill: BAND, bw: 0 });
-    this.write(String(s).toUpperCase(), M + 5, this.y + 1.5, 8.5, this.f.bold, ACCENT);
-    this.y -= 7;
+    const size = this.headingSize || 8.5;
+    const grow = size - 8.5;
+    const bandH = size + 6.5;
+    this.need(64 + grow);
+    this.y -= 20 + grow;
+    this.rect(M, this.y - 3, CW, bandH, { fill: BAND, bw: 0 });
+    // Centred in the band on the capital height, which is about 0.72 of the type size.
+    this.write(String(s).toUpperCase(), M + 5, this.y - 3 + (bandH - 0.72 * size) / 2, size,
+      this.f.bold, ACCENT);
+    this.y -= 7 + grow;
   }
 
   /** A small grey instruction line, as the paper prints its italic prompts. */
@@ -558,14 +594,36 @@ class Form {
     else this.line(dx, this.y - 1.5, M + CW, this.y - 1.5);
   }
 
-  /** The form's title and the company line under it. */
+  /**
+   * The head of page one, laid out as the delivery note lays out its own: the logo top left
+   * with the company under it, and the document's reference and date top right.
+   *
+   * A logo that cannot be read prints the company name in its place rather than failing the
+   * form -- the form is built when a job card is saved, and a missing picture must not stop that.
+   */
+  letterhead(ref, right) {
+    const top = this.y;
+    let under = top - LOGO_H;
+    if (this.f.logo) {
+      const w = LOGO_H * this.f.logo.width / this.f.logo.height;
+      this.page.drawImage(this.f.logo, { x: M, y: top - LOGO_H, width: w, height: LOGO_H });
+    } else {
+      this.write('TAGEX ENERGY', M, top - 20, 18, this.f.bold, INK);
+      under = top - 26;
+    }
+    this.write(CO.name, M, under - 10, 7.5, this.f.bold, MUTED);
+    this.write(CO.addr, M, under - 19, 7.5, this.f.reg, MUTED);
+    const rx = (s, y, size, font) => this.write(s, M + CW - this.width(s, size, font), y, size, font);
+    if (str(ref)) rx(ref, top - 12, 10, this.f.bold);
+    (right || []).forEach((line, i) => rx(line, top - 25 - i * 11, 8, this.f.reg));
+    this.y = under - 31;
+  }
+
+  /** The form's title, centred. The company is in the letterhead above it. */
   title(text) {
     this.y -= 22;
     this.write(text, A4.w / 2 - this.width(text, 17, this.f.bold) / 2, this.y, 17, this.f.bold, ACCENT);
-    this.y -= 11;
-    const co = CO.name + ' · ' + CO.addr;
-    this.write(co, A4.w / 2 - this.width(co, 7) / 2, this.y, 7, this.f.reg, MUTED);
-    this.y -= 4;
+    this.y -= 6;
   }
 
   /** The Service Call-Out terms, verbatim, and the client's acceptance of them, on a new page. */
@@ -620,6 +678,8 @@ async function newForm(titleMeta) {
     reg: await doc.embedFont(StandardFonts.Helvetica),
     bold: await doc.embedFont(StandardFonts.HelveticaBold),
   };
+  const bytes = logo();
+  if (bytes) { try { fonts.logo = await doc.embedPng(bytes); } catch (e) { fonts.logo = null; } }
   doc.setTitle(safe(titleMeta));
   return { doc, form: new Form(doc, fonts), fonts };
 }
@@ -655,22 +715,26 @@ async function jobCardFormPdf(d) {
   const ref = str(f['JC Reference']);
   const { doc, form: s, fonts } = await newForm('TAGEX Job Card ' + ref);
 
+  s.letterhead(ref, ['Printed: ' + fmtDate(new Date().toISOString())]);
+
   // ── the approval strip across the head of page one ────────────────────────
   const decision = str(f['Director Decision']);
   const cellW = CW / 3;
   s.y -= 34;
-  ['Approved', 'Denied', 'Completed'].forEach((word, i) => {
+  // On a coloured cell everything is drawn in ink: the grey used for labels and writing lines
+  // elsewhere disappears into red and blue.
+  DECISIONS.forEach(([word, colour], i) => {
     const x = M + i * cellW;
-    s.rect(x, s.y, cellW - 6, 34);
+    s.rect(x, s.y, cellW - 6, 34, { fill: hex(colour), bc: INK, bw: 0.7 });
     s.tick(x + 6, s.y + 22, word.toUpperCase(), decision === word, 8);
-    s.write('Director Signature:', x + 6, s.y + 11, 6.5, fonts.reg, MUTED);
+    s.write('Director Signature:', x + 6, s.y + 11, 6.5, fonts.reg, INK);
     const who = decision === word ? str(f['Director Decision By']) : '';
     if (who) s.write(s.fit(who, 6.5, fonts.reg, cellW - 90), x + 76, s.y + 11, 6.5);
-    else s.line(x + 76, s.y + 10, x + cellW - 12, s.y + 10);
-    s.write('Date:', x + 6, s.y + 3, 6.5, fonts.reg, MUTED);
+    else s.line(x + 76, s.y + 10, x + cellW - 12, s.y + 10, 0.6, INK);
+    s.write('Date:', x + 6, s.y + 3, 6.5, fonts.reg, INK);
     const when = decision === word ? fmtDate(f['Director Decision Date']) : '';
     if (when) s.write(when, x + 30, s.y + 3, 6.5);
-    else s.line(x + 30, s.y + 2, x + cellW - 12, s.y + 2);
+    else s.line(x + 30, s.y + 2, x + cellW - 12, s.y + 2, 0.6, INK);
   });
   s.y -= 6;
 
@@ -852,6 +916,6 @@ function formFilename(ref) {
   return 'JC-' + clean + '-' + new Date().toISOString().slice(0, 10) + '.pdf';
 }
 
-module.exports = { jobCardFormPdf, formFilename, jobCardSensitivity, TERMS, COST_ROWS, ENTITIES,
+module.exports = { LOGO_FILE, DECISIONS, jobCardFormPdf, formFilename, jobCardSensitivity, TERMS, COST_ROWS, ENTITIES,
   ACTIONS, CLASSES, CONFIRMS, PROJECT_TYPES, projectType, costRow, LOGISTICS, logisticsKeys,
   STAFF_SLOTS, Form, newForm, padTo, CO, A4, M, CW };

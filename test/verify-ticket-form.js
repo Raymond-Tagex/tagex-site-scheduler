@@ -143,6 +143,29 @@ const FULL = {
   t('with the job card’s head', HEAD.filter((l) => !all.includes(l)), []);
   t('and the company line', all.includes(J.CO.name), true);
 
+  {
+    // The ticket's section bands are larger than the job card's, as the business asked.
+    const sizeOf = (b, word) => {
+      const raw = Buffer.from(b).toString('latin1');
+      const hex = Buffer.from(word, 'latin1').toString('hex').toUpperCase();
+      for (const m of raw.matchAll(/stream\r?\n/g)) {
+        const from = m.index + m[0].length;
+        let body;
+        try { body = zlib.inflateSync(Buffer.from(raw.slice(from, raw.indexOf('endstream', from)), 'latin1')).toString('latin1'); }
+        catch (e) { continue; }
+        const g = new RegExp('/\\S+ ([\\d.]+) Tf\\s+[\\d.]+ TL\\s+1 0 0 1 [\\d.]+ [\\d.]+ Tm\\s*<' + hex + '> Tj').exec(body);
+        if (g) return Number(g[1]);
+      }
+      return null;
+    };
+    const jcBytes = await J.jobCardFormPdf({ jobcard: {} });
+    t('the ticket’s section headings are set at the ticket size',
+      ['FAULT DETAILS', 'SITE VISITS', 'RESOLUTION'].map((h) => sizeOf(bytes, h)), [TF.TICKET_HEADING, TF.TICKET_HEADING, TF.TICKET_HEADING]);
+    t('which is larger than the job card’s', TF.TICKET_HEADING > sizeOf(jcBytes, 'ON-SITE INSPECTION'), true);
+    t('and the logo heads the ticket too', /\/Subtype \/Image/.test(Buffer.from(bytes).toString('latin1')), true);
+    t('with its job card named in the letterhead', all.includes('Job Card: OM-2026-0169/MAINT/TE'), true);
+  }
+
   console.log('\n\x1b[1mWHAT THE TICKET KNOWS IS PRINTED\x1b[0m\n');
   t('its reference and its job card',
     ['TKT-2026-0048', 'OM-2026-0169/MAINT/TE'].filter((x) => !all.includes(x)), []);

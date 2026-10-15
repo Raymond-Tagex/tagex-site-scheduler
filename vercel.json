@@ -16,7 +16,12 @@
   ],
   "functions": {
     "api/ticket-report.js": {
-      "maxDuration": 30
+      "maxDuration": 30,
+      "includeFiles": "api/_lib/assets/**"
+    },
+    "api/jobcard-form.js": {
+      "maxDuration": 30,
+      "includeFiles": "api/_lib/assets/**"
     },
     "api/at.js": {
       "maxDuration": 30

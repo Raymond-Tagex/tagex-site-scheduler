@@ -155,7 +155,7 @@ console.log('\n\x1b[1mA TICKET WITH NOTHING ON IT YET\x1b[0m\n');
   t('it is a PDF', pdf.slice(0, 5).toString(), '%PDF-');
   t('the reference is on it', text.includes('TKT-2026-0042'), true);
   t('so is the company', text.includes('TAGEX ENERGY (PTY) Ltd'), true);
-  t('and the address', text.includes('412 Heidelberg Street, Tulisa Park, Alberton'), true);
+  t('and the address', text.includes('412 Heidelberg Road, Tulisa Park, JHB 2197'), true);
   t('and the VAT number', /VAT: 4550259271/.test(text), true);
   // The registration number has never been supplied. It must not be invented, and an empty
   // "Reg:" label is its own kind of lie.

@@ -95,6 +95,10 @@ downloaded. Reprints from the Print buttons are never filed.
 - One filed copy per name ("Job Card form — REF", "Ticket form — TKT-…"); a failed upload is
   retired with Record Status = Deleted, never deleted. Document Type is "Other" because the
   select has no "Job Card" choice and the API cannot add one.
+- Both forms open with the TAGEX logo, laid out as the delivery note's head
+  (`api/_lib/assets/tagex-logo.png`, copied from tagex-delivery). It is read from disk, so
+  `vercel.json` ships it with `jobcard-form.js` and `ticket-report.js` via `includeFiles` — a
+  new function that prints a form needs the same entry.
 
 ## Why things are vendored
 
