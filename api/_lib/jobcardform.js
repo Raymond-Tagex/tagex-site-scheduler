@@ -60,6 +60,9 @@ const DECISIONS = Object.freeze([
 // A logistics section's own title. Bigger than the 8.5pt labels under it and in the form's
 // accent colour, so the eye finds where each section starts without reading the labels.
 const BLOCK_TITLE = 12;
+// The section bands (PRE-VISIT NOTES, SUMMARY OF COSTS...) on both forms. Below BLOCK_TITLE:
+// a band heads several logistics sections and must not be confused with one of them.
+const SECTION_HEADING = 11;
 const BLOCK_TITLE_DROP = 21;
 
 // The TAGEX logo, the same file the delivery note prints (tagex-delivery public/img/tagex-logo.png)
@@ -393,10 +396,11 @@ class Form {
   // A heading is kept with room for the lines under it: one stranded at the foot of a page,
   // with its section on the next, reads as a section with nothing in it.
   //
-  // headingSize is the band's type size. The job card keeps 8.5pt, the paper's own; the ticket
-  // form sets it larger, because its sections are few and long and need to be found at a glance.
+  // SECTION_HEADING is the band's type size on both forms. The paper's own is 8.5pt, the same as
+  // the labels under it; the business asked for the bands to stand out, first on the ticket form
+  // and then on the job card, so both are larger than the paper.
   heading(s) {
-    const size = this.headingSize || 8.5;
+    const size = SECTION_HEADING;
     const grow = size - 8.5;
     const bandH = size + 6.5;
     this.need(64 + grow);
@@ -916,6 +920,6 @@ function formFilename(ref) {
   return 'JC-' + clean + '-' + new Date().toISOString().slice(0, 10) + '.pdf';
 }
 
-module.exports = { LOGO_FILE, DECISIONS, jobCardFormPdf, formFilename, jobCardSensitivity, TERMS, COST_ROWS, ENTITIES,
+module.exports = { SECTION_HEADING, LOGO_FILE, DECISIONS, jobCardFormPdf, formFilename, jobCardSensitivity, TERMS, COST_ROWS, ENTITIES,
   ACTIONS, CLASSES, CONFIRMS, PROJECT_TYPES, projectType, costRow, LOGISTICS, logisticsKeys,
   STAFF_SLOTS, Form, newForm, padTo, CO, A4, M, CW };
