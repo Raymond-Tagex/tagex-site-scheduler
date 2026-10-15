@@ -144,7 +144,8 @@ const FULL = {
   t('and the company line', all.includes(J.CO.name), true);
 
   {
-    // The ticket's section bands are larger than the job card's, as the business asked.
+    // Both forms' section bands are set larger than the paper's 8.5pt, as the business asked --
+    // the ticket first, then the job card -- and at the same size, so the two read alike.
     const sizeOf = (b, word) => {
       const raw = Buffer.from(b).toString('latin1');
       const hex = Buffer.from(word, 'latin1').toString('hex').toUpperCase();
@@ -159,9 +160,14 @@ const FULL = {
       return null;
     };
     const jcBytes = await J.jobCardFormPdf({ jobcard: {} });
-    t('the ticket’s section headings are set at the ticket size',
-      ['FAULT DETAILS', 'SITE VISITS', 'RESOLUTION'].map((h) => sizeOf(bytes, h)), [TF.TICKET_HEADING, TF.TICKET_HEADING, TF.TICKET_HEADING]);
-    t('which is larger than the job card’s', TF.TICKET_HEADING > sizeOf(jcBytes, 'ON-SITE INSPECTION'), true);
+    const H = J.SECTION_HEADING;
+    t('the ticket’s section headings are set at the section size',
+      ['FAULT DETAILS', 'SITE VISITS', 'RESOLUTION'].map((h) => sizeOf(bytes, h)), [H, H, H]);
+    t('and so are the job card’s',
+      ['PRE-VISIT NOTES', 'ON-SITE INSPECTION', 'STOCK, MATERIAL & LOGISTICS ALLOCATION', 'SUMMARY OF COSTS',
+        'SIGNATURES FOR APPROVALS'].map((h) => sizeOf(jcBytes, h)), [H, H, H, H, H]);
+    t('which is larger than the paper’s 8.5pt labels', H > 8.5, true);
+    t('and smaller than a logistics section’s own title, which sits under a band', H < 12, true);
     t('and the logo heads the ticket too', /\/Subtype \/Image/.test(Buffer.from(bytes).toString('latin1')), true);
     t('with its job card named in the letterhead', all.includes('Job Card: OM-2026-0169/MAINT/TE'), true);
   }
