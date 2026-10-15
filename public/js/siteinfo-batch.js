@@ -215,8 +215,7 @@
       + 'banking or financial material is refused — including photographs and scans.</div>'
       + '<div class="si-form" id="batchForm">'
       + '<div class="si-f"><label for="batchBase">Base</label>'
-      + '<select id="batchBase"><option value="OM">O&amp;M</option>'
-      + '<option value="CI">C&amp;I</option></select></div>'
+      + '<select id="batchBase">' + TX.baseOptions(BASE) + '</select></div>'
       + '<div class="si-f si-wide"><label>Documents</label>'
       + '<label class="si-drop" id="batchDrop">'
       + '<span>Drop the site folder here, or choose files</span>'
@@ -310,28 +309,26 @@
     };
     const cliParams = { pageSize: 100, fields: ['Client Name'] };
     const siteParams = { pageSize: 100, fields: ['Site Name'] };
-    const [ci, om, ciCli, omCli, ciSite, omSite] = await Promise.all([
-      TX.list('CI', 'job_cards', params).catch(() => ({ records: [] })),
-      TX.list('OM', 'job_cards', params).catch(() => ({ records: [] })),
-      TX.list('CI', 'clients', cliParams).catch(() => ({ records: [] })),
-      TX.list('OM', 'clients', cliParams).catch(() => ({ records: [] })),
-      TX.list('CI', 'site_information', siteParams).catch(() => ({ records: [] })),
-      TX.list('OM', 'site_information', siteParams).catch(() => ({ records: [] })),
-    ]);
+    const none = () => ({ records: [] });
+    const per = await Promise.all(TX.OPS_BASES.map((b) => Promise.all([
+      TX.list(b.key, 'job_cards', params).catch(none),
+      TX.list(b.key, 'clients', cliParams).catch(none),
+      TX.list(b.key, 'site_information', siteParams).catch(none),
+    ])));
 
-    // Keyed by base as well as id. The two bases are duplicates of one another and share
-    // table ids; assuming they cannot also share a record id is the kind of thing that is
-    // true until it is not.
+    // Keyed by base as well as id. The bases are duplicates of one another and share table
+    // ids; assuming they cannot also share a record id is the kind of thing that is true
+    // until it is not.
     const names = {};
     const sites = {};
     const learn = (res, base, field, into) => (res.records || []).forEach((r) => {
       const n = first(r.fields[field]);
       if (n) into[base + ':' + r.id] = n;
     });
-    learn(ciCli, 'CI', 'Client Name', names);
-    learn(omCli, 'OM', 'Client Name', names);
-    learn(ciSite, 'CI', 'Site Name', sites);
-    learn(omSite, 'OM', 'Site Name', sites);
+    per.forEach(([, cli, site], i) => {
+      learn(cli, TX.OPS_BASES[i].key, 'Client Name', names);
+      learn(site, TX.OPS_BASES[i].key, 'Site Name', sites);
+    });
 
     const take = (r, base) => ({
       id: r.id,
@@ -343,10 +340,8 @@
       status: String(r.fields.Status || ''),
       hasSite: (r.fields['Site Information'] || []).length > 0,
     });
-    CARDS = [
-      ...(ci.records || []).map((r) => take(r, 'CI')),
-      ...(om.records || []).map((r) => take(r, 'OM')),
-    ].filter((c) => c.ref);
+    CARDS = per.flatMap(([cards], i) => (cards.records || []).map((r) => take(r, TX.OPS_BASES[i].key)))
+      .filter((c) => c.ref);
     return CARDS;
   }
 
@@ -466,7 +461,7 @@
           + (c.title ? ' — ' + esc(c.title) : '')
           + '<br><span class="si-cardmeta">' + esc([c.client, c.address].filter(Boolean).join(' · '))
           + '</span></span>'
-          + '<span class="si-batch-size">' + esc(c.base === 'OM' ? 'O&M' : 'C&I')
+          + '<span class="si-batch-size">' + esc(TX.baseLabel(c.base))
           + (c.status ? ' · ' + esc(c.status) : '') + '</span>'
           + (c.hasSite ? '<span class="si-chip">has a site</span>' : '')
           + '</button>')).join('') + '</div>'
@@ -786,10 +781,10 @@
     });
 
     const head = r.existing
-      ? '<div class="si-msg ok">This site already exists in ' + esc(r.existing.base === 'OM' ? 'O&M' : 'C&I')
+      ? '<div class="si-msg ok">This site already exists in ' + esc(TX.baseLabel(r.existing.base))
         + ' as <strong>' + esc(r.existing.name) + '</strong>. Its stored values are kept; the scan '
         + 'only fills what was blank. Saving updates that record.</div>'
-      : '<div class="si-msg">No matching site was found in C&amp;I or O&amp;M, so this will create '
+      : '<div class="si-msg">No matching site was found in C&amp;I, O&amp;M or RES, so this will create '
         + 'a new one.</div>';
 
     const dupes = (r.duplicates || []).length

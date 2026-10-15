@@ -9,6 +9,12 @@
 // denied.
 //
 // Reads are fresh rather than cached: this is a document somebody signs and takes to site.
+//
+// { jobCardId, file: true } ALSO KEEPS A COPY in Documents, against the job card. The scheduler
+// sends it once, straight after a job card is raised, so every job card has its form on the
+// record without anybody having to remember to print one. Filing is a separate right
+// (documents:create) checked separately -- see _lib/formfile.js -- and a refusal there still
+// returns the PDF, because the person who raised the job card may print it either way.
 
 'use strict';
 
@@ -19,16 +25,16 @@ const A = require('./_lib/audit.js');
 const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 const F = require('./_lib/jobcardform.js');
+const FF = require('./_lib/formfile.js');
 
-const BASE = 'OM';
 const MAX_VISITS = 60;
 
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 const first = (v) => (Array.isArray(v) ? v.find((x) => typeof x === 'string' && x) || '' : (v || ''));
 
-/** One table's rows, already stripped of whatever this role may not read. */
-async function readAll(auth, moduleKey, sub) {
-  const r = T.resolve(BASE, moduleKey, sub);
+/** One table's rows, from the scheduler's base, already stripped of whatever this role may not read. */
+async function readAll(auth, base, moduleKey, sub) {
+  const r = T.resolve(base, moduleKey, sub);
   if (!r.ok) throw Object.assign(new Error(r.detail), { status: r.status, reason: r.reason });
   const rule = auth.perms && auth.perms[moduleKey];
   const rows = await at.list(r.baseId, r.tableId, {});
@@ -68,9 +74,12 @@ module.exports = async function handler(req, res) {
   if (!/^rec[A-Za-z0-9]+$/.test(jobCardId)) {
     return H.fail(res, 400, 'bad_request', 'A job card record id is required.');
   }
+  const base = T.schedulerBase(body.base);
+  if (!base) return H.fail(res, 400, 'bad_request', 'Unknown base.');
+  ctx.baseSymbol = base;
 
   try {
-    const jcs = await readAll(auth, 'job_cards');
+    const jcs = await readAll(auth, base, 'job_cards');
     const jobcard = jcs.find((r) => r.id === jobCardId);
     // Not "no such record": a job card outside this role's scope was stripped by readAll, and
     // saying which of the two it was would tell the caller a record exists.
@@ -86,7 +95,7 @@ module.exports = async function handler(req, res) {
     // still gets a job card, with that section blank rather than an error.
     let costing = {};
     try {
-      const rows = await readAll(auth, 'costing');
+      const rows = await readAll(auth, base, 'costing');
       const mine = rows.filter((r) => ids(r.fields['Job Card']).includes(jobCardId));
       // The form has one Summary of Costs grid, so several costing rows are added together.
       mine.forEach((r) => {
@@ -98,7 +107,7 @@ module.exports = async function handler(req, res) {
 
     let visits = [];
     try {
-      const rows = await readAll(auth, 'site_visits');
+      const rows = await readAll(auth, base, 'site_visits');
       visits = rows
         .filter((r) => ids(r.fields['Job Card']).includes(jobCardId))
         .slice(0, MAX_VISITS)
@@ -112,14 +121,15 @@ module.exports = async function handler(req, res) {
 
     let ticketRefs = [];
     try {
-      const rows = await readAll(auth, 'tickets', 'ticket');
+      const rows = await readAll(auth, base, 'tickets', 'ticket');
       ticketRefs = rows
         .filter((r) => ids(r.fields['Job Card']).includes(jobCardId))
         .map((r) => String(r.fields['Ticket Ref'] || '')).filter(Boolean);
     } catch (e) { ticketRefs = []; }
 
-    const bytes = await F.jobCardFormPdf({
+    const payload = {
       jobcard: f,
+      created: jobcard.createdTime,
       client: first(f['Client Name']),
       site: first(f['Site / Address']),
       responsible: (f.Responsible && f.Responsible.name) || '',
@@ -128,15 +138,36 @@ module.exports = async function handler(req, res) {
       ticketRefs,
       bomCount: ids(f['BOM Sheets']).length,
       generatedBy: auth.email,
-    });
+    };
+    const bytes = await F.jobCardFormPdf(payload);
+    const filename = F.formFilename(f['JC Reference']);
 
     await A.auditNow({ ...ctx, action: 'Export', result: 'Allowed', recordId: jobCardId,
       newValue: 'job card form printed' });
 
+    let filed = null;
+    if (body.file === true) {
+      const ref = String(f['JC Reference'] || jobCardId);
+      try {
+        filed = await FF.fileForm({
+          auth, base, ctx, jobCardId, filename, bytes,
+          name: 'Job Card form — ' + ref,
+          sensitivity: F.jobCardSensitivity(payload),
+          notes: 'The printed job card as it stood when it was raised, filed automatically by the '
+            + 'scheduler for ' + auth.email + ' on ' + new Date().toISOString().slice(0, 10)
+            + '. Print the job card again for its current state.',
+        });
+      } catch (e) {
+        // The form was built and is returned; only the copy failed, and that is said plainly.
+        filed = { ok: false, reason: 'error', detail: String(e.message || e).slice(0, 200) };
+      }
+    }
+
     return H.ok(res, {
-      filename: F.formFilename(f['JC Reference']),
+      filename,
       contentType: 'application/pdf',
       content: Buffer.from(bytes).toString('base64'),
+      filed: FF.filedSummary(filed),
     });
   } catch (e) {
     await A.auditNow({ ...ctx, action: 'Export', result: 'Denied',

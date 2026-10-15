@@ -99,6 +99,19 @@ function yPositions(stream) {
 
 const pagesOf = (buf) => streams(buf).filter((s) => /Tj|re|l\s|m\s/.test(s));
 
+/** The font size a given string was drawn at (each pdf-lib drawText is its own BT ... ET block). */
+function fontSizeOfRef(buf, text) {
+  const hex = Buffer.from(text, 'latin1').toString('hex').toUpperCase();
+  for (const st of streams(buf)) {
+    for (const block of st.split('ET')) {
+      if (!block.toUpperCase().includes('<' + hex + '>') && !block.includes('(' + text + ')')) continue;
+      const m = /([\d.]+)\s+Tf/.exec(block);
+      if (m) return parseFloat(m[1]);
+    }
+  }
+  return 0;
+}
+
 // ── fixtures ────────────────────────────────────────────────────────────────
 const LONG = Array.from({ length: 420 }, (_, i) => 'word' + i).join(' ');
 
@@ -142,7 +155,7 @@ console.log('\n\x1b[1mA TICKET WITH NOTHING ON IT YET\x1b[0m\n');
   t('it is a PDF', pdf.slice(0, 5).toString(), '%PDF-');
   t('the reference is on it', text.includes('TKT-2026-0042'), true);
   t('so is the company', text.includes('TAGEX ENERGY (PTY) Ltd'), true);
-  t('and the address', text.includes('412 Heidelberg Street, Tulisa Park, Alberton'), true);
+  t('and the address', text.includes('412 Heidelberg Road, Tulisa Park, JHB 2197'), true);
   t('and the VAT number', /VAT: 4550259271/.test(text), true);
   // The registration number has never been supplied. It must not be invented, and an empty
   // "Reg:" label is its own kind of lie.
@@ -351,7 +364,7 @@ console.log('\n\x1b[1mTHE TICKET LIST\x1b[0m\n');
     generatedBy: 'raymond@tagexenergy.co.za', generatedAt: '2026-10-08T09:30:00.000Z' });
   const doc = await PDFDocument.load(pdf);
   const { width, height } = doc.getPage(0).getSize();
-  t('prints landscape, so the subject has room', width > height, true);
+  t('a page is A4 either way round', [Math.round(width), Math.round(height)].sort().join('x'), '595x842');
   // Streams that draw no text (fonts, the odd empty one) are not pages.
   const pages = pagesOf(pdf).map(drawn).filter((p) => p.length);
   t('the reader finds as many pages as the document has', pages.length, doc.getPageCount());
@@ -361,16 +374,24 @@ console.log('\n\x1b[1mTHE TICKET LIST\x1b[0m\n');
   t('and what Open means', text.includes('Open tickets (New, Assigned'), true);
   t('a count per status', /Visit Scheduled\n46/.test(text) && /New\n24/.test(text), true);
   t('every ticket is on it', many.every((r) => text.includes(r.ref)), true);
-  t('it runs onto more than one page', pages.length > 1, true);
-  t('and the column headings repeat on every page',
-    pages.every((p) => p.includes('Ticket') && p.includes('Subject')), true);
-  t('and every page is numbered', pages.every((p, i) => p.includes(`Page ${i + 1} of ${pages.length}`)), true);
+  t('70 tickets still print on ONE page', doc.getPageCount(), 1);
+  t('with the column headings', text.includes('Ticket') && text.includes('Subject'), true);
+  t('and numbered as the only page', text.includes('Page 1 of 1'), true);
+  t('the print date is on it, large', text.includes('PRINTED') && text.includes('Thu 08 Oct 2026'), true);
   t('the days column counts from reported', text.includes('\n18\n'), true);
 
   const one = await R.ticketListPdf({ filter: 'Closed', search: 'groot', rows: [],
     generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
   const t1 = pagesOf(one).map(drawn).flat().join('\n');
   t('an empty chip says so rather than printing a blank page', t1.includes('No tickets match.'), true);
+  const few = await R.ticketListPdf({ filter: 'OPEN', search: '', rows: many.slice(0, 5),
+    generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
+  const huge = await R.ticketListPdf({ filter: 'ALL', search: '', rows: Array.from({ length: 400 }, (_, i) => row(i, 'Closed')),
+    generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
+  t('a short list prints larger than a long one', fontSizeOfRef(few, many[0].ref) > fontSizeOfRef(pdf, many[0].ref), true);
+  t('a short list prints at least 10 pt', fontSizeOfRef(few, many[0].ref) >= 10, true);
+  { const pg = (await PDFDocument.load(few)).getPage(0).getSize(); t('and landscape, so the subject has room', pg.width > pg.height, true); }
+  t('even 400 tickets stay on one page', (await PDFDocument.load(huge)).getPageCount(), 1);
   t('and a search is printed with it', t1.includes('Search: "groot"'), true);
   t('the filename names the chip and the day',
     R.listFilename({ filter: 'Awaiting Spares', generatedAt: '2026-10-08T09:30:00.000Z' }),
@@ -399,8 +420,18 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
     const id = require.resolve(api(file));
     require.cache[id] = { id, filename: id, loaded: true, exports };
   };
+  // RES is a duplicate of O&M with the same table ids, so only the BASE id tells the two apart.
+  // Each read records which base it hit, and RES serves rows of its own.
+  const T = require(api('_lib/tables.js'));
+  const RES_ROWS = {
+    [TICKETS]: [tk('recTKRES000000001', 'TKT-2026-0901', 'New', { 'Job Card': [] })],
+  };
+  const BASES_READ = [];
   stub('_lib/airtable.js', {
-    async list(baseId, tableId) { return JSON.parse(JSON.stringify(ROWS[tableId] || [])); },
+    async list(baseId, tableId) {
+      BASES_READ.push(baseId);
+      return JSON.parse(JSON.stringify((baseId === T.BASES.RES ? RES_ROWS : ROWS)[tableId] || []));
+    },
     async fieldMaps() { return { idToName: {}, nameToId: {} }; },
   });
   let WHO = null;
@@ -456,6 +487,26 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
 
   r = await call(who({ tickets: ALL }), { list: { status: 'ALL' } });
   t('a role that cannot read job cards still gets its list', [r.code, r.body.count], [200, 4]);
+
+  // ── which base ──
+  BASES_READ.length = 0;
+  r = await call(ops, { list: { status: 'ALL' } });
+  t('no base named reads O&M only, as before RES existed',
+    [r.code, BASES_READ.length > 0 && BASES_READ.every((b) => b === T.BASES.OM)], [200, true]);
+  BASES_READ.length = 0;
+  r = await call(ops, { base: 'RES', list: { status: 'ALL' } });
+  text = printed(r);
+  t('base RES reads RES only', BASES_READ.length > 0 && BASES_READ.every((b) => b === T.BASES.RES), true);
+  t('and prints RES tickets, not O&M ones', [r.body.count, text.includes('TKT-2026-0901'), text.includes('TKT-2026-0001')], [1, true, false]);
+  r = await call(ops, { base: 'RES', ticketId: 'recTKOPEN00000001' });
+  t('an O&M ticket asked for under RES is not found there', r.code, 404);
+  r = await call(ops, { base: 'RES', ticketId: 'recTKRES000000001' });
+  t('a RES ticket prints under RES', r.code, 200);
+  for (const bad of ['CI', 'IAM', 'app0tq4y9wH10h6Up', 'om']) {
+    BASES_READ.length = 0;
+    r = await call(ops, { base: bad, list: { status: 'ALL' } });
+    t(`base "${bad}" is refused before anything is read`, [r.code, BASES_READ.length], [400, 0]);
+  }
 }
 
 console.log('\n\x1b[1mTHE BROWSER HARNESSES PARSE\x1b[0m\n');
