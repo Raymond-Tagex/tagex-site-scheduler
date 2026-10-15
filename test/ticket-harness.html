@@ -279,6 +279,7 @@ function stubTX() {
   TX.userEmail = () => 'raymond@tagexenergy.co.za';
 
   TX.api = async (q) => {
+    (window.BASES_SEEN = window.BASES_SEEN || new Set()).add(q.base);
     if (q.op === 'get' && q.table === 'tickets' && q.sub === 'ticket') {
       // Before the read, not after: this is the reads-only branch, and the guard further down
       // never saw a ticket get because this returned first.
@@ -436,6 +437,17 @@ async function suite(log) {
 
   log('THE FORM IS THE ONE THE APP SHIPS');
   t('the real #schedApp was lifted out of index.html', !!$('om-view-new'), true);
+
+  log('\nTHE BASE PICKER');
+  {
+    let want = 'OM';
+    try { if (localStorage.getItem('tagex_sched_base') === 'RES') want = 'RES'; } catch (e) { /* default */ }
+    const sel = $('schedBase');
+    t('the top bar offers O&M and RES, and not C&I', sel ? [...sel.options].map((o) => o.value) : null, ['OM', 'RES']);
+    t('with the base in use selected', sel && sel.value, want);
+    t('and the tickets tab says which base', (document.querySelector('[data-tab="omtickets"]') || {}).textContent,
+      (want === 'RES' ? 'RES' : 'O&M') + ' Tickets');
+  }
   t('six ways a fault can reach us', document.querySelectorAll('.om-chanopt').length, 6);
   t('four priorities', [...document.querySelectorAll('.om-priopt')].map((e) => e.textContent.trim()),
     ['Low', 'Normal', 'High', 'Urgent']);
@@ -1811,7 +1823,15 @@ async function suite(log) {
   await pickChip('Resolved');
   await pressPrint();
   t('it asks the report endpoint', (REQ[REQ.length - 1] || {}).url, '/api/ticket-report');
-  t('for the chip that is selected, and nothing else', (REQ[REQ.length - 1] || {}).body, { list: { status: 'Resolved' } });
+  // base: the scheduler's base (O&M unless RES was chosen), so the report reads the same base.
+  // The base the scheduler picked up from storage: run the page with tagex_sched_base = RES
+  // set and the whole suite runs against RES.
+  let WANT_BASE = 'OM';
+  try { if (localStorage.getItem('tagex_sched_base') === 'RES') WANT_BASE = 'RES'; } catch (e) { /* default */ }
+  t('for the chip that is selected, and nothing else', (REQ[REQ.length - 1] || {}).body, { list: { status: 'Resolved' }, base: WANT_BASE });
+  // STK is the shared stock catalogue, the same whichever base the scheduler is in.
+  t('every Airtable call so far named the scheduler base and no other',
+    [...(window.BASES_SEEN || [])].filter((x) => x !== 'STK'), [WANT_BASE]);
 
   await pickChip('Open');
   await pressPrint();
@@ -2318,7 +2338,7 @@ const MUTANTS = [
    '        [TKS.ticket]:[id], [TKS.visit]:[id],\n        [TKS.code]:line.code, [TKS.desc]:line.desc, [TKS.unit]:line.unit,'],
 
   ['parts asked for before a date was set are never attached to the visit',
-   '        for(const sp of loose){\n          await TX.api({ op:\'update\', base:\'OM\', table:\'tickets\', sub:\'spares\',\n            recordId:sp.id, fields:{ [TKS.visit]:[rec.id] } });\n          adopted++;\n        }',
+   '        for(const sp of loose){\n          await TX.api({ op:\'update\', base: SCHED_BASE, table:\'tickets\', sub:\'spares\',\n            recordId:sp.id, fields:{ [TKS.visit]:[rec.id] } });\n          adopted++;\n        }',
    '        for(const sp of loose){ adopted++; }'],
 
   ['a part already on a visit is dragged onto the new one as well',

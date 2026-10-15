@@ -63,8 +63,20 @@ test/           verify-*.js in node; *-harness.html in a browser
 scripts/        dry-run by default, --apply to write
 ```
 
-Two operating bases by symbol: **CI** (C&I) and **OM** (O&M). Several tables exist in both
-with diverging field names — see `FIELD_ALIASES` in `tables.js`.
+Three operating bases by symbol: **CI** (C&I), **OM** (O&M) and **RES** (residential). Several
+tables exist in C&I and O&M with diverging field names — see `FIELD_ALIASES` in `tables.js`.
+
+**RES is a structure-only duplicate of O&M** and keeps O&M's table and field ids, so `tables.js`
+derives every RES mapping from O&M's (`mirrorOmToRes`). A table or field added to O&M must be
+added to RES too, by hand in Airtable; `test/verify-res-mirror.js` compares the live schemas and
+fails when they drift. The browser's list of bases is `TX.OPS_BASES` in `core.js`; the server's is
+`OPS_BASES` in `tables.js`.
+
+**The scheduler and tickets work in one base at a time: O&M or RES** (`SCHEDULER_BASES`; C&I has
+its own scheduler). The choice is per browser (`tagex_sched_base` in localStorage) and **changing
+it reloads the page**, so nothing cached from one base can be written into the other. Every call in
+`mod-scheduler.js` names `SCHED_BASE`, never a literal; `/api/jobcard-form` and `/api/ticket-report`
+take `base` and refuse anything but O&M or RES (none named = O&M).
 
 ## Why things are vendored
 

@@ -420,8 +420,18 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
     const id = require.resolve(api(file));
     require.cache[id] = { id, filename: id, loaded: true, exports };
   };
+  // RES is a duplicate of O&M with the same table ids, so only the BASE id tells the two apart.
+  // Each read records which base it hit, and RES serves rows of its own.
+  const T = require(api('_lib/tables.js'));
+  const RES_ROWS = {
+    [TICKETS]: [tk('recTKRES000000001', 'TKT-2026-0901', 'New', { 'Job Card': [] })],
+  };
+  const BASES_READ = [];
   stub('_lib/airtable.js', {
-    async list(baseId, tableId) { return JSON.parse(JSON.stringify(ROWS[tableId] || [])); },
+    async list(baseId, tableId) {
+      BASES_READ.push(baseId);
+      return JSON.parse(JSON.stringify((baseId === T.BASES.RES ? RES_ROWS : ROWS)[tableId] || []));
+    },
     async fieldMaps() { return { idToName: {}, nameToId: {} }; },
   });
   let WHO = null;
@@ -477,6 +487,26 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
 
   r = await call(who({ tickets: ALL }), { list: { status: 'ALL' } });
   t('a role that cannot read job cards still gets its list', [r.code, r.body.count], [200, 4]);
+
+  // ── which base ──
+  BASES_READ.length = 0;
+  r = await call(ops, { list: { status: 'ALL' } });
+  t('no base named reads O&M only, as before RES existed',
+    [r.code, BASES_READ.length > 0 && BASES_READ.every((b) => b === T.BASES.OM)], [200, true]);
+  BASES_READ.length = 0;
+  r = await call(ops, { base: 'RES', list: { status: 'ALL' } });
+  text = printed(r);
+  t('base RES reads RES only', BASES_READ.length > 0 && BASES_READ.every((b) => b === T.BASES.RES), true);
+  t('and prints RES tickets, not O&M ones', [r.body.count, text.includes('TKT-2026-0901'), text.includes('TKT-2026-0001')], [1, true, false]);
+  r = await call(ops, { base: 'RES', ticketId: 'recTKOPEN00000001' });
+  t('an O&M ticket asked for under RES is not found there', r.code, 404);
+  r = await call(ops, { base: 'RES', ticketId: 'recTKRES000000001' });
+  t('a RES ticket prints under RES', r.code, 200);
+  for (const bad of ['CI', 'IAM', 'app0tq4y9wH10h6Up', 'om']) {
+    BASES_READ.length = 0;
+    r = await call(ops, { base: bad, list: { status: 'ALL' } });
+    t(`base "${bad}" is refused before anything is read`, [r.code, BASES_READ.length], [400, 0]);
+  }
 }
 
 console.log('\n\x1b[1mTHE BROWSER HARNESSES PARSE\x1b[0m\n');

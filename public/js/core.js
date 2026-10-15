@@ -216,6 +216,19 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+  // The operations bases, in the order screens offer them. The label is also the value of the
+  // "Source Base" select on Site Information. The server keeps its own list (tables.js OPS_BASES)
+  // and refuses a base it does not know, so this list only decides what is offered.
+  TX.OPS_BASES = Object.freeze([
+    Object.freeze({ key: 'CI', label: 'C&I' }),
+    Object.freeze({ key: 'OM', label: 'O&M' }),
+    Object.freeze({ key: 'RES', label: 'RES' }),
+  ]);
+  TX.baseLabel = (key) => (TX.OPS_BASES.find((b) => b.key === key) || { label: key || '' }).label;
+  /** <option>s for a base picker, escaped. */
+  TX.baseOptions = (selected) => TX.OPS_BASES.map((b) => '<option value="' + b.key + '"'
+    + (b.key === selected ? ' selected' : '') + '>' + TX.esc(b.label) + '</option>').join('');
+
   /** Human-readable message for an ApiError, for a status banner. */
   TX.errorText = (e) => {
     if (!e) return 'Something went wrong.';

@@ -23,7 +23,6 @@ const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 const R = require('./_lib/ticketreport.js');
 
-const BASE = 'OM';
 const MAX_LIST_IDS = 5000;
 const MAX_VISITS = 200;
 const MAX_SPARES = 500;
@@ -33,8 +32,8 @@ const MAX_ACTS = 500;
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 
 /** Read one table's rows, already stripped of whatever this role may not read. */
-async function readAll(auth, moduleKey, sub, tableSymbolForRule) {
-  const r = T.resolve(BASE, moduleKey, sub);
+async function readAll(auth, base, moduleKey, sub, tableSymbolForRule) {
+  const r = T.resolve(base, moduleKey, sub);
   if (!r.ok) throw Object.assign(new Error(r.detail), { status: r.status, reason: r.reason });
   const rule = auth.perms && auth.perms[tableSymbolForRule || moduleKey];
   const rows = await at.list(r.baseId, r.tableId, {});
@@ -75,7 +74,12 @@ module.exports = async function handler(req, res) {
   try { body = await H.readBody(req); }
   catch (e) { return H.fail(res, 400, e.code || 'bad_request', e.message); }
 
-  if (body.list) return listReport(auth, ctx, body.list, res);
+  // Which scheduler base the ticket lives in. Every read below is confined to it.
+  const base = T.schedulerBase(body.base);
+  if (!base) return H.fail(res, 400, 'bad_request', 'Unknown base.');
+  ctx.baseSymbol = base;
+
+  if (body.list) return listReport(auth, ctx, base, body.list, res);
 
   const ticketId = String(body.ticketId || '').trim();
   if (!/^rec[A-Za-z0-9]{14}$/.test(ticketId)) {
@@ -83,7 +87,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const tickets = await readAll(auth, 'tickets', 'ticket');
+    const tickets = await readAll(auth, base, 'tickets', 'ticket');
     const ticket = tickets.find((x) => x.id === ticketId);
     if (!ticket) {
       await A.auditNow({ ...ctx, action: 'Export', result: 'Denied', denialReason: 'not_found', recordId: ticketId });
@@ -93,14 +97,14 @@ module.exports = async function handler(req, res) {
     const jcId = ids(ticket.fields['Job Card'])[0] || null;
     let jobcard = {};
     if (jcId) {
-      const jcs = await readAll(auth, 'job_cards');
+      const jcs = await readAll(auth, base, 'job_cards');
       jobcard = (jcs.find((x) => x.id === jcId) || {}).fields || {};
     }
 
     // People, so a technician link becomes a name rather than a record id.
     const names = {};
     try {
-      for (const p of await readAll(auth, 'people')) {
+      for (const p of await readAll(auth, base, 'people')) {
         names[p.id] = R.str(p.fields.Name || p.fields['Full Name'] || '');
       }
     } catch (e) { /* a role without people still gets a report, just without names */ }
@@ -108,7 +112,7 @@ module.exports = async function handler(req, res) {
     const visitIds = ids(ticket.fields['Site Visits']);
     let visits = [];
     if (visitIds.length) {
-      const all = await readAll(auth, 'site_visits');
+      const all = await readAll(auth, base, 'site_visits');
       visits = all.filter((v) => visitIds.includes(v.id)).slice(0, MAX_VISITS).map((v) => {
         const f = v.fields;
         return {
@@ -124,7 +128,7 @@ module.exports = async function handler(req, res) {
 
     let spares = [];
     try {
-      spares = (await readAll(auth, 'tickets', 'spares'))
+      spares = (await readAll(auth, base, 'tickets', 'spares'))
         .filter((x) => ids(x.fields.Ticket).includes(ticketId))
         .slice(0, MAX_SPARES)
         .map((x) => ({
@@ -142,7 +146,7 @@ module.exports = async function handler(req, res) {
     let activity = [];
     let activityNote = '';
     try {
-      activity = (await readAll(auth, 'activity_log'))
+      activity = (await readAll(auth, base, 'activity_log'))
         .filter((x) => ids(x.fields.Ticket).includes(ticketId))
         .slice(0, MAX_ACTS)
         .map((x) => ({ at: x.createdTime, type: R.str(x.fields['Action Type']), note: R.str(x.fields.Update) }))
@@ -197,7 +201,7 @@ module.exports = async function handler(req, res) {
  * mean re-implementing it twice -- and those only ever NARROW the list: an id outside the chip,
  * or one the role cannot read, is simply not printed.
  */
-async function listReport(auth, ctx, list, res) {
+async function listReport(auth, ctx, base, list, res) {
   const filter = String((list && list.status) || '').trim();
   if (!['OPEN', 'ALL', ...R.TICKET_STATUSES].includes(filter)) {
     return H.fail(res, 400, 'bad_request', 'Choose which tickets to print.');
@@ -214,7 +218,7 @@ async function listReport(auth, ctx, list, res) {
   const search = String(list.search || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80);
 
   try {
-    const tickets = (await readAll(auth, 'tickets', 'ticket'))
+    const tickets = (await readAll(auth, base, 'tickets', 'ticket'))
       .filter((x) => R.inFilter(x.fields.Status, filter))
       .filter((x) => !only || only.has(x.id));
 
@@ -222,7 +226,7 @@ async function listReport(auth, ctx, list, res) {
     // read them still gets its list, with those two columns empty.
     const jcs = {};
     try {
-      for (const j of await readAll(auth, 'job_cards')) jcs[j.id] = j.fields;
+      for (const j of await readAll(auth, base, 'job_cards')) jcs[j.id] = j.fields;
     } catch (e) { /* no job card access */ }
 
     const rows = tickets.map((x) => {

@@ -16,6 +16,9 @@
 const BASES = {
   CI:  'appfzAX5YHqg4UXCl', // TAGEX – C&I Operations Platform
   OM:  'app0tq4y9wH10h6Up', // TAGEX – O&M Platform
+  // Residential. A structure-only duplicate of O&M, so every table and field id is O&M's
+  // (see mirrorOmToRes below). Absent here = RES does not resolve anywhere: deny by default.
+  RES: 'appY81aumN7ocxMNC', // TAGEX – RES Platform
   IAM: 'appVrQ4Nuwb9gk6Ip', // TAGEX – Identity & Access (Workspace 2, Directors only)
   // The stock catalogue lives in its own base. It is a supplier/product master, not an
   // operations base: it carries no job cards, no delivery notes and no personal data, so the
@@ -311,6 +314,48 @@ const SCOPE_FIELDS = {
 };
 
 // ─────────────────────────────────────────────────────────────
+// RES MIRRORS O&M
+//
+// The RES base was made with Airtable's "Duplicate base" (structure only) from O&M, and a
+// duplicate keeps every table and field id -- the same reason several C&I and O&M ids above
+// match. So RES gets exactly what O&M has: tables, field aliases and record-scope fields,
+// derived here rather than copied by hand, so the two cannot drift.
+//
+// This holds only while the bases stay identical. A table or field added to one and not the
+// other must be mapped explicitly; test/verify-res-mirror.js compares the live schemas.
+// ─────────────────────────────────────────────────────────────
+function mirrorOmToRes(map) {
+  for (const entry of Object.values(map)) {
+    if (!entry || typeof entry !== 'object') continue;
+    if ('OM' in entry && !('RES' in entry)) entry.RES = entry.OM;
+    // SCOPE_FIELDS nests per-base maps one level down ({ ownerEmail: { CI, OM } }).
+    for (const v of Object.values(entry)) {
+      if (v && typeof v === 'object' && !Array.isArray(v) && 'OM' in v && !('RES' in v)) v.RES = v.OM;
+    }
+  }
+}
+mirrorOmToRes(TABLES);
+mirrorOmToRes(FIELD_ALIASES);
+mirrorOmToRes(SCOPE_FIELDS);
+
+/** The operations bases -- the ones holding sites, job cards and delivery notes. */
+const OPS_BASES = Object.freeze(['CI', 'OM', 'RES']);
+
+// The bases the scheduler and tickets work in. Not C&I: its scheduler is a separate
+// application, and tickets resolve only in O&M and its duplicate.
+const SCHEDULER_BASES = Object.freeze(['OM', 'RES']);
+
+/**
+ * The scheduler base a request names. Nothing named is O&M, so a browser still running the
+ * page from before RES existed keeps working; anything else named is refused (null), never
+ * guessed.
+ */
+function schedulerBase(value) {
+  if (value === undefined || value === null || value === '') return 'OM';
+  return SCHEDULER_BASES.includes(value) ? value : null;
+}
+
+// ─────────────────────────────────────────────────────────────
 // SENSITIVITY LADDER
 // A role's sensitivity_max caps which Documents it may see. Unclassified documents are
 // treated as Restricted — deny by default means an unlabelled record is the MOST
@@ -567,6 +612,9 @@ function expandFieldRules(rule, module, baseSymbol) {
 
 module.exports = {
   BASES,
+  OPS_BASES,
+  SCHEDULER_BASES,
+  schedulerBase,
   TABLES,
   NOT_PROVISIONED,
   VIRTUAL_MODULES,
