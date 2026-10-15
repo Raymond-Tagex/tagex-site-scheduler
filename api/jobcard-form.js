@@ -9,6 +9,12 @@
 // denied.
 //
 // Reads are fresh rather than cached: this is a document somebody signs and takes to site.
+//
+// { jobCardId, file: true } ALSO KEEPS A COPY in Documents, against the job card. The scheduler
+// sends it once, straight after a job card is raised, so every job card has its form on the
+// record without anybody having to remember to print one. Filing is a separate right
+// (documents:create) checked separately -- see _lib/formfile.js -- and a refusal there still
+// returns the PDF, because the person who raised the job card may print it either way.
 
 'use strict';
 
@@ -19,6 +25,7 @@ const A = require('./_lib/audit.js');
 const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 const F = require('./_lib/jobcardform.js');
+const FF = require('./_lib/formfile.js');
 
 const MAX_VISITS = 60;
 
@@ -120,8 +127,9 @@ module.exports = async function handler(req, res) {
         .map((r) => String(r.fields['Ticket Ref'] || '')).filter(Boolean);
     } catch (e) { ticketRefs = []; }
 
-    const bytes = await F.jobCardFormPdf({
+    const payload = {
       jobcard: f,
+      created: jobcard.createdTime,
       client: first(f['Client Name']),
       site: first(f['Site / Address']),
       responsible: (f.Responsible && f.Responsible.name) || '',
@@ -130,15 +138,36 @@ module.exports = async function handler(req, res) {
       ticketRefs,
       bomCount: ids(f['BOM Sheets']).length,
       generatedBy: auth.email,
-    });
+    };
+    const bytes = await F.jobCardFormPdf(payload);
+    const filename = F.formFilename(f['JC Reference']);
 
     await A.auditNow({ ...ctx, action: 'Export', result: 'Allowed', recordId: jobCardId,
       newValue: 'job card form printed' });
 
+    let filed = null;
+    if (body.file === true) {
+      const ref = String(f['JC Reference'] || jobCardId);
+      try {
+        filed = await FF.fileForm({
+          auth, base, ctx, jobCardId, filename, bytes,
+          name: 'Job Card form — ' + ref,
+          sensitivity: F.jobCardSensitivity(payload),
+          notes: 'The printed job card as it stood when it was raised, filed automatically by the '
+            + 'scheduler for ' + auth.email + ' on ' + new Date().toISOString().slice(0, 10)
+            + '. Print the job card again for its current state.',
+        });
+      } catch (e) {
+        // The form was built and is returned; only the copy failed, and that is said plainly.
+        filed = { ok: false, reason: 'error', detail: String(e.message || e).slice(0, 200) };
+      }
+    }
+
     return H.ok(res, {
-      filename: F.formFilename(f['JC Reference']),
+      filename,
       contentType: 'application/pdf',
       content: Buffer.from(bytes).toString('base64'),
+      filed: FF.filedSummary(filed),
     });
   } catch (e) {
     await A.auditNow({ ...ctx, action: 'Export', result: 'Denied',

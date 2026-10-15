@@ -1034,6 +1034,7 @@ async function saveVisit(wrap){
       if(r.ok){
         raisedRef=r.ref;
         if(r.logError) ticketProblems.push('its activity entry: '+r.logError);
+        if(r.formError) ticketProblems.push('its ticket form: '+r.formError);
       }else{
         ticketProblems.push('the ticket for it: '+r.error);
       }
@@ -1942,6 +1943,7 @@ async function omRaiseTicketForVisit(visitRec, m, startISO){
 
     const rec=await tktCreate(f);
     const ref=(rec&&rec.fields&&rec.fields[TK.ref])||'';
+    let logError='';
     try{
       await omPost(OM_T.ACT,{
         [OM_F.AL_NOTE]:'['+ref+'] [Internal] Raised for the visit booked on '
@@ -1951,9 +1953,14 @@ async function omRaiseTicketForVisit(visitRec, m, startISO){
         [OM_F.AL_TYPE]:'Ticket Logged',
       });
     }catch(e){
-      return { ok:true, ref, logError:e.message };
+      logError=e.message;
     }
-    return { ok:true, ref };
+    // After the log entry, never before it: the entry belongs to the ticket, and it must not
+    // wait on a PDF being built. Filed, not downloaded -- this ticket was raised as a side effect
+    // of booking a visit, and a PDF landing in somebody's downloads while they save a calendar
+    // entry is noise.
+    const form=await omAutoForm('tkt',rec.id,{ download:false });
+    return logError ? { ok:true, ref, logError, formError:form.problem } : { ok:true, ref, formError:form.problem };
   }catch(e){
     return { ok:false, error:e.message };
   }
@@ -2188,6 +2195,7 @@ function omBuildTicket(rec,acts,spares){
     <div class="om-dbody">
       <div class="om-acts">
         ${closed?'':`<button class="btn sm" data-act="omBookVisit" data-a1="${esc(rec.id)}">\ud83d\udcc5 ${visits.length?'Schedule another visit':'Schedule site visit'}</button>`}
+        ${TX.can('tickets','export')?`<button class="btn ghost sm" data-act="omTktForm" data-a1="${esc(rec.id)}">\ud83d\udcc4 Print ticket form</button>`:''}
         ${TX.can('tickets','export')?`<button class="btn ghost sm" data-act="omTktReport" data-a1="${esc(rec.id)}">\ud83d\udcc4 Download report</button>`:''}
         ${jc&&TX.can('activity_log','edit')?`<button class="btn ghost sm" data-act="omTktPullHistory" data-a1="${esc(rec.id)}">\u2199 Pull job card history</button>`:''}
       </div>
@@ -2503,6 +2511,66 @@ async function omJcForm(id){
     else toast('The job card could not be built: '+TX.errorText(e),'bad');
   }
   if(btn){ btn.disabled=false; btn.textContent=was; }
+}
+
+/**
+ * The printed form for a job card or ticket that has just been raised: built on the server,
+ * a copy filed in Documents against the job card, and (unless told not to) downloaded.
+ *
+ * Called by every place that raises one, so "every new job card / ticket has its form" does not
+ * depend on anybody pressing Print. The server decides what is printed and whether a copy may
+ * be filed (job_cards:export or tickets:export to build it, documents:create to keep it); this
+ * only reports what happened.
+ *
+ * Never throws: the record is already saved, and a form that could not be built must not read
+ * as the job card or ticket itself having failed.
+ *
+ * @returns {Promise<{html:string, problem:string}>} a line for the message area, and a plain
+ *   reason when something did not happen that should have
+ */
+async function omAutoForm(kind,id,opts){
+  const jc=kind==='jc';
+  const what=jc?'Job card form':'Ticket form';
+  const download=!(opts&&opts.download===false);
+  // A role without the print right never gets a form; that is the permission model, not a fault.
+  if(!TX.can(jc?'job_cards':'tickets','export')){
+    return { html:'<div class="om-hint">'+what+' not produced: your role may not print '
+      +(jc?'job cards':'tickets')+'.</div>', problem:'' };
+  }
+  try{
+    const r=await TX.request(jc?'/api/jobcard-form':'/api/ticket-report',
+      jc?{ jobCardId:id, base:SCHED_BASE, file:true }
+        :{ ticketId:id, base:SCHED_BASE, form:true, file:true });
+    if(download) omDownloadPdf(r,jc?'job-card.pdf':'ticket-form.pdf');
+    const f=r.filed||{};
+    const got=download?' and downloaded':'';
+    if(f.ok||f.reason==='already_filed'){
+      return { html:'<div class="om-ok">\u2713 '+what+' saved to the job card\u2019s documents'+got+'</div>', problem:'' };
+    }
+    const why=f.detail||f.reason||'unknown reason';
+    return { html:'<div class="om-err">\u26a0 '+what+(download?' downloaded, but':'')
+      +' not saved to the job card\u2019s documents: '+esc(why)+'</div>', problem:'not saved: '+why };
+  }catch(e){
+    const why=TX.errorText(e);
+    return { html:'<div class="om-err">\u26a0 The '+what.toLowerCase()+' could not be built: '+esc(why)+'</div>',
+      problem:'could not be built: '+why };
+  }
+}
+
+/** Print a ticket's form again, as it stands now. Nothing is filed. */
+async function omTktForm(id){
+  const btn=document.querySelector('[data-act="omTktForm"]');
+  const was=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
+  try{
+    const r=await TX.request('/api/ticket-report',{ ticketId:id, base:SCHED_BASE, form:true });
+    omDownloadPdf(r,'ticket-form.pdf');
+    toast('Ticket form downloaded','ok');
+  }catch(e){
+    toast('Ticket form failed: '+TX.errorText(e),'bad');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent=was; }
+  }
 }
 
 /** Hand a PDF the server built to the browser as a download. */
@@ -3324,17 +3392,24 @@ async function omSubmit(){
     }catch(logErr){
       // The ticket is saved and that is the record that matters. Say what did not happen
       // rather than implying the whole thing failed.
-      msg.innerHTML='<div class="om-ok">\u2713 Ticket '+esc(ref)+' logged</div>'
+      const form=await omAutoForm('tkt',rec.id);
+      msg.innerHTML='<div class="om-ok">\u2713 Ticket '+esc(ref)+' logged</div>'+form.html
         +'<div class="om-err">\u26a0 Its activity-log entry could not be written: '+esc(logErr.message)+'</div>';
       document.getElementById('om-subtxt').textContent='\ud83d\udce4 Submit Ticket';
       omTktData=[];
       return;
     }
 
-    msg.innerHTML='<div class="om-ok">\u2713 Ticket '+esc(ref)+' logged</div>';
+    // Every ticket raised here gets its form: built, filed against the job card, downloaded.
+    // After the log entry, so the entry never waits on a PDF being built.
+    msg.innerHTML='<div class="om-ok">\u2713 Ticket '+esc(ref)+' logged</div>'
+      +'<div class="om-hint">Building its ticket form\u2026</div>';
+    const form=await omAutoForm('tkt',rec.id);
+    msg.innerHTML='<div class="om-ok">\u2713 Ticket '+esc(ref)+' logged</div>'+form.html;
     omResetTicketForm();
     omTktData=[];                       // the list re-reads next time it is opened
-    setTimeout(()=>omGoView('jc'),1500);
+    // Longer when the form could not be filed, so the warning is read before the screen moves.
+    setTimeout(()=>omGoView('jc'),form.problem?6000:2500);
   }catch(e){
     fail(e.message);
   }
@@ -3567,13 +3642,16 @@ async function omSubmitNewJC(){
     const acts=[...document.querySelectorAll('#njc-actions input:checked')].map(x=>x.value);
     if(acts.length) f[JCF.JC_ACTIONS]=acts;
     const rec=await omPost(OM_T.JC,f);
-    // Offered here rather than only on the detail screen: printing it is the next thing
-    // somebody does after raising one, and sending them off to find it again is how a step
-    // gets skipped.
-    const canPrint = rec && rec.id && TX.can('job_cards','export');
+    // Every job card raised here gets its printed form straight away: built, filed in the job
+    // card's documents and downloaded. The button stays for a second copy. The job card is
+    // said to exist before the form is built: it does, and building takes a few seconds.
     msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${esc(ref)}</strong></div>`
+      +'<div class="om-hint">Building its job card form\u2026</div>';
+    const form=rec&&rec.id ? await omAutoForm('jc',rec.id) : { html:'', problem:'' };
+    const canPrint = rec && rec.id && TX.can('job_cards','export');
+    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${esc(ref)}</strong></div>`+form.html
       +(canPrint
-        ? `<div style="margin-top:8px"><button class="btn sm" data-act="omJcForm" data-a1="${esc(rec.id)}">\ud83d\udcc4 Download the job card</button></div>`
+        ? `<div style="margin-top:8px"><button class="btn sm" data-act="omJcForm" data-a1="${esc(rec.id)}">\ud83d\udcc4 Download the job card again</button></div>`
         : '');
     await omLoadAll(true);
     // The list is one tap away; leaving on a timer would take the button with it.
@@ -3615,6 +3693,7 @@ async function omSubmitNewJC(){
     add('omTktSaveMonitoring', typeof omTktSaveMonitoring === 'function' ? omTktSaveMonitoring : null);
     add('omBookVisit', typeof omBookVisit === 'function' ? omBookVisit : null);
     add('omTktReport', typeof omTktReport === 'function' ? omTktReport : null);
+    add('omTktForm', typeof omTktForm === 'function' ? omTktForm : null);
     add('omTktPrintList', typeof omTktPrintList === 'function' ? omTktPrintList : null);
     add('omJcForm', typeof omJcForm === 'function' ? omJcForm : null);
     add('omTktPullHistory', typeof omTktPullHistory === 'function' ? omTktPullHistory : null);
