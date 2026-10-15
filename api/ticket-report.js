@@ -12,6 +12,12 @@
 // print whatever the browser chose to claim, including fields the role is denied.
 //
 // Reads are deliberately fresh rather than cached: this is a document someone signs.
+//
+// POST /api/ticket-report { ticketId, form: true } -- the ticket as a FORM, in the job card's
+// format (_lib/ticketform.js), rather than the report. Same right, same reads, same endpoint:
+// a thirteenth function would not deploy on the Hobby plan.
+// Add file: true and a copy is kept in Documents against the ticket's job card -- the scheduler
+// sends that once, straight after a ticket is raised. See _lib/formfile.js for what it checks.
 
 'use strict';
 
@@ -22,6 +28,8 @@ const A = require('./_lib/audit.js');
 const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 const R = require('./_lib/ticketreport.js');
+const TF = require('./_lib/ticketform.js');
+const FF = require('./_lib/formfile.js');
 
 const MAX_LIST_IDS = 5000;
 const MAX_VISITS = 200;
@@ -122,6 +130,7 @@ module.exports = async function handler(req, res) {
           tech: ids(f['Assigned Technician']).map((i) => names[i] || '?').join(', '),
           status: R.str(f.Status),
           notes: R.str(f.Notes),
+          subject: R.str(f.Subject),
         };
       }).sort((a, b) => String(a.start).localeCompare(String(b.start)));
     }
@@ -134,6 +143,7 @@ module.exports = async function handler(req, res) {
         .map((x) => ({
           code: R.str(x.fields['Palladium Stock Code']),
           desc: R.str(x.fields['Item Description']),
+          unit: R.str(x.fields.Unit),
           req: x.fields['Qty Required'],
           issued: x.fields['Qty Issued'],
           status: R.str(x.fields.Status),
@@ -162,6 +172,7 @@ module.exports = async function handler(req, res) {
 
     const payload = {
       ticket: ticket.fields,
+      ticketCreated: ticket.createdTime,
       jobcard,
       visits,
       spares,
@@ -170,6 +181,8 @@ module.exports = async function handler(req, res) {
       generatedBy: auth.email,
       generatedAt: new Date().toISOString(),
     };
+
+    if (body.form === true) return ticketForm(auth, ctx, base, body, ticketId, jcId, payload, res);
 
     const pdf = await R.ticketReportPdf(payload);
 
@@ -191,6 +204,47 @@ module.exports = async function handler(req, res) {
       'The report could not be compiled: ' + String(e.message || e).slice(0, 200));
   }
 };
+
+/**
+ * The ticket as a form, and -- when asked -- a copy of it filed against its job card.
+ *
+ * A refusal to file does not withhold the form: building it is the export right the caller
+ * has already been checked for; keeping a copy is documents:create, checked in fileForm.
+ */
+async function ticketForm(auth, ctx, base, body, ticketId, jcId, payload, res) {
+  const ref = R.str(payload.ticket['Ticket Ref']) || ticketId;
+  const bytes = await TF.ticketFormPdf(payload);
+  const filename = TF.ticketFormFilename(ref);
+
+  await A.auditNow({
+    ...ctx, action: 'Export', result: 'Allowed', recordId: ticketId, field: 'Form',
+    newValue: 'Service ticket form for ' + ref,
+  });
+
+  let filed = null;
+  if (body.file === true) {
+    try {
+      filed = await FF.fileForm({
+        auth, base, ctx, jobCardId: jcId, filename, bytes,
+        name: 'Ticket form — ' + ref,
+        // A ticket form carries no costs and no contact details beyond the reporter's name.
+        sensitivity: 'Internal',
+        notes: 'Service ticket ' + ref + ' as it stood when it was raised, filed automatically by '
+          + 'the scheduler for ' + auth.email + ' on ' + new Date().toISOString().slice(0, 10) + '.',
+      });
+    } catch (e) {
+      filed = { ok: false, reason: 'error', detail: String(e.message || e).slice(0, 200) };
+    }
+  }
+
+  return H.ok(res, {
+    filename,
+    contentType: 'application/pdf',
+    content: Buffer.from(bytes).toString('base64'),
+    bytes: bytes.length,
+    filed: FF.filedSummary(filed),
+  });
+}
 
 /**
  * The tickets under one status chip, as the Tickets screen lists them.

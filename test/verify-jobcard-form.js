@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The printed job card, against the form it reproduces.
 //
-// SOURCE OF TRUTH: TAGEX JOB CARD TEMPLATE SEP2026.docx. Every heading and every clause of the
-// terms below was taken from that file. If the paper form changes, these assertions are what
-// should fail first.
+// SOURCE OF TRUTH: TAGEX JOB CARD TEMPLATE SEP2026.docx, the revision with "Project Type",
+// "Actual Date JC Created" and the ADDITIONAL SITE NOTES grid. Every heading, every label and
+// every clause of the terms below was taken from that file. If the paper form changes, these
+// assertions are what should fail first.
 //
 // What is checked: that every section of the form is on the sheet, that the values given are
 // printed, that the terms are reproduced word for word, that nothing runs off the page, and
@@ -70,12 +71,35 @@ function yPositions(bytes) {
   return ys;
 }
 
+/** Every drawn string with the page and height it was drawn at. */
+function placed(bytes) {
+  const raw = Buffer.from(bytes).toString('latin1');
+  const out = [];
+  let page = -1;
+  for (const m of raw.matchAll(/stream\r?\n/g)) {
+    const from = m.index + m[0].length;
+    const to = raw.indexOf('endstream', from);
+    if (to < 0) continue;
+    let body;
+    try { body = zlib.inflateSync(Buffer.from(raw.slice(from, to), 'latin1')).toString('latin1'); }
+    catch (e) { continue; }
+    const re = /1 0 0 1 ([\d.]+) ([\d.]+) Tm\s*(?:<([0-9A-Fa-f\s]+)>|\(((?:\\.|[^\\)])*)\))\s*Tj/g;
+    const found = [...body.matchAll(re)];
+    if (!found.length) continue;
+    page += 1;
+    const dec = (buf) => new TextDecoder('windows-1252').decode(buf);
+    found.forEach((g) => out.push({ page, y: Number(g[2]),
+      text: g[3] ? dec(Buffer.from(g[3].replace(/\s+/g, ''), 'hex')) : dec(Buffer.from(g[4], 'latin1')) }));
+  }
+  return out;
+}
+
 const FULL = {
   jobcard: {
     'JC Reference': 'OM-2026-0169/MAINT/TE',
     'Director Decision': 'Approved', 'Director Decision By': 'A de Jager',
     'Director Decision Date': '2026-09-30',
-    'Entity Name': 'Tagex Energy', 'Ticket Raised By': 'Maurice Kruger',
+    'Entity Name': 'Tagex Energy', 'Owner Category': 'SUB-RES', 'Ticket Raised By': 'Maurice Kruger',
     'Suggested Site Actions': ['Maintenance', 'Warranty Work'],
     'Suggested Site Actions — Other': 'Meter swap',
     'Operational Classification': 'Standard Operational Activity',
@@ -95,6 +119,7 @@ const FULL = {
     'Client Acceptance Name': 'Christopher Maitin',
     'Client Acceptance Email': 'chris@example.co.za',
   },
+  created: '2026-09-29T08:12:00.000Z',
   client: 'SUB 139 - Christopher Maitin',
   site: '12 Mill Road, Midrand',
   responsible: 'Adriaan de Jager',
@@ -147,6 +172,8 @@ const FULL = {
   visits: [
     { start: '2026-09-28T07:00:00.000Z', subject: 'Prepaid meter inspection', status: 'Completed' },
     { start: '2026-10-06T07:00:00.000Z', subject: 'Replace meter', status: 'Scheduled' },
+    { start: '2026-09-29T07:00:00.000Z', subject: 'Meter replacement', status: 'Completed',
+      notes: 'Old meter removed, new meter commissioned and tested with the client present.' },
   ],
   generatedBy: 'raymond@tagexenergy.co.za',
 };
@@ -158,19 +185,34 @@ const FULL = {
   const flat = all.replace(/\s+/g, ' ');
 
   console.log('\n\x1b[1mEVERY SECTION OF THE PAPER FORM IS ON THE SHEET\x1b[0m\n');
-  const SECTIONS = ['JOB CARD', 'PRE-VISIT NOTES', 'SUGGESTED SITE ACTIONS',
-    'OPERATIONAL CLASSIFICATION', 'GENERAL NOTES', 'PRE-SITE VISIT — SCOPE OF WORK',
-    'ON-SITE INSPECTION', 'ACTUAL SITE VISIT — SCOPE OF WORK',
-    'STOCK, MATERIAL & LOGISTICS ALLOCATION', 'UNFORSEEN COSTS', 'SUMMARY OF COSTS',
-    'RESPONSIBLE PERSONNEL', 'TIMELINE CONTROL', 'SIGNATURES FOR APPROVALS',
-    'Service Call-Out Terms and Conditions', 'CLIENT ACCEPTANCE OF TERMS AND CONDITIONS'];
+  // In the template's order, with the template's spelling -- "UNFORSEEN" included.
+  const SECTIONS = ['JOB CARD', 'PRE-VISIT NOTES', 'PRE-SITE VISIT - SCOPE OF WORK',
+    'PRE-SITE VISIT', 'ON-SITE INSPECTION', 'ACTUAL SITE VISIT - FINDINGS', 'ACTUAL-SITE VISIT',
+    'ADDITIONAL SITE NOTES ON WORK DONE', 'STOCK, MATERIAL & LOGISTICS ALLOCATION',
+    'UNFORSEEN COSTS', 'SUMMARY OF COSTS', 'RESPONSIBLE PERSONNEL', 'TIMELINE CONTROL',
+    'SIGNATURES FOR APPROVALS', 'Service Call-Out Terms and Conditions',
+    'CLIENT ACCEPTANCE OF TERMS AND CONDITIONS'];
   t('none is missing', SECTIONS.filter((h) => !all.includes(h)), []);
+  const firstAt = (h) => all.indexOf(h);
+  t('and they come in the template’s order',
+    SECTIONS.filter((h, i) => i && firstAt(h) < firstAt(SECTIONS[i - 1])), []);
 
   console.log('\n\x1b[1mAND EVERY LABEL THE FORM ASKS FOR\x1b[0m\n');
-  const LABELS = ['Entity Name:', 'Job Card Number:', 'Ticket Number:',
-    'Project Reference Number:', 'Client Name:', 'Site Address:', 'Actual Date of Issue:',
-    'Ticket Raised By:', 'Site Inspection Conducted By:', 'Date of Inspection:',
-    'BOM Attached', 'Supplier Quotes Attached', 'Transportation Details',
+  const LABELS = ['Project Type:', 'Job Card Number:', 'Ticket Number:',
+    'Project Reference Number:', 'Client Name:', 'Site Address:', 'Actual Date Issue Reported:',
+    'Ticket Raised By:', 'Actual Date JC Created:', 'Suggested Site Actions:', 'Other:',
+    'Operational Classification:', 'Provide a detailed description of work to be executed:',
+    'Site Inspection Conducted By:', 'Date of Inspection:',
+    'BOM Attached', 'Supplier Quotes Attached', 'Warehouse Costing Attached',
+    'Travel Required:', 'Fuel Cost Inclusive Wear&Tear =', 'Vehicle Allocation:',
+    'Distance to Site (km):', 'Total Km:', 'Driver Name:', 'Toll Fees:', 'Site Visit Cost:',
+    'Trip 2 Cost:', 'Trip 3 Cost:', 'Total Travel Cost:', 'Approved by Management:',
+    'Accommodation Required:', 'Number of Personnel:', 'From Date:', 'To Date:',
+    'Number of Nights:', 'Cost per Night:', 'Total Accommodation Cost:', 'Labour Required:',
+    'Number of hrs:', 'Staff Names:', 'Day 2 Cost:', 'Day 3 Cost:', 'Rental Required:',
+    'Equipment (Attached quotes):', 'Number of days:', 'Fixed Cost:', 'Cost per day:',
+    'Total Cost:', 'Cost per Category', 'Delay Explanation (if applicable):',
+    'Transportation Details',
     'Accommodation Details', 'Labour Details', 'Rental Details', 'Project Manager:',
     'Technician / Installer:', 'Planned Start Date:', 'Site Visit Date:',
     'Actual Installation Date:', 'Actual Completion Date:', 'Requested By:', 'Procurement:',
@@ -188,13 +230,37 @@ const FULL = {
     ['Maurice Kruger', 'Adriaan de Jager', 'Geoff Oswin - Jetnix'].filter((x) => !all.includes(x)), []);
   t('the written sections', all.includes('Prepaid meter reading incorrectly since the storm.'), true);
   t('and the dates, in the form South Africa writes them', all.includes('30/09/2026'), true);
+  // The record's creation, which nobody types, is the template's "Actual Date JC Created".
+  t('the date the job card was created', /Actual Date JC Created:\n29\/09\/2026/.test(all), true);
+  // The revised paper has no lines for these two, and they are still printed: somebody typed
+  // them when raising the job card, and a form that drops them loses what they said.
+  t('pre-visit and general notes still print when they hold something',
+    ['Prepaid meter reading incorrectly since the storm.', 'Client available weekday mornings only.']
+      .filter((x) => !all.includes(x)), []);
 
   console.log('\n\x1b[1mTHE TICK BOXES ARE DRAWN, NOT TYPED\x1b[0m\n');
   // U+2610 is not in WinAnsi: drawn as text it would vanish and leave a form with no boxes.
   t('no ballot-box character is anywhere on the sheet', all.includes('☐'), false);
-  t('every entity option is offered', F.ENTITIES.filter((e) => !all.includes(e)), []);
+  t('every project type is offered', F.PROJECT_TYPES.filter((e) => !all.includes(e)), []);
+  t('the emergency classification says it needs approval, as the paper does',
+    all.includes('Emergency / Critical Response (Approval Required)'), true);
   t('every suggested action', F.ACTIONS.filter((a) => !all.includes(a)), []);
   t('every inspection confirmation', F.CONFIRMS.filter((c) => !all.includes(c)), []);
+
+  console.log('\n\x1b[1mPROJECT TYPE IS THE COMMERCIAL ARRANGEMENT\x1b[0m\n');
+  {
+    const pt = (f) => F.projectType(f);
+    t('SUB-RES is SUB', pt({ 'Owner Category': 'SUB-RES' }), 'SUB');
+    t('SUB-C&I is SUB', pt({ 'Owner Category': 'SUB-C&I' }), 'SUB');
+    t('DIRECT-PURC is Direct Purchase', pt({ 'Owner Category': 'DIRECT-PURC' }), 'Direct Purchase');
+    t('PPA is PPA, as an Airtable choice object too', pt({ 'Owner Category': { name: 'PPA' } }), 'PPA');
+    // Owner Category has no Alpine; Entity Name does.
+    t('Alpine comes from Entity Name when Owner Category is empty', pt({ 'Entity Name': 'Alpine' }), 'Alpine');
+    // One answer on a one-answer line: Owner Category wins, never two ticks.
+    t('Owner Category wins over Entity Name', pt({ 'Owner Category': 'PPA', 'Entity Name': 'Alpine' }), 'PPA');
+    t('an entity that is not a project type ticks nothing', pt({ 'Entity Name': 'Tagex Energy' }), '');
+    t('nothing known ticks nothing', pt({}), '');
+  }
 
   console.log('\n\x1b[1mTHE COST GRID MATCHES THE COSTING TABLE\x1b[0m\n');
   t('every category on the paper is a row',
@@ -217,11 +283,14 @@ const FULL = {
     t('and a category with nothing at all stays empty',
       F.costRow(FULL.costing, 'Rental Cost').total, null);
 
-    // THE DEFECT THIS REPLACES. The grid used to print eight paper rows against Costing's own
-    // Total, which includes Material Cost -- so the column did not add up.
-    t('Materials is a row, because Costing has that money and the total counts it',
-      all.includes('Materials'), true);
+    // The revised paper's Consumables row is Costing's Material Cost -- the money the previous
+    // revision had no row for, and which the grid printed as an extra "Materials" row so its
+    // column added up. Now it is the paper's own row, and there is no extra one.
+    t('Consumables is a row, and it is Material Cost',
+      F.COST_ROWS.find(([l]) => l === 'Consumables'), ['Consumables', 'Material Cost']);
     t('and its figure is printed', all.includes('R 2415.65'), true);
+    t('there is no Materials row beside it', all.includes('Materials'), false);
+    t('nine rows, as on the paper', F.COST_ROWS.length, 9);
 
     // The grand total must be the sum of what is printed above it.
     const expected = F.COST_ROWS
@@ -240,9 +309,10 @@ const FULL = {
   {
     t('all four blocks are headed', ['Transportation Details', 'Accommodation Details',
       'Labour Details', 'Rental Details'].filter((h) => !all.includes(h)), []);
+    const blockLabels = F.LOGISTICS.flatMap((b) => [b.name, b.totalLabel].concat(
+      b.lines.flatMap((line) => (line === 'staff' ? ['Staff Names:'] : line.map((c) => c.l)))));
     t('every label the four blocks ask for is on the sheet',
-      F.LOGISTICS.flatMap(([, , , , rows]) => rows.map(([l]) => l))
-        .filter((l) => !all.includes(l)), []);
+      blockLabels.filter((l) => !all.includes(l)), []);
 
     // THE POINT OF THE CHANGE. These four blocks used to print as ruled blanks.
     t('the vehicle and the driver are printed',
@@ -256,10 +326,17 @@ const FULL = {
     // NO SECOND FIGURE FOR THE SAME MONEY. Each block's total is the field the cost grid
     // already prints, so the two cannot disagree on a sheet somebody signs.
     t("the block totals are the cost grid's own fields",
-      F.LOGISTICS.map(([, , , totalKey]) => totalKey),
+      F.LOGISTICS.map((b) => b.total),
       ['Transport Cost', 'Accommodation Cost', 'Labour Cost', 'Rental Cost']);
-    t('and each one is a row of the cost grid', F.LOGISTICS.map(([, , , k]) => k)
+    t('and each one is a row of the cost grid', F.LOGISTICS.map((b) => b.total)
       .filter((k) => !F.COST_ROWS.some(([, key]) => key === k)), []);
+
+    // The revised paper asks for Rand per trip and per day, where Costing holds kilometres and a
+    // day rate. The cost is worked out, and what it was worked from is printed beside it.
+    t('a trip is priced at the rate, with its distance shown', all.includes('R 809.10 (186 km)'), true);
+    t('a fuel-only rate says it is fuel only', all.includes('R 4.35/km (fuel only)'), true);
+    t('two days of labour price two days', (all.match(/R 1050\.00/g) || []).length, 2);
+    t('and day three is left for a pen', /Day 3 Cost:\nR\n/.test(all), true);
     t('the travel total reads the same in both places',
       (all.match(/R 1746\.70/g) || []).length, 2);
     // Labour has no figure of its own, so its block total is the split added up -- the same
@@ -271,7 +348,7 @@ const FULL = {
     // ticking No would put a management refusal on paper that nobody actually gave.
     t('nothing is ever printed as a ticked No', /: *No\b/.test(flat), false);
     t('a block with nothing recorded still prints its questions',
-      ['Rental Details', 'Equipment:', 'Fixed Cost:'].filter((x) => !all.includes(x)), []);
+      ['Rental Details', 'Equipment (Attached quotes):', 'Fixed Cost:'].filter((x) => !all.includes(x)), []);
 
     // DRIFT. A field provisioned onto Costing that the form never prints is a field somebody
     // fills in and never sees again.
@@ -279,17 +356,57 @@ const FULL = {
       path.join(__dirname, '..', 'scripts', 'provision-costing-detail.js'), 'utf8');
     const want = (script.match(/^\s*(?:check|text|long|date|num|rand)\('([^']+)'/gm) || [])
       .map((m) => m.replace(/^[^']*'/, '').replace(/'$/, ''));
-    const printed = new Set(F.LOGISTICS.flatMap(([, req, app, , rows]) =>
-      [req, app].concat(rows.map(([, key]) => key))));
+    const printed = F.logisticsKeys();
     t('the provisioned fields are all accounted for', want.length, 34);
     t('and every one of them is printed', want.filter((f) => !printed.has(f)), []);
     t('and the form prints nothing that was never provisioned',
       [...printed].filter((f) => !want.includes(f)), []);
   }
 
+  console.log('\n\x1b[1mEACH LOGISTICS SECTION IS BOXED ON ITS OWN\x1b[0m\n');
+  {
+    // Marked up by the business: the four sections ran together as one list of blanks, and
+    // nobody filling it in could see where Transportation ended and Accommodation began.
+    const check = async (label, data) => {
+      const b = await F.jobCardFormPdf(data);
+      const boxes = b.boxes || [];
+      const text = placed(b);
+      t(label + ': one box per section', boxes.length, F.LOGISTICS.length);
+      // The box holding a line is the one on its page whose top and bottom it sits between.
+      const boxOf = (s) => {
+        const at = text.find((x) => x.text === s);
+        return at ? boxes.findIndex((bx) => bx.page === at.page && at.y > bx.y && at.y < bx.y + bx.h) : -2;
+      };
+      t(label + ': each section’s heading is inside its own box',
+        F.LOGISTICS.map((blk) => boxOf(blk.name)), F.LOGISTICS.map((blk, i) => i));
+      t(label + ': and so is its Approved line, so nothing of it hangs outside',
+        F.LOGISTICS.map((blk, i) => {
+          const at = text.filter((x) => x.text === 'Approved by Management:')[i];
+          return at ? boxes.findIndex((bx) => bx.page === at.page && at.y > bx.y && at.y < bx.y + bx.h) : -2;
+        }), F.LOGISTICS.map((blk, i) => i));
+      t(label + ': the three "attached" questions share the first box, as marked up',
+        ['BOM Attached', 'Supplier Quotes Attached', 'Warehouse Costing Attached'].map(boxOf), [0, 0, 0]);
+      t(label + ': the boxes do not overlap',
+        boxes.slice(1).every((bx, i) => bx.page > boxes[i].page || bx.y + bx.h <= boxes[i].y), true);
+      t(label + ': and every box is the same width, so they line up',
+        new Set(boxes.map((bx) => bx.x + ':' + bx.w)).size, 1);
+    };
+    await check('filled in', FULL);
+    await check('blank', { jobcard: { 'JC Reference': 'OM-2026-0170/MAINT/TE' } });
+    // A long list of staff wraps; the box has to grow with it rather than cut through it.
+    const many = Array.from({ length: 30 }, (x, i) => 'Technician Number ' + (i + 1)).join('\n');
+    await check('thirty staff names', { ...FULL, costing: { ...FULL.costing, 'Staff Names': many } });
+  }
+
   console.log('\n\x1b[1mTHE VISIT TABLES COME FROM SITE VISITS\x1b[0m\n');
   t('a visit already made is listed', all.includes('Prepaid meter inspection'), true);
   t('and one still to come', all.includes('Replace meter'), true);
+  // A visit's own notes go in ADDITIONAL SITE NOTES ON WORK DONE, under its date -- and in
+  // full, wrapped, not cut at the edge of the column.
+  t('a visit’s notes are the additional site notes',
+    flat.includes('Old meter removed, new meter commissioned and tested with the client present.'), true);
+  t('and they sit under that heading',
+    all.indexOf('Old meter removed') > all.indexOf('ADDITIONAL SITE NOTES ON WORK DONE'), true);
 
   console.log('\n\x1b[1mTHE TERMS ARE REPRODUCED WORD FOR WORD\x1b[0m\n');
   // Wrapped across lines on the page, so compare with the whitespace taken out.
@@ -319,14 +436,49 @@ const FULL = {
   t('nothing runs off that sheet either', yPositions(blank).filter((y) => y < 20 || y > 820), []);
   t('and no value is invented', /undefined|NaN|\[object/.test(blankText), false);
   t('the four logistics blocks still have a line under every question',
-    F.LOGISTICS.flatMap(([name, , , , rows]) => [name].concat(rows.map(([l]) => l)))
+    F.LOGISTICS.flatMap((b) => [b.name].concat(
+      b.lines.flatMap((line) => (line === 'staff' ? ['Staff Names:'] : line.map((c) => c.l)))))
       .filter((l) => !blankText.includes(l)), []);
+  t('and no project type is ticked from nothing', F.projectType({}), '');
   // Yes and No are the labels beside the boxes and are always drawn — a blank form is
   // meant to be ticked by hand. Both must still be offered against every block.
   t('and each block still offers a Yes to tick by hand',
     (blankText.match(/Yes/g) || []).length >= F.LOGISTICS.length * 2, true);
   t('and a No beside it',
     (blankText.match(/No/g) || []).length >= F.LOGISTICS.length * 2, true);
+
+  console.log('\n\x1b[1mWHAT THE STANDARD FONTS CANNOT DRAW DOES NOT STOP THE FORM\x1b[0m\n');
+  {
+    // An emoji in a job card made pdf-lib throw, and now the form is built on every save.
+    let err = '';
+    let odd = '';
+    try {
+      odd = flatten(pages(await F.jobCardFormPdf({ jobcard: {
+        'JC Reference': 'OM-2026-0171/MAINT/TE', 'Title': 'x',
+        'Pre-Visit Notes': 'Client says ✅ all good 👍\nSecond line ≥ first',
+        'Ticket Raised By': 'Zoë 😀 Naidoo',
+      } })));
+    } catch (e) { err = e.message; }
+    t('an emoji or a maths sign does not throw', err, '');
+    t('the rest of the text survives around it', /Zo. +Naidoo/.test(odd), true);
+    t('and a line break in a note is kept as a line', /all good *\nSecond line/.test(odd), true);
+
+    // A long value wraps under its label rather than running off the edge of the page.
+    const long = 'Unit 4, The Stables Business Park, 1200 Old Pretoria Main Road, Halfway House, '
+      + 'Midrand, Gauteng, 1685 — enter by the north gate and ask security for the plant room';
+    const lp = flatten(pages(await F.jobCardFormPdf({ jobcard: {}, site: long })));
+    t('a long address is printed in full', lp.replace(/\s+/g, ' ').includes(long), true);
+  }
+
+  console.log('\n\x1b[1mTHE FILED COPY IS CLASSIFIED BY WHAT IS ON IT\x1b[0m\n');
+  {
+    t('a job card with no costs is Internal', F.jobCardSensitivity({ jobcard: {}, costing: {} }), 'Internal');
+    t('one with a cost figure is Confidential', F.jobCardSensitivity(FULL), 'Confidential');
+    t('a Costing row of zeros is still Internal',
+      F.jobCardSensitivity({ jobcard: {}, costing: { 'Capital Cost': 0 } }), 'Internal');
+    t("the client's own contact details make it Confidential",
+      F.jobCardSensitivity({ jobcard: { 'Client Acceptance Email': 'a@b.co.za' }, costing: {} }), 'Confidential');
+  }
 
   console.log('\n\x1b[1mTHE FILENAME\x1b[0m\n');
   t('is the reference and the date',

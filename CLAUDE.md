@@ -78,6 +78,24 @@ it reloads the page**, so nothing cached from one base can be written into the o
 `mod-scheduler.js` names `SCHED_BASE`, never a literal; `/api/jobcard-form` and `/api/ticket-report`
 take `base` and refuse anything but O&M or RES (none named = O&M).
 
+## Printed forms are made when the record is
+
+Every job card and every ticket raised in the scheduler gets its printed form straight away
+(`omAutoForm` in `mod-scheduler.js`): built on the server, **filed in Documents against the job
+card** (`api/_lib/formfile.js`) and downloaded. A ticket raised by booking a visit is filed but not
+downloaded. Reprints from the Print buttons are never filed.
+
+- The job card form (`_lib/jobcardform.js`) reproduces *TAGEX JOB CARD TEMPLATE SEP2026.docx*; the
+  ticket form (`_lib/ticketform.js`) is the same format for a ticket. Change the paper, change
+  `test/verify-jobcard-form.js` first.
+- Building a form is the **export** right; filing a copy is **documents:create**, checked
+  separately, with the copy's Sensitivity (Confidential once it carries costs) inside the role's
+  cap. Technician / Field and RMA Supervisor can raise tickets but hold neither, so their tickets
+  get no form until IAM says otherwise.
+- One filed copy per name ("Job Card form — REF", "Ticket form — TKT-…"); a failed upload is
+  retired with Record Status = Deleted, never deleted. Document Type is "Other" because the
+  select has no "Job Card" choice and the API cannot add one.
+
 ## Why things are vendored
 
 `vercel.json` sets `script-src 'self'`, so no CDN scripts. The OCR language data and pdf.js are
@@ -87,7 +105,7 @@ on a third party being up stops working for reasons nobody here can fix. Keep it
 ## Testing
 
 ```bash
-npm test                       # six node suites, ~1,730 assertions
+npm test                       # eight node suites; verify-part-c needs AIRTABLE_PAT
 node scripts/ui-harness.js     # then http://localhost:4321/test/<name>.html
 ```
 

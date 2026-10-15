@@ -625,6 +625,6 @@ const reportFilename = (d) => {
 };
 
 module.exports = {
-  ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str,
+  ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str, safe,
   ticketListPdf, listFilename, inFilter, daysOpen, filterLabel, TICKET_STATUSES, OPEN_STATUSES,
 };

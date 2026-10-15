@@ -278,6 +278,20 @@ function stubTX() {
   TX.canField = () => true;
   TX.userEmail = () => 'raymond@tagexenergy.co.za';
 
+  // The printed forms are built on the server and checked in verify-ticket-form.js. Here: what
+  // was asked for, a stub PDF back, and "filed" -- unless a test sets FAIL_FORM. BLOBS counts
+  // downloads, which is the only way to see that a form was handed to the browser.
+  window.FORMS = [];
+  window.BLOBS = 0;
+  TX.request = async (url, body) => {
+    window.FORMS.push({ url, body: JSON.parse(JSON.stringify(body)) });
+    if (window.FAIL_FORM) throw new Error(window.FAIL_FORM);
+    return { content: btoa('%PDF-1.4\n'), filename: 'form.pdf', contentType: 'application/pdf',
+      filed: { ok: true, reason: '', detail: '', documentId: 'recDOC1' } };
+  };
+  const realBlobUrl = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (b) => { window.BLOBS += 1; return realBlobUrl(b); };
+
   TX.api = async (q) => {
     (window.BASES_SEEN = window.BASES_SEEN || new Set()).add(q.base);
     if (q.op === 'get' && q.table === 'tickets' && q.sub === 'ticket') {
@@ -497,6 +511,8 @@ async function suite(log) {
 
   log('\nA GOOD TICKET');
   window.SENT = [];
+  window.FORMS = [];
+  const blobsBefore = window.BLOBS;
   fill({ cat:'Inverter Fault', subj:'Inverter offline since Tuesday',
          desc:'Error 0x33 on the display.', rep:'Oubaas', asset:'INV-2',
          err:'0x33', detail:'082 555 1234', chan:'WhatsApp', pri:'Urgent',
@@ -533,6 +549,17 @@ async function suite(log) {
   t('the note carries the reference', /TKT-2026-0042/.test(al.fields[FID.alNote]), true);
 
   t('the reference is read back off the created record', /TKT-2026-0042/.test(msg()), true);
+
+  // Every ticket raised gets its form, filed against the job card and downloaded.
+  let FORM_BASE = 'OM';
+  try { if (localStorage.getItem('tagex_sched_base') === 'RES') FORM_BASE = 'RES'; } catch (e) { /* default */ }
+  t('the new ticket asks for its form, to be filed', window.FORMS[window.FORMS.length - 1] || null,
+    { url: '/api/ticket-report', body: { ticketId: 'recTKT42', base: FORM_BASE, form: true, file: true } });
+  t('once', window.FORMS.length, 1);
+  t('and only after its activity entry was written',
+    window.SENT.filter((s) => s.table === 'activity_log').length, 1);
+  t('the form is downloaded', window.BLOBS - blobsBefore, 1);
+  t('and the screen says it was saved to the job card', /Ticket form saved to the job card/.test(msg()), true);
   t('and the form is cleared for the next call', [$('om-subj').value, $('om-desc').value,
     $('om-rep').value, $('om-chandetail').value], ['', '', '', '']);
   t('including the channel, which must be answered again',
@@ -1229,6 +1256,8 @@ async function suite(log) {
   modal().querySelector('#mType').value = 'Maintenance';
   modal().querySelector('#mNotes').value = 'Six-monthly service.';
   window.SENT = [];
+  window.FORMS = [];
+  const visitBlobs = window.BLOBS;
   modal().querySelector('#mSave').dispatchEvent(new MouseEvent('click', { bubbles:true }));
   await settle(45);
 
@@ -1255,6 +1284,13 @@ async function suite(log) {
     && x.fields[FID.alType] === 'Ticket Logged');
   t('it is logged as a ticket being raised', !!raised, true);
   t('saying it came from a booked visit', /Raised for the visit booked/.test(raised.fields[FID.alNote]), true);
+  // The ticket booking a visit raised gets its form too -- filed, but not dropped into the
+  // downloads of somebody who was only saving a calendar entry.
+  const vForm = window.FORMS.filter((r) => r.body && r.body.form === true);
+  t('the ticket it raised has its form filed', vForm.map((r) => [r.url, r.body.file]),
+    [['/api/ticket-report', true]]);
+  t('for that ticket', vForm.length && /^recTKT/.test(vForm[0].body.ticketId), true);
+  t('without a download', window.BLOBS - visitBlobs, 0);
   omCloseAnyModal();
 
   log('\nA VISIT RAISED FROM A TICKET DOES NOT RAISE A SECOND ONE');
@@ -1994,6 +2030,16 @@ if (IS_RUNNER) {
 
 // ── mutants: each one a bug this file is supposed to catch ──────────────────
 const MUTANTS = [
+  ['a ticket from the New Ticket form is raised without its form',
+   "</div>';\n    const form=await omAutoForm('tkt',rec.id);\n    msg.innerHTML",
+   "</div>';\n    const form={ html:'', problem:'' };\n    msg.innerHTML"],
+
+  ['a ticket raised by booking a visit gets no form',
+   "const form=await omAutoForm('tkt',rec.id,{ download:false });", "const form={ html:'', problem:'' };"],
+
+  ['a visit-raised ticket form lands in the downloads',
+   "omAutoForm('tkt',rec.id,{ download:false })", "omAutoForm('tkt',rec.id)"],
+
   ['Monitoring is let through with nobody named',
    "if(!omMonName(by)) return { by, ends, problem:'Say who is doing the monitoring.', focus:'om-tktmonby' };",
    '// MUTANT: anybody'],
