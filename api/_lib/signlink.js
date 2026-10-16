@@ -18,6 +18,7 @@
 
 const crypto = require('crypto');
 const C = require('./crypto.js');
+const T = require('./tables.js');
 
 const TTL_HOURS = 72;
 const TYP = 'sign-link';
@@ -46,13 +47,13 @@ function isConfigured() {
  *
  * @param {object} a
  * @param {string} a.deliveryNoteId  Airtable record id
- * @param {string} a.baseSymbol      'CI' | 'OM'
+ * @param {string} a.baseSymbol      one of T.OPS_BASES
  * @param {string} a.dnNumber        for the audit trail and error messages
  * @returns {{token:string, jti:string, expiresAt:string}}
  */
 function mint({ deliveryNoteId, baseSymbol, dnNumber }) {
   if (!deliveryNoteId) throw new Error('A delivery note is required.');
-  if (baseSymbol !== 'CI' && baseSymbol !== 'OM') throw new Error('Unknown base.');
+  if (!T.OPS_BASES.includes(baseSymbol)) throw new Error('Unknown base.');
 
   const jti = crypto.randomBytes(16).toString('hex');
   const ttl = TTL_HOURS * 3600;
@@ -93,7 +94,7 @@ function verify(token) {
   if (p.typ !== TYP) return { ok: false, reason: 'invalid_link' };
   if (p.role !== ROLE) return { ok: false, reason: 'invalid_link' };
   if (!p.dn || typeof p.dn !== 'string') return { ok: false, reason: 'invalid_link' };
-  if (p.b !== 'CI' && p.b !== 'OM') return { ok: false, reason: 'invalid_link' };
+  if (!T.OPS_BASES.includes(p.b)) return { ok: false, reason: 'invalid_link' };
   if (!p.jti) return { ok: false, reason: 'invalid_link' };
 
   return { ok: true, payload: p };

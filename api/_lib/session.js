@@ -33,10 +33,30 @@ const IDLE_TIMEOUT_MINUTES   = () => Number(process.env.IDLE_TIMEOUT_MINUTES || 
 const REQUIRE_ADMIN_MFA = () =>
   String(process.env.REQUIRE_ADMIN_MFA || 'false').toLowerCase() === 'true';
 
+/**
+ * True for a role held to the same MFA rule as an administrator: one that manages users, or one
+ * that may edit a TAGEX BOM (the Stock Controller), since that role approves supplier purchases.
+ * Read from the role's own Permissions, never from a per-user override, so an override cannot
+ * take a person out of it.
+ */
+function mfaRole(role) {
+  if (!role) return false;
+  if (role['Can Manage Users'] === true) return true;
+  try {
+    const p = typeof role.Permissions === 'string' ? JSON.parse(role.Permissions) : role.Permissions;
+    // Held with Admin: whoever handles supplier quotes -- prices, and who the business buys from.
+    // It was any TAGEX BOM editor; project managers now build BOMs on their phones with costs
+    // hidden from them, and asked not to carry an authenticator for that (16 Oct 2026).
+    return !!(p && p.supplier_quotes && p.supplier_quotes.edit === true);
+  } catch (e) {
+    return false; // an unparseable role grants nothing at all, so there is nothing to protect
+  }
+}
+
 /** True when this session must enrol MFA before it may do anything else. */
 function mustEnrolMfa(role, userFields) {
   if (!REQUIRE_ADMIN_MFA()) return false;
-  if (!role || role['Can Manage Users'] !== true) return false;
+  if (!mfaRole(role)) return false;
   return !(userFields && userFields['MFA Enabled'] === true && userFields['MFA Secret']);
 }
 // Any session that has touched restricted personal data drops to a tighter idle window.
@@ -331,7 +351,7 @@ function invalidateRole(roleRecordId) {
 module.exports = {
   COOKIE,
   SESSION_TTL_HOURS, IDLE_TIMEOUT_MINUTES, RESTRICTED_IDLE_MINUTES, REMEMBER_TTL_HOURS,
-  REQUIRE_ADMIN_MFA, mustEnrolMfa,
+  REQUIRE_ADMIN_MFA, mustEnrolMfa, mfaRole,
   readCookie, setSessionCookie, clearSessionCookie,
   clientIp, userAgent,
   findUserByEmail, loadRole, roleForUser,

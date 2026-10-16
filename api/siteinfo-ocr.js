@@ -36,7 +36,7 @@ const MAX_BYTES = 3 * 1024 * 1024;
 // stops a caller making us run OCR three hundred times inside one function invocation.
 const MAX_PAGES_IN = 12;
 
-const BASES = ['CI', 'OM'];
+const BASES = T.OPS_BASES;
 
 /** Airtable formula string literal. */
 const lit = P.lit;
@@ -67,7 +67,7 @@ function namesMatch(a, b) {
   return false;
 }
 
-/** Every site in both bases whose name matches, with the base it came from. */
+/** Every site in any operations base whose name matches, with the base it came from. */
 async function findSites(name) {
   if (!key(name)) return [];
   const out = [];
@@ -86,7 +86,7 @@ async function findSites(name) {
 }
 
 /**
- * A job card by its reference, in either base.
+ * A job card by its reference, in any operations base.
  *
  * THE FIELD IS "JC Reference". This queried {Job Card Number} — which does not exist on the
  * table — so Airtable rejected the formula, the .catch swallowed the error, and every run
@@ -131,7 +131,7 @@ async function siteForJobCard(base, jobCard) {
   return rec && rec.fields ? { base, record: rec } : null;
 }
 
-/** A client by name, in either base. */
+/** A client by name, in any operations base. */
 async function findClient(name) {
   if (!key(name)) return null;
   for (const b of BASES) {
@@ -255,7 +255,7 @@ module.exports = async function handler(req, res) {
   // When the caller has already chosen a job card, that job card is the authority on which
   // site this is. Nothing is guessed from the scan.
   const jobCardId = String(body.jobCardId || '').slice(0, 40);
-  const baseSymbol = ['CI', 'OM'].indexOf(String(body.base || '')) >= 0 ? String(body.base) : '';
+  const baseSymbol = BASES.indexOf(String(body.base || '')) >= 0 ? String(body.base) : '';
 
   // Reading a jobcard in order to build a site is site_information work, and it reads job cards
   // and clients on the way. All three are checked, so a role that cannot see job cards cannot

@@ -1,4 +1,8 @@
 // POST /api/ticket-report — the Service Ticket Report for one ticket, as a PDF.
+// POST /api/ticket-report { list: { status, ids? , search? } } — the ticket LIST, as a PDF.
+//
+// The list shares this endpoint rather than taking a new one: the deployment counts against
+// the Hobby plan's twelve functions, and both are the same export right on the same table.
 //
 // THE CLIENT SENDS A RECORD ID AND NOTHING ELSE.
 //
@@ -8,6 +12,12 @@
 // print whatever the browser chose to claim, including fields the role is denied.
 //
 // Reads are deliberately fresh rather than cached: this is a document someone signs.
+//
+// POST /api/ticket-report { ticketId, form: true } -- the ticket as a FORM, in the job card's
+// format (_lib/ticketform.js), rather than the report. Same right, same reads, same endpoint:
+// a thirteenth function would not deploy on the Hobby plan.
+// Add file: true and a copy is kept in Documents against the ticket's job card -- the scheduler
+// sends that once, straight after a ticket is raised. See _lib/formfile.js for what it checks.
 
 'use strict';
 
@@ -18,8 +28,10 @@ const A = require('./_lib/audit.js');
 const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 const R = require('./_lib/ticketreport.js');
+const TF = require('./_lib/ticketform.js');
+const FF = require('./_lib/formfile.js');
 
-const BASE = 'OM';
+const MAX_LIST_IDS = 5000;
 const MAX_VISITS = 200;
 const MAX_SPARES = 500;
 const MAX_ACTS = 500;
@@ -28,8 +40,8 @@ const MAX_ACTS = 500;
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 
 /** Read one table's rows, already stripped of whatever this role may not read. */
-async function readAll(auth, moduleKey, sub, tableSymbolForRule) {
-  const r = T.resolve(BASE, moduleKey, sub);
+async function readAll(auth, base, moduleKey, sub, tableSymbolForRule) {
+  const r = T.resolve(base, moduleKey, sub);
   if (!r.ok) throw Object.assign(new Error(r.detail), { status: r.status, reason: r.reason });
   const rule = auth.perms && auth.perms[tableSymbolForRule || moduleKey];
   const rows = await at.list(r.baseId, r.tableId, {});
@@ -70,13 +82,20 @@ module.exports = async function handler(req, res) {
   try { body = await H.readBody(req); }
   catch (e) { return H.fail(res, 400, e.code || 'bad_request', e.message); }
 
+  // Which scheduler base the ticket lives in. Every read below is confined to it.
+  const base = T.schedulerBase(body.base);
+  if (!base) return H.fail(res, 400, 'bad_request', 'Unknown base.');
+  ctx.baseSymbol = base;
+
+  if (body.list) return listReport(auth, ctx, base, body.list, res);
+
   const ticketId = String(body.ticketId || '').trim();
   if (!/^rec[A-Za-z0-9]{14}$/.test(ticketId)) {
     return H.fail(res, 400, 'bad_request', 'A ticket record id is required.');
   }
 
   try {
-    const tickets = await readAll(auth, 'tickets', 'ticket');
+    const tickets = await readAll(auth, base, 'tickets', 'ticket');
     const ticket = tickets.find((x) => x.id === ticketId);
     if (!ticket) {
       await A.auditNow({ ...ctx, action: 'Export', result: 'Denied', denialReason: 'not_found', recordId: ticketId });
@@ -86,14 +105,14 @@ module.exports = async function handler(req, res) {
     const jcId = ids(ticket.fields['Job Card'])[0] || null;
     let jobcard = {};
     if (jcId) {
-      const jcs = await readAll(auth, 'job_cards');
+      const jcs = await readAll(auth, base, 'job_cards');
       jobcard = (jcs.find((x) => x.id === jcId) || {}).fields || {};
     }
 
     // People, so a technician link becomes a name rather than a record id.
     const names = {};
     try {
-      for (const p of await readAll(auth, 'people')) {
+      for (const p of await readAll(auth, base, 'people')) {
         names[p.id] = R.str(p.fields.Name || p.fields['Full Name'] || '');
       }
     } catch (e) { /* a role without people still gets a report, just without names */ }
@@ -101,7 +120,7 @@ module.exports = async function handler(req, res) {
     const visitIds = ids(ticket.fields['Site Visits']);
     let visits = [];
     if (visitIds.length) {
-      const all = await readAll(auth, 'site_visits');
+      const all = await readAll(auth, base, 'site_visits');
       visits = all.filter((v) => visitIds.includes(v.id)).slice(0, MAX_VISITS).map((v) => {
         const f = v.fields;
         return {
@@ -111,18 +130,20 @@ module.exports = async function handler(req, res) {
           tech: ids(f['Assigned Technician']).map((i) => names[i] || '?').join(', '),
           status: R.str(f.Status),
           notes: R.str(f.Notes),
+          subject: R.str(f.Subject),
         };
       }).sort((a, b) => String(a.start).localeCompare(String(b.start)));
     }
 
     let spares = [];
     try {
-      spares = (await readAll(auth, 'tickets', 'spares'))
+      spares = (await readAll(auth, base, 'tickets', 'spares'))
         .filter((x) => ids(x.fields.Ticket).includes(ticketId))
         .slice(0, MAX_SPARES)
         .map((x) => ({
           code: R.str(x.fields['Palladium Stock Code']),
           desc: R.str(x.fields['Item Description']),
+          unit: R.str(x.fields.Unit),
           req: x.fields['Qty Required'],
           issued: x.fields['Qty Issued'],
           status: R.str(x.fields.Status),
@@ -135,7 +156,7 @@ module.exports = async function handler(req, res) {
     let activity = [];
     let activityNote = '';
     try {
-      activity = (await readAll(auth, 'activity_log'))
+      activity = (await readAll(auth, base, 'activity_log'))
         .filter((x) => ids(x.fields.Ticket).includes(ticketId))
         .slice(0, MAX_ACTS)
         .map((x) => ({ at: x.createdTime, type: R.str(x.fields['Action Type']), note: R.str(x.fields.Update) }))
@@ -151,6 +172,7 @@ module.exports = async function handler(req, res) {
 
     const payload = {
       ticket: ticket.fields,
+      ticketCreated: ticket.createdTime,
       jobcard,
       visits,
       spares,
@@ -159,6 +181,8 @@ module.exports = async function handler(req, res) {
       generatedBy: auth.email,
       generatedAt: new Date().toISOString(),
     };
+
+    if (body.form === true) return ticketForm(auth, ctx, base, body, ticketId, jcId, payload, res);
 
     const pdf = await R.ticketReportPdf(payload);
 
@@ -180,3 +204,123 @@ module.exports = async function handler(req, res) {
       'The report could not be compiled: ' + String(e.message || e).slice(0, 200));
   }
 };
+
+/**
+ * The ticket as a form, and -- when asked -- a copy of it filed against its job card.
+ *
+ * A refusal to file does not withhold the form: building it is the export right the caller
+ * has already been checked for; keeping a copy is documents:create, checked in fileForm.
+ */
+async function ticketForm(auth, ctx, base, body, ticketId, jcId, payload, res) {
+  const ref = R.str(payload.ticket['Ticket Ref']) || ticketId;
+  const bytes = await TF.ticketFormPdf(payload);
+  const filename = TF.ticketFormFilename(ref);
+
+  await A.auditNow({
+    ...ctx, action: 'Export', result: 'Allowed', recordId: ticketId, field: 'Form',
+    newValue: 'Service ticket form for ' + ref,
+  });
+
+  let filed = null;
+  if (body.file === true) {
+    try {
+      filed = await FF.fileForm({
+        auth, base, ctx, jobCardId: jcId, filename, bytes,
+        name: 'Ticket form — ' + ref,
+        // A ticket form carries no costs and no contact details beyond the reporter's name.
+        sensitivity: 'Internal',
+        notes: 'Service ticket ' + ref + ' as it stood when it was raised, filed automatically by '
+          + 'the scheduler for ' + auth.email + ' on ' + new Date().toISOString().slice(0, 10) + '.',
+      });
+    } catch (e) {
+      filed = { ok: false, reason: 'error', detail: String(e.message || e).slice(0, 200) };
+    }
+  }
+
+  return H.ok(res, {
+    filename,
+    contentType: 'application/pdf',
+    content: Buffer.from(bytes).toString('base64'),
+    bytes: bytes.length,
+    filed: FF.filedSummary(filed),
+  });
+}
+
+/**
+ * The tickets under one status chip, as the Tickets screen lists them.
+ *
+ * THE SERVER DECIDES WHICH TICKETS ARE PRINTED. The browser names the chip; the status test is
+ * applied here, to rows read here, through the role's own read rules. When a search is active
+ * the browser also sends the ids it is showing -- matching the screen's search exactly would
+ * mean re-implementing it twice -- and those only ever NARROW the list: an id outside the chip,
+ * or one the role cannot read, is simply not printed.
+ */
+async function listReport(auth, ctx, base, list, res) {
+  const filter = String((list && list.status) || '').trim();
+  if (!['OPEN', 'ALL', ...R.TICKET_STATUSES].includes(filter)) {
+    return H.fail(res, 400, 'bad_request', 'Choose which tickets to print.');
+  }
+  let only = null;
+  if (list.ids != null) {
+    if (!Array.isArray(list.ids) || list.ids.length > MAX_LIST_IDS
+      || !list.ids.every((x) => typeof x === 'string' && /^rec[A-Za-z0-9]{14}$/.test(x))) {
+      return H.fail(res, 400, 'bad_request', 'The ticket list sent is not valid.');
+    }
+    only = new Set(list.ids);
+  }
+  // Printed as typed, so it is cut short and stripped of anything that is not text.
+  const search = String(list.search || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80);
+
+  try {
+    const tickets = (await readAll(auth, base, 'tickets', 'ticket'))
+      .filter((x) => R.inFilter(x.fields.Status, filter))
+      .filter((x) => !only || only.has(x.id));
+
+    // Job cards give each ticket its reference and client, as on screen. A role that cannot
+    // read them still gets its list, with those two columns empty.
+    const jcs = {};
+    try {
+      for (const j of await readAll(auth, base, 'job_cards')) jcs[j.id] = j.fields;
+    } catch (e) { /* no job card access */ }
+
+    const rows = tickets.map((x) => {
+      const f = x.fields;
+      const jc = jcs[ids(f['Job Card'])[0]] || {};
+      return {
+        ref: R.str(f['Ticket Ref']),
+        reportedAt: f['Reported At'] || null,
+        closedAt: f['Closed At'] || null,
+        client: R.str(jc['Client Name']),
+        jc: R.str(jc['JC Reference']),
+        subject: R.str(f.Subject),
+        category: R.str(f['Fault Category']),
+        priority: R.str(f.Priority),
+        status: R.str(f.Status),
+      };
+    // Newest first, the order the screen lists them in.
+    }).sort((a, b) => b.ref.localeCompare(a.ref));
+
+    const payload = {
+      filter, search, rows, generatedBy: auth.email, generatedAt: new Date().toISOString(),
+    };
+    const pdf = await R.ticketListPdf(payload);
+
+    await A.auditNow({
+      ...ctx, action: 'Export', result: 'Allowed', field: 'Ticket list',
+      newValue: `Service ticket list: ${R.filterLabel(filter)}, ${rows.length} ticket(s)`
+        + (search ? `, search "${search}"` : ''),
+    });
+
+    return H.ok(res, {
+      filename: R.listFilename(payload),
+      contentType: 'application/pdf',
+      content: pdf.toString('base64'),
+      bytes: pdf.length,
+      count: rows.length,
+    });
+  } catch (e) {
+    if (e.status) return H.fail(res, e.status, e.reason || 'error', e.message);
+    return H.fail(res, 500, 'report_failed',
+      'The ticket list could not be compiled: ' + String(e.message || e).slice(0, 200));
+  }
+}

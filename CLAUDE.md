@@ -63,8 +63,50 @@ test/           verify-*.js in node; *-harness.html in a browser
 scripts/        dry-run by default, --apply to write
 ```
 
-Two operating bases by symbol: **CI** (C&I) and **OM** (O&M). Several tables exist in both
-with diverging field names — see `FIELD_ALIASES` in `tables.js`.
+Three operating bases by symbol: **CI** (C&I), **OM** (O&M) and **RES** (residential). Several
+tables exist in C&I and O&M with diverging field names — see `FIELD_ALIASES` in `tables.js`.
+
+**RES is a structure-only duplicate of O&M** and keeps O&M's table and field ids, so `tables.js`
+derives every RES mapping from O&M's (`mirrorOmToRes`). A table or field added to O&M must be
+added to RES too, by hand in Airtable; `test/verify-res-mirror.js` compares the live schemas and
+fails when they drift. The browser's list of bases is `TX.OPS_BASES` in `core.js`; the server's is
+`OPS_BASES` in `tables.js`.
+
+**The scheduler and tickets work in one base at a time: O&M or RES** (`SCHEDULER_BASES`; C&I has
+its own scheduler). The choice is per browser (`tagex_sched_base` in localStorage) and **changing
+it reloads the page**, so nothing cached from one base can be written into the other. Every call in
+`mod-scheduler.js` names `SCHED_BASE`, never a literal; `/api/jobcard-form` and `/api/ticket-report`
+take `base` and refuse anything but O&M or RES (none named = O&M).
+
+## Printed forms are made when the record is
+
+Every job card and every ticket raised in the scheduler gets its printed form straight away
+(`omAutoForm` in `mod-scheduler.js`): built on the server, **filed in Documents against the job
+card** (`api/_lib/formfile.js`) and downloaded. A ticket raised by booking a visit is filed but not
+downloaded. Reprints from the Print buttons are never filed.
+
+- The job card form (`_lib/jobcardform.js`) reproduces *TAGEX JOB CARD TEMPLATE SEP2026.docx*; the
+  ticket form (`_lib/ticketform.js`) is the same format for a ticket. Change the paper, change
+  `test/verify-jobcard-form.js` first.
+- Building a form is the **export** right; filing a copy is **documents:create**, checked
+  separately, with the copy's Sensitivity (Confidential once it carries costs) inside the role's
+  cap. Technician / Field and RMA Supervisor can raise tickets but hold neither, so their tickets
+  get no form until IAM says otherwise.
+- One filed copy per name ("Job Card form — REF", "Ticket form — TKT-…"); a failed upload is
+  retired with Record Status = Deleted, never deleted. Document Type is "Other" because the
+  select has no "Job Card" choice and the API cannot add one.
+- Both forms open with the TAGEX logo, laid out as the delivery note's head
+  (`api/_lib/assets/tagex-logo.png`, copied from tagex-delivery). It is read from disk, so
+  `vercel.json` ships it with `jobcard-form.js` and `ticket-report.js` via `includeFiles` — a
+  new function that prints a form needs the same entry.
+
+## A hidden field cannot be searched on
+
+A list or get whose `filterByFormula` or `sort` names a field the role may not read -- its `deny_read`,
+or the never-return list -- is refused as `filter_on_denied_field` (`P.deniedReferences`, the same code
+as the delivery app). Stripping the field from the answer is not enough: a filter on it tells the value
+by halving. Whoever may edit supplier quotes is held to MFA with Admin (`mfaRole`); building a TAGEX
+BOM alone is not, since project managers do that on phones with the costs hidden from them.
 
 ## Why things are vendored
 
@@ -75,7 +117,7 @@ on a third party being up stops working for reasons nobody here can fix. Keep it
 ## Testing
 
 ```bash
-npm test                       # six node suites, ~1,730 assertions
+npm test                       # eight node suites; verify-part-c needs AIRTABLE_PAT
 node scripts/ui-harness.js     # then http://localhost:4321/test/<name>.html
 ```
 
@@ -85,6 +127,26 @@ window actually drawing: pdf.js renders nothing in a hidden or backgrounded tab.
 
 **A test that passes for the wrong reason is worse than no test.** Put the bug back and check
 the test fails.
+
+## One trunk: `claude/delivery-status-mismatches-hq3pfj`
+
+**This repository is worked by several Claude sessions at once**, and each branches off
+whatever it last saw. That is how work gets dropped and how a decision gets quietly reversed by
+somebody acting in good faith.
+
+- **Start from `claude/delivery-status-mismatches-hq3pfj`.** It is the default branch and the
+  trunk, whatever its name suggests. Fetch before you branch — it has usually moved.
+- **Finish by merging back into it,** through a pull request. That is what has been happening
+  here (#1, #2, #3) and it is why this repository has not lost anything; the sister repository,
+  tagex-delivery, merged straight onto its trunk and did.
+- **A branch that is pushed and left is a branch that is not deployed.** `vercel --prod` ships
+  the local working directory, so anything only on a side branch is invisible to the next
+  release.
+- **Read before you rewrite.** A function carrying a comment that explains a decision had that
+  decision made on purpose, and usually measured. Changing it is fine; reversing it without
+  noticing is not. Say so in the commit message when you do.
+- **Leave the reason in the code, not in the chat.** A convention agreed in conversation is
+  invisible to the next session. This file is the one place every session reads.
 
 ## Working here
 

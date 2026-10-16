@@ -504,7 +504,13 @@
       $$('#rEditor input[type=checkbox]').forEach((cb) => {
         const m = cb.dataset.m, o = cb.dataset.o;
         if (!cb.checked) return;
-        next[m] = next[m] || Object.assign({}, perms[m] || {});
+        // Every right starts off and only the ticked ones go back on. Copying the old rule with its
+        // rights in place meant a right unticked beside one still ticked was kept: revoking "edit"
+        // while leaving "view" saved "edit" again. The copy is for the flags the grid does not show.
+        if (!next[m]) {
+          next[m] = Object.assign({}, perms[m] || {});
+          for (const op of OPS) next[m][op] = false;
+        }
         next[m][o] = true;
       });
       // Preserve field rules and sensitivity caps that the grid does not express.
