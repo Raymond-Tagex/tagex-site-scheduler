@@ -30,8 +30,8 @@ So "RMA Supervisor" exists in both places:
 |---|---|---|
 | Admin / Director | `recnux0y686i1pUZX` | unchanged |
 | **Operations Manager** | `recjAVlENZ3OS3wH2` | **renamed** from *Operations / Project Manager*. Same record, same permissions. Everyone who holds it today keeps it. |
-| **Project Manager** | new | created from the Operations grant (see §3) |
-| **RMA Supervisor** | new | see §4 |
+| **Project Manager** | `recndoGFlPZPm0pdD` | created from the Operations grant (see §3) |
+| **RMA Supervisor** | `rec1Yl8OY1omBv0ZI` | see §4 |
 | Technician / Field | `recLBElqoyXofiWCR` | unchanged |
 | Warehouse / Stores | `recu56ankV4dDTpAv` | unchanged |
 | Driver | `recBm5sxSi40M85WB` | unchanged |
@@ -67,8 +67,8 @@ V = view, C = create, E = edit, D = delete, X = export, – = no access.
 | people, audit_log (own) | V | V | |
 | **contracts, slas, error_criteria** | VCE | **V** | O&M service configuration belongs to the process owner |
 | **response_templates** | VE | **V** | same |
-| **users, access_levels** | VC (live) | **–** | see §6 — inviting users is Admin-only in the code anyway |
-| **restricted_personal** | VC (live) | **–** | the level's own description says "NO access to FICA / personal data" |
+| users, access_levels | – | – | removed from Operations on 2026-10-06 (see §6) |
+| restricted_personal | – | – | FICA / personal data is Admin-only; removed from Operations on 2026-10-06 |
 
 Approval Limit stays R 0 on both. Set it on the Operations Manager if advance replacements
 (P01 §6) are to be approved in-app against a value.
@@ -156,12 +156,11 @@ and should not be given one in RMA Staff.
 
 ## 6. Open points
 
-1. **The live Operations level has drifted from its spec.** It grants `restricted_personal`
-   view+create and `users` / `access_levels` view+create. Its own description, and the Part B
-   matrix this repo tests against, say "NO access to FICA / personal data. NO user management."
-   The double gate (role flag is off) and the Admin-only invite endpoint stop these grants
-   doing much today. They were left as they are on the Operations Manager. Decide whether to
-   remove them.
+1. **Resolved 2026-10-06.** The live Operations level had drifted from its spec: it granted
+   `restricted_personal` view+create and `users` / `access_levels` view+create, against its own
+   description ("NO access to FICA / personal data. NO user management.") and the Part B matrix.
+   All three were removed from the Operations Manager on 2026-10-06; nothing else changed. The
+   live level now matches the matrix `verify-part-b.js` checks.
 2. **Maurice holds three RMA roles** — RMA Supervisor, Test Centre Manager and Test Technician.
    P01 separates them on purpose: Section D needs a "tested by" and a different "verified by".
    The RMA app should refuse the same person signing both slots of D, and the Operations

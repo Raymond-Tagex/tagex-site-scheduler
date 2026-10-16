@@ -896,7 +896,11 @@
     const out = $('#siNewMsg');
     const name = ($('#nsSiteName').value || '').trim();
     const client = ($('#nsClientName').value || '').trim();
-    const base = $('#nsBase').value;
+    // A SUB site is not a base of its own: it lives in O&M or RES and is marked by Contract Type
+    // "SUB", a choice both bases already have. So "OM-SUB" means base OM plus that mark.
+    const pick = $('#nsBase').value;
+    const sub = /-SUB$/.test(pick);
+    const base = pick.replace(/-SUB$/, '');
     if (!name) { out.innerHTML = '<div class="si-msg err">A site name is required.</div>'; return; }
 
     const btn = document.querySelector('[data-act="siSaveNew"]');
@@ -921,6 +925,7 @@
     opt('nsAddress', F.address); opt('nsJc', F.jcNumber); opt('nsSubSol', F.subSol);
     const cat = $('#nsCategory').value;
     if (cat) fields[F.category] = cat;
+    if (sub) fields[F.contractType] = 'SUB';
 
     try {
       const r = await TX.create(base, 'site_information', fields);
