@@ -179,6 +179,13 @@ module.exports = async function handler(req, res) {
         return H.fail(res, 400, filterCheck.reason, filterCheck.detail);
       }
 
+      // A filter or sort on a field the role may not read would tell it the value anyway.
+      const peeking = P.deniedReferences(rule, params, idToName);
+      if (peeking.length) {
+        await A.auditNow({ ...ctx, action: 'View', result: 'Denied', denialReason: 'filter_on_denied_field', field: peeking.join(', ') });
+        return H.fail(res, 403, 'filter_on_denied_field', `You cannot search or sort on ${peeking.join(', ')}.`);
+      }
+
       const filter = P.buildReadFilter({
         moduleKey: tableSymbol, baseSymbol, rule, scope, user: auth.user,
         clientFilter: params.filterByFormula,

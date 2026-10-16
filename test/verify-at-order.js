@@ -201,6 +201,20 @@ const shape = (r) => ({ code: r.code, reason: r.body && r.body.reason, detail: r
   const noRight = await call(warehouse, del('recOPENMINE000001'));
   t('a role without delete is still refused before any of this', noRight.code, 403);
 
+  console.log('\nreads: a filter or sort on a field the role may not read is refused');
+  // Stripping the field from the answer is not enough: a filter on it says the value by halving.
+  const noCost = signedIn('tech@tagexenergy.co.za', { picking_slips: { view: true, create: false, edit: false, delete: false, export: false,
+    fields: { deny_read: ['Total Value'] } } }, 'All Records');
+  const listSlips = (params) => call(noCost, { op: 'list', base: 'OM', table: 'picking_slips', params });
+  reset();
+  t('a search on a hidden field', [(await listSlips({ filterByFormula: '{Total Value} > 1000' })).body.reason], ['filter_on_denied_field']);
+  t('a sort on one', [(await listSlips({ sort: [{ field: 'Total Value', direction: 'desc' }] })).body.reason], ['filter_on_denied_field']);
+  t('a password hash, by anyone', [(await call(admin, { op: 'list', base: 'OM', table: 'picking_slips',
+    params: { filterByFormula: '{Password Hash} != ""' } })).body.reason], ['filter_on_denied_field']);
+  t('the refusal is audited', AUDIT.filter((e) => e.denialReason === 'filter_on_denied_field').length, 3);
+  t('a search on what it may read goes ahead', (await listSlips({ filterByFormula: '{Status} = "Picked"' })).code, 200);
+  t('and the field named in text is just text', (await listSlips({ filterByFormula: 'FIND("{Total Value}", {Notes})' })).code, 200);
+
   console.log(failed
     ? `\n\x1b[31m\x1b[1m  ${failed} FAILED\x1b[0m, ${passed} passed`
     : `\n\x1b[32m\x1b[1m  ALL ${passed} ASSERTIONS PASSED\x1b[0m`);

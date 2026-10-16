@@ -44,7 +44,10 @@ function mfaRole(role) {
   if (role['Can Manage Users'] === true) return true;
   try {
     const p = typeof role.Permissions === 'string' ? JSON.parse(role.Permissions) : role.Permissions;
-    return !!(p && p.tagex_bom && p.tagex_bom.edit === true);
+    // Held with Admin: whoever handles supplier quotes -- prices, and who the business buys from.
+    // It was any TAGEX BOM editor; project managers now build BOMs on their phones with costs
+    // hidden from them, and asked not to carry an authenticator for that (16 Oct 2026).
+    return !!(p && p.supplier_quotes && p.supplier_quotes.edit === true);
   } catch (e) {
     return false; // an unparseable role grants nothing at all, so there is nothing to protect
   }

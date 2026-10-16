@@ -249,6 +249,55 @@ function filterReadFields(rule, fields, idToName) {
 }
 
 /**
+ * The fields a client's filter or sort names that this role may not read.
+ *
+ * Stripping a field from the answer is not enough on its own: a filter on it is an oracle. A role
+ * denied "Warehouse Unit Cost" that may still list lines WHERE {Warehouse Unit Cost} > 100 learns
+ * the cost by halving, without ever being sent it. So a read whose filter or sort names a field the
+ * role may not read -- or one on the never-return list -- is refused before it reaches Airtable.
+ *
+ * Airtable names a field as {Field Name} (or {fld…}) and, for a one-word name, bare. Both are read
+ * here, outside string literals; a bare word followed by "(" is a function, not a field.
+ *
+ * @returns {string[]} the offending names as written; [] when the read may go ahead
+ */
+function deniedReferences(rule, params, idToName) {
+  const denied = [...((rule && rule.fields && rule.fields.deny_read) || []), ...T.NEVER_RETURN];
+  if (!denied.length) return [];
+  const named = [];
+  const s = String((params && params.filterByFormula) || '');
+  let quote = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quote) {
+      if (ch === '\\') { i++; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === '{') {
+      const end = s.indexOf('}', i + 1);
+      if (end < 0) break;
+      named.push(s.slice(i + 1, end).trim());
+      i = end;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(ch) && !/[A-Za-z0-9_]/.test(s[i - 1] || '')) {
+      let j = i;
+      while (j < s.length && /[A-Za-z0-9_]/.test(s[j])) j++;
+      let k = j;
+      while (k < s.length && s[k] === ' ') k++;
+      if (s[k] !== '(') named.push(s.slice(i, j));
+      i = j - 1;
+    }
+  }
+  for (const x of (Array.isArray(params && params.sort) ? params.sort : [])) {
+    if (x && x.field) named.push(String(x.field));
+  }
+  return [...new Set(named.filter((n) => matchesField(n, denied, idToName)))];
+}
+
+/**
  * Validate a write payload.
  *
  * Rejects — never silently drops — with the offending field names, so the 403 can name them:
@@ -477,6 +526,7 @@ function effectiveScope(role, user, rule) {
 
 module.exports = {
   OPS,
+  deniedReferences,
   OP_FOR_AIRTABLE,
   escapeFormulaString,
   lit,

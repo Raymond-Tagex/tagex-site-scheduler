@@ -100,6 +100,14 @@ downloaded. Reprints from the Print buttons are never filed.
   `vercel.json` ships it with `jobcard-form.js` and `ticket-report.js` via `includeFiles` — a
   new function that prints a form needs the same entry.
 
+## A hidden field cannot be searched on
+
+A list or get whose `filterByFormula` or `sort` names a field the role may not read -- its `deny_read`,
+or the never-return list -- is refused as `filter_on_denied_field` (`P.deniedReferences`, the same code
+as the delivery app). Stripping the field from the answer is not enough: a filter on it tells the value
+by halving. Whoever may edit supplier quotes is held to MFA with Admin (`mfaRole`); building a TAGEX
+BOM alone is not, since project managers do that on phones with the costs hidden from them.
+
 ## Why things are vendored
 
 `vercel.json` sets `script-src 'self'`, so no CDN scripts. The OCR language data and pdf.js are
