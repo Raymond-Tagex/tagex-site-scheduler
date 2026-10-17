@@ -83,9 +83,11 @@ const TABLES = {
     CI: 'tbloMBkQNCafn8rLI',
     OM: 'tblhstPiOo5SgAF6x',
   },
+  // The PALLADIUM base is the one stock list for every TAGEX app (Raymond, 17 Oct 2026: "ALL
+  // applications must use the PALLADIUM base"). The C&I and O&M Stock Items tables
+  // (tblaWIGSRHtKbaYBE, tbl1lGcVzPHz3QLZ8) stay in their bases but are no longer whitelisted: a CI
+  // or OM stock_items request is refused as wrong_base. The Delivery Note app was locked the same day.
   stock_items: {
-    CI:  'tblaWIGSRHtKbaYBE',
-    OM:  'tbl1lGcVzPHz3QLZ8',
     STK: 'tblunrbqwZld0rO1J', // PALLADIUM STOCK
   },
   site_visits: {
