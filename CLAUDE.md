@@ -108,6 +108,16 @@ as the delivery app). Stripping the field from the answer is not enough: a filte
 by halving. Whoever may edit supplier quotes is held to MFA with Admin (`mfaRole`); building a TAGEX
 BOM alone is not, since project managers do that on phones with the costs hidden from them.
 
+## Job card money is for four people
+
+Since 20 Oct 2026 every role's `job_cards` rule denies reading and writing Budget, Actual Cost, Project
+Value, Cost Exposure, Cost Variance %, Total BOM Value and PDF: Financial Summary. Only Chane, Janette,
+Gus and Raymond see those figures, on the delivery app's Costing tab (`project_costing`, a key off on
+the roles and on in their Permission Overrides). A scheduler screen that wants them gets them stripped,
+and a filter or sort on them is refused. Do not lift the deny on a role: override denies cannot be
+lifted per person, so it would open them to everyone on that role. The Costing table (labour on the
+printed job card) is unchanged.
+
 ## Why things are vendored
 
 `vercel.json` sets `script-src 'self'`, so no CDN scripts. The OCR language data and pdf.js are
