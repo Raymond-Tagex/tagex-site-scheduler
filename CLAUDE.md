@@ -145,7 +145,7 @@ on a third party being up stops working for reasons nobody here can fix. Keep it
 ## Testing
 
 ```bash
-npm test                       # nine node suites; verify-part-c needs AIRTABLE_PAT
+npm test                       # ten node suites; verify-part-c needs AIRTABLE_PAT
 node scripts/ui-harness.js     # then http://localhost:4321/test/<name>.html
 ```
 
