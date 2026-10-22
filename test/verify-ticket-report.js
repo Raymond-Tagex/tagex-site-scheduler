@@ -398,22 +398,71 @@ console.log('\n\x1b[1mTHE TICKET LIST\x1b[0m\n');
     'Tickets_Awaiting-Spares_20261008.pdf');
 }
 
+console.log('\n\x1b[1mTHE TICKET LIST, SORTED\x1b[0m\n');
+{
+  const r = (ref, reportedAt, tech) => ({ ref, reportedAt, tech });
+  const rows = [
+    r('TKT-2026-0099', '2026-10-05T08:00:00Z', 'Zola Mthembu'),
+    r('TKT-2026-0100', '2026-09-01T08:00:00Z', ''),
+    r('TKT-2026-0012', null, 'anna Botha'),
+    r('TKT-2026-0050', '2026-09-15T08:00:00Z', 'Bongani Dlamini'),
+    r('TKT-2026-0051', '2026-09-15T08:00:00Z', 'Bongani Dlamini'),
+  ];
+  const refs = (sort, dir) => R.sortRows(rows, sort, dir).map((x) => x.ref.slice(-4));
+  t('nothing named is ticket number, newest first, as before', refs(undefined, undefined), ['0100', '0099', '0051', '0050', '0012']);
+  t('ticket number ascending', refs('ref', 'asc'), ['0012', '0050', '0051', '0099', '0100']);
+  t('0100 is after 0099, not before it', refs('ref', 'desc')[0], '0100');
+  t('date ascending, the undated one last', refs('date', 'asc'), ['0100', '0051', '0050', '0099', '0012']);
+  t('date descending, the undated one still last', refs('date', 'desc'), ['0099', '0051', '0050', '0100', '0012']);
+  t('technician A–Z, ignoring case, the unassigned one last', refs('tech', 'asc'), ['0012', '0051', '0050', '0099', '0100']);
+  t('technician Z–A, the unassigned one still last', refs('tech', 'desc'), ['0099', '0051', '0050', '0012', '0100']);
+  t('a technician’s own tickets read newest first either way', [refs('tech', 'asc').slice(1, 3), refs('tech', 'desc').slice(1, 3)], [['0051', '0050'], ['0051', '0050']]);
+  t('the rows given are not reordered in place', rows.map((x) => x.ref.slice(-4)), ['0099', '0100', '0012', '0050', '0051']);
+  t('the sheet says how it is sorted', R.sortLabel('tech', 'asc'), 'Sorted by: Technician, A–Z');
+  t('and the default says so too', R.sortLabel(undefined, undefined), 'Sorted by: Ticket no., newest first');
+
+  const pdf = await R.ticketListPdf({ filter: 'OPEN', search: '', sort: 'date', dir: 'asc',
+    rows: R.sortRows(rows.map((x) => ({ ...x, status: 'New', subject: 's', client: 'c', jc: 'j' })), 'date', 'asc'),
+    generatedBy: 'x@y.z', generatedAt: '2026-10-08T09:30:00.000Z' });
+  const text = pagesOf(pdf).map(drawn).flat().join('\n');
+  t('the printout has a Technician column', text.includes('Technician'), true);
+  // a name may wrap in its column, so it is matched across the line break
+  t('with the technician on it', /Zola\s+Mthembu/.test(text), true);
+  t('and the order printed under the title', text.includes('Sorted by: Date reported, oldest first'), true);
+  const at = (ref) => text.indexOf(ref);
+  t('rows are printed in the order given', at('TKT-2026-0100') < at('TKT-2026-0050') && at('TKT-2026-0099') < at('TKT-2026-0012'), true);
+}
+
 console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
 {
   process.env.AUTH_MODE = 'session';
   const api = (m) => path.join(__dirname, '..', 'api', m);
   const TICKETS = 'tbln5V2ynpBY9sIOc', JOBCARDS = 'tbl2wqnfM0eDa8M7P';
+  const VISITS = 'tblny4UUKq8OIHQlw', PEOPLE = 'tblYXKBqfN4zituh1';
   const tk = (id, ref, status, extra) => ({ id, createdTime: '2026-09-01T00:00:00.000Z',
     fields: Object.assign({ 'Ticket Ref': ref, Subject: 'Fault ' + ref, Status: status,
       'Job Card': ['recJC000000000001'], 'Reported At': '2026-09-20T08:00:00Z' }, extra) });
   const ROWS = {
     [TICKETS]: [
-      tk('recTKOPEN00000001', 'TKT-2026-0001', 'New'),
-      tk('recTKOPEN00000002', 'TKT-2026-0002', 'Visit Scheduled'),
+      // 0001's latest visit is a cancelled one with Anna: Zola, on the visit before it, is working it.
+      tk('recTKOPEN00000001', 'TKT-2026-0001', 'New',
+        { 'Reported At': '2026-09-25T08:00:00Z', 'Site Visits': ['recVIS00000000001', 'recVIS00000000002'] }),
+      tk('recTKOPEN00000002', 'TKT-2026-0002', 'Visit Scheduled',
+        { 'Reported At': '2026-09-10T08:00:00Z', 'Site Visits': ['recVIS00000000003'] }),
       tk('recTKCLOSED000003', 'TKT-2026-0003', 'Closed'),
-      tk('recTKNOSTATUS0004', 'TKT-2026-0004', undefined),
+      tk('recTKNOSTATUS0004', 'TKT-2026-0004', undefined, { 'Reported At': undefined }),
     ],
     [JOBCARDS]: [{ id: 'recJC000000000001', fields: { 'JC Reference': 'OM-2026-0174/MAINT/TE', 'Client Name': ['Grootvlei'] } }],
+    [VISITS]: [
+      { id: 'recVIS00000000001', fields: { 'Start DateTime': '2026-09-21T06:00:00Z', Status: 'Completed', 'Assigned Technician': ['recPPL00000000001'] } },
+      { id: 'recVIS00000000002', fields: { 'Start DateTime': '2026-09-28T06:00:00Z', Status: 'Cancelled', 'Assigned Technician': ['recPPL00000000002'] } },
+      { id: 'recVIS00000000003', fields: { 'Start DateTime': '2026-09-22T06:00:00Z', Status: 'Scheduled', 'Assigned Technician': ['recPPL00000000003'] } },
+    ],
+    [PEOPLE]: [
+      { id: 'recPPL00000000001', fields: { Name: 'Zola Mthembu' } },
+      { id: 'recPPL00000000002', fields: { Name: 'Anna Botha' } },
+      { id: 'recPPL00000000003', fields: { Name: 'Bongani Dlamini' } },
+    ],
   };
   const AUDIT = [];
   const stub = (file, exports) => {
@@ -487,6 +536,34 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
 
   r = await call(who({ tickets: ALL }), { list: { status: 'ALL' } });
   t('a role that cannot read job cards still gets its list', [r.code, r.body.count], [200, 4]);
+
+  // ── sorted ──
+  const opsT = who({ tickets: ALL, job_cards: ALL, site_visits: ALL, people: ALL });
+  const order = (res) => { const tx = printed(res); return ['0001', '0002', '0004'].map((n) => [n, tx.indexOf('TKT-2026-' + n)]).sort((a, b) => a[1] - b[1]).map((x) => x[0]); };
+  r = await call(opsT, { list: { status: 'OPEN' } });
+  t('no sort named prints ticket number, newest first, as before', order(r), ['0004', '0002', '0001']);
+  text = printed(r);
+  t('the technician is the one on the latest visit that was not cancelled', /Zola\s+Mthembu/.test(text) && !/Anna/.test(text), true);
+  r = await call(opsT, { list: { status: 'OPEN', sort: 'tech', dir: 'asc' } });
+  t('by technician A–Z, the ticket with no visit last', order(r), ['0002', '0001', '0004']);
+  r = await call(opsT, { list: { status: 'OPEN', sort: 'tech', dir: 'desc' } });
+  t('by technician Z–A, the ticket with no visit still last', order(r), ['0001', '0002', '0004']);
+  r = await call(opsT, { list: { status: 'OPEN', sort: 'date', dir: 'asc' } });
+  t('by date reported, oldest first, the undated one last', order(r), ['0002', '0001', '0004']);
+  t('and the sheet says so', printed(r).includes('Sorted by: Date reported, oldest first'), true);
+  t('the audit records the order', AUDIT.some((a) => /sorted by: date reported, oldest first/.test(a.newValue || '')), true);
+  r = await call(opsT, { list: { status: 'OPEN', sort: 'ref', dir: 'asc' } });
+  t('by ticket number ascending', order(r), ['0001', '0002', '0004']);
+  for (const bad of [{ sort: 'subject' }, { sort: 'tech', dir: 'up' }, { sort: '__proto__' }, { sort: 'constructor' }]) {
+    r = await call(opsT, { list: { status: 'OPEN', ...bad } });
+    t(`a sort of ${JSON.stringify(bad)} is refused`, r.code, 400);
+  }
+  // Deny by default: with no rule for site visits or people, readAll would hand over every field.
+  r = await call(ops, { list: { status: 'OPEN', sort: 'tech', dir: 'asc' } });
+  text = printed(r);
+  t('a role that may not view site visits gets no technician names', [r.code, /Zola|Bongani|Anna/.test(text)], [200, false]);
+  r = await call(who({ tickets: ALL, job_cards: ALL, site_visits: ALL }), { list: { status: 'OPEN' } });
+  t('nor one that may not view people', /Zola|Bongani|Anna/.test(printed(r)), false);
 
   // ── which base ──
   BASES_READ.length = 0;

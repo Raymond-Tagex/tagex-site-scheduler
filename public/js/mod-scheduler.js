@@ -2600,7 +2600,7 @@ async function omTktPrintList(){
   if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
   try{
     const q=omTktSearchQ.trim();
-    const list={ status:omTktFilter };
+    const list={ status:omTktFilter, ...omTktPrintOrder() };
     if(q){ list.search=q; list.ids=omFilteredTkts().map(r=>r.id); }
     const r=await TX.request('/api/ticket-report',{ list, base:SCHED_BASE });
     omDownloadPdf(r,'tickets.pdf');
@@ -3507,6 +3507,27 @@ function omSyncPrintBtn(){
   const b=document.getElementById('tktPrintTop'); if(!b)return;
   const tab=document.getElementById('view-omtickets');
   b.hidden=!(tab&&!tab.classList.contains('hidden')&&omCurrentView==='tickets');
+  // The sort pickers go wherever the button goes: they mean nothing without it.
+  for(const id of ['tktPrintSort','tktPrintDir']){
+    const el=document.getElementById(id); if(!el) continue;
+    el.hidden=b.hidden;
+    if(!el.dataset.init){
+      el.dataset.init='1';
+      try{ const v=localStorage.getItem('tagex_'+id); if(v&&[...el.options].some(o=>o.value===v)) el.value=v; }catch(e){ /* storage off: defaults */ }
+      el.addEventListener('change',()=>{ try{ localStorage.setItem('tagex_'+id,el.value); }catch(e){ /* not remembered */ } });
+    }
+  }
+}
+
+/**
+ * How the printed list is ordered: by ticket number, date reported or technician, either way.
+ * The server sorts -- it is the one that reads the technicians -- this only names the choice.
+ * With the pickers absent (a role without tickets:export) nothing is sent, and the server's
+ * default is the order the list always printed in: ticket number, newest first.
+ */
+function omTktPrintOrder(){
+  const s=document.getElementById('tktPrintSort'), d=document.getElementById('tktPrintDir');
+  return (s&&d)?{ sort:s.value, dir:d.value }:{};
 }
 
 // ── Helpers ──
