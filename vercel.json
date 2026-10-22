@@ -37,6 +37,10 @@
       "maxDuration": 60,
       "includeFiles": "{api/_lib/tessdata/**,node_modules/tesseract.js-core/**}"
     },
+    "api/fica-docs.js": {
+      "maxDuration": 60,
+      "includeFiles": "{api/_lib/tessdata/**,node_modules/tesseract.js-core/**}"
+    },
     "api/siteinfo-report.js": {
       "maxDuration": 30
     }

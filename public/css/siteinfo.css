@@ -396,3 +396,30 @@
   font-family: var(--mono); font-size: 10px; color: var(--red);
   text-transform: uppercase; letter-spacing: .04em;
 }
+
+/* ── split a scanned PDF (siteinfo-split.js) ─────────────────────────────── */
+.si-split-sum { font-size: 13px; margin-bottom: 10px; }
+.si-split-n { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: var(--rs);
+  border: 1px solid var(--border); margin-left: 4px; }
+.si-split-n.fica { color: var(--red); border-color: var(--red-border); background: var(--red-dim); }
+.si-split-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+  max-height: 46vh; overflow-y: auto; margin: 10px 0; }
+.si-split-page { margin: 0; border: 2px solid var(--border); border-radius: var(--rs); background: var(--card);
+  overflow: hidden; display: flex; flex-direction: column; }
+.si-split-page.fica { border-color: var(--red); }
+.si-split-page.other { border-color: var(--green-border); }
+.si-split-page img { width: 100%; aspect-ratio: 1 / 1.414; object-fit: contain; background: #fff;
+  border-bottom: 1px solid var(--border); }
+.si-split-page figcaption { padding: 6px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+.si-split-tag { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+.si-split-tag.fica { color: var(--red); }
+.si-split-tag.unsure { color: var(--amber-ink); }
+.si-split-tag.other { color: var(--green); }
+.si-split-choice { display: flex; gap: 4px; }
+.si-split-choice .si-btn { flex: 1; padding: 4px 6px; font-size: 12px; min-height: 0; }
+.si-split-choice .si-btn.on { background: var(--amber); border-color: var(--amber); color: #101215; font-weight: 600; }
+.si-split-step { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+.si-split-step h3 { margin: 0 0 8px; font-size: 13.5px; }
+.si-split-entry { display: flex; justify-content: space-between; gap: 10px; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.si-split-entry .si-btn { margin: 2px; }

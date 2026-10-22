@@ -191,7 +191,11 @@
 
   // ── the modal ─────────────────────────────────────────────────────────────
 
-  function open(mode) {
+  /**
+   * `files`, when given, are queued as if they had been dropped: siteinfo-split.js hands over the
+   * pages of a scan that were not FICA, so they go through exactly this route and its checks.
+   */
+  function open(mode, files) {
     if ($('#siBatchModal')) return;
     FILES = []; CARD = -1; RESULT = null; EDIT = {}; EQUIP = []; BUSY = false;
     REFUSED = []; SITE = null;
@@ -259,7 +263,7 @@
       add([...(e.dataTransfer.files || [])]);
     });
 
-    render();
+    if (files && files.length) add(files); else render();
   }
 
   function close() {

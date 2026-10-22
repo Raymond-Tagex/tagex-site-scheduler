@@ -376,6 +376,14 @@
       + '<button class="si-btn" data-act="siTab" data-a1="equipment">Equipment</button>'
       + (TX.can('job_cards', 'view')
         ? '<button class="si-btn" data-act="siJobCards">Linked job cards</button>' : '')
+      + (TX.can('site_information', 'create')
+        ? '<button class="si-btn" data-act="siSplit" data-a1="' + esc(CURRENT.rec.id) + '" data-a2="'
+          + esc(CURRENT.base) + '">Split a PDF</button>' : '')
+      // Only for the people who may see FICA at all, and never loaded until asked for: opening
+      // the list is itself an audited restricted view (api/fica-docs.js, op index).
+      + (TX.can('restricted_personal', 'view') && TX.me() && TX.me().user.canViewRestricted
+        ? '<button class="si-btn" data-act="siFicaIndex" data-a1="' + esc(CURRENT.rec.id) + '" data-a2="'
+          + esc(CURRENT.base) + '">FICA documents</button>' : '')
       + '<button class="si-btn" data-act="siBack">Back to list</button>'
       + '</div>';
   }
@@ -1041,6 +1049,18 @@
     siBatchEq: (i, checked) => TX.sitebatch && TX.sitebatch.setEquip(i, checked),
     siBatchRetryPick: (i, checked) => TX.sitebatch && TX.sitebatch.pickRetry(i, checked),
     siBatchRetry: () => TX.sitebatch && TX.sitebatch.retryRefused(),
+    // Splitting a scanned PDF into its FICA pages and the rest lives in siteinfo-split.js.
+    siSplit: (id, base) => TX.sitesplit && TX.sitesplit.open(id, base),
+    siSplitClose: () => TX.sitesplit && TX.sitesplit.close(),
+    siSplitPick: () => { const el = $('#splitFile'); if (el) el.click(); },
+    siSplitSet: (page, verdict) => TX.sitesplit && TX.sitesplit.choose(page, verdict),
+    siSplitSite: (v) => TX.sitesplit && TX.sitesplit.setSite(v),
+    siSplitFile: () => TX.sitesplit && TX.sitesplit.fileFica(),
+    siSplitSkip: () => TX.sitesplit && TX.sitesplit.skipFica(),
+    siSplitOn: (mode) => TX.sitesplit && TX.sitesplit.handOff(mode),
+    siSplitDownload: () => TX.sitesplit && TX.sitesplit.download(),
+    siFicaIndex: (id, base) => TX.sitesplit && TX.sitesplit.showIndex(id, base),
+    siFicaOpen: (id, n) => TX.sitesplit && TX.sitesplit.openPage(id, n),
     siBatchPickFiles: () => { const el = $('#batchFiles'); if (el) el.click(); },
     siBatchPickFolder: () => { const el = $('#batchFolder'); if (el) el.click(); },
     siReload: loadSites,
