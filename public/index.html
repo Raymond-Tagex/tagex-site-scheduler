@@ -209,6 +209,17 @@
            reloads the page so nothing cached from one base reaches the other. -->
       <select class="f" id="schedBase" title="Which base the scheduler and tickets work in" aria-label="Base"></select>
       <div class="grow"></div>
+      <!-- How the printed ticket list is ordered. Offered with the Print button and only with it
+           (omSyncPrintBtn); the server applies the order, these only name it. -->
+      <select class="f" id="tktPrintSort" data-requires="tickets:export" title="Sort the printed list by" aria-label="Sort the printed list by" hidden>
+        <option value="ref">Sort: Ticket no.</option>
+        <option value="date">Sort: Date reported</option>
+        <option value="tech">Sort: Technician</option>
+      </select>
+      <select class="f" id="tktPrintDir" data-requires="tickets:export" title="Order of the printed list" aria-label="Order of the printed list" hidden>
+        <option value="desc">Descending</option>
+        <option value="asc">Ascending</option>
+      </select>
       <button class="btn ghost sm" id="tktPrintTop" type="button" data-act="omTktPrintList" data-requires="tickets:export" title="A PDF of the tickets under the status selected below" hidden>Print</button>
       <button class="btn sm" id="newVisitTop" type="button" data-requires="site_visits:create">+ Schedule Site Visit</button>
       <button class="btn ghost sm" id="refreshBtn" type="button" title="Reload from the server">&#8635; Refresh</button>
