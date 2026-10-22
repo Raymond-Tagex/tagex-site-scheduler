@@ -83,6 +83,66 @@ function serveStatic(req, res, pathname) {
   fs.createReadStream(full).pipe(res);
 }
 
+// ── Vercel-style request body ──────────────────────────────────────────────
+// Vercel reads and parses the body before a handler runs and hands it over as req.body, so
+// H.readBody() takes that path in production and never streams. Here nothing did, so readBody
+// streamed it -- and its 1 MB cap, which production never reaches, refused every request
+// carrying a few page pictures (Split a PDF's classify, 22 Oct 2026). Local was stricter than
+// production in a way that looked like a bug in the feature. So this does what Vercel does:
+// the platform's own 4.5 MB ceiling, then a parse by content type.
+const VERCEL_BODY_LIMIT = 4.5 * 1024 * 1024;
+
+/**
+ * @returns {Promise<{ok:true, body:any} | {ok:false, status:number, payload:object}>}
+ */
+function vercelBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let over = false;
+    req.on('data', (c) => {
+      if (over) return;
+      size += c.length;
+      // Read to the end even when over, as a proxy would, so the client gets the 413 rather
+      // than a reset connection.
+      if (size > VERCEL_BODY_LIMIT) { over = true; chunks.length = 0; return; }
+      chunks.push(c);
+    });
+    req.on('error', reject);
+    req.on('end', () => {
+      if (over) {
+        resolve({ ok: false, status: 413, payload: { error: true, reason: 'FUNCTION_PAYLOAD_TOO_LARGE',
+          detail: 'Request body over the 4.5 MB Vercel allows.' } });
+        return;
+      }
+      const raw = Buffer.concat(chunks);
+      const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      // An empty body is '', not undefined: undefined would send readBody back to a stream that
+      // has already ended, and it would wait for ever.
+      if (!raw.length) { resolve({ ok: true, body: '' }); return; }
+      if (type === 'application/json') {
+        try { resolve({ ok: true, body: JSON.parse(raw.toString('utf8')) }); }
+        catch (e) { resolve({ ok: false, status: 400, payload: { error: true, reason: 'bad_json', detail: 'Invalid JSON' } }); }
+        return;
+      }
+      if (type === 'application/x-www-form-urlencoded') {
+        resolve({ ok: true, body: Object.fromEntries(new URLSearchParams(raw.toString('utf8'))) });
+        return;
+      }
+      if (type.startsWith('text/')) { resolve({ ok: true, body: raw.toString('utf8') }); return; }
+      resolve({ ok: true, body: raw });
+    });
+  });
+}
+
+/** Sets req.body as Vercel would before the handler runs. A GET or HEAD carries none. */
+async function attachBody(req) {
+  if (req.method === 'GET' || req.method === 'HEAD') return { ok: true };
+  const b = await vercelBody(req);
+  if (b.ok) req.body = b.body;
+  return b;
+}
+
 // ── Vercel-style response shims ────────────────────────────────────────────
 // The handlers are written for Vercel's res.status().json()/.send(). Node's ServerResponse
 // has neither, so add them.
@@ -191,6 +251,8 @@ const server = http.createServer(async (req, res) => {
     const handler = freshRequire(file);
     const fn = typeof handler === 'function' ? handler : handler.default;
     if (typeof fn !== 'function') throw new Error(`${path.basename(file)} does not export a handler`);
+    const b = await attachBody(req);
+    if (!b.ok) { res.status(b.status).json(b.payload); return; }
     await fn(req, res);
   } catch (err) {
     console.error(`  \x1b[31m${req.method} ${url.pathname}\x1b[0m`, err && err.stack);
@@ -228,7 +290,9 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(PORT, () => {
+// Exported for test/verify-dev-server.js, which requires this file without starting it.
+module.exports = { vercelBody, attachBody, VERCEL_BODY_LIMIT };
+if (require.main === module) server.listen(PORT, () => {
   const mfa = MFA_REQUIRED();
   console.log('');
   console.log('  \x1b[1mTAGEX dev server\x1b[0m');
