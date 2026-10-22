@@ -434,6 +434,48 @@ function inFilter(status, filter) {
   return st === filter;
 }
 
+/**
+ * How the printed list may be ordered, and how each order is described on the sheet.
+ *
+ * No sort named = ticket number, newest first: what the list printed before it could be sorted,
+ * and the order the Tickets screen shows. Anything that cannot be ordered -- no reported date, no
+ * technician -- goes to the END in both directions, so "ascending" never opens with a page of
+ * blanks. Ties keep newest ticket first, so a technician's own tickets read latest at the top.
+ */
+const LIST_SORTS = Object.freeze({
+  ref: { label: 'Ticket no.', asc: 'oldest first', desc: 'newest first' },
+  date: { label: 'Date reported', asc: 'oldest first', desc: 'newest first' },
+  tech: { label: 'Technician', asc: 'A–Z', desc: 'Z–A' },
+});
+const LIST_DIRS = Object.freeze(['asc', 'desc']);
+
+/** The number in a ticket ref, for ordering: TKT-2026-0100 after TKT-2026-0099, and after 9999. */
+const refKey = (ref) => (str(ref).match(/\d+/g) || []).map((n) => n.padStart(10, '0')).join('-');
+
+/** A copy of rows in the order asked for. Rows are as listReport builds them, with tech. */
+function sortRows(rows, sort, dir) {
+  const by = LIST_SORTS[sort] ? sort : 'ref';
+  const sign = dir === 'asc' ? 1 : -1;
+  const newestFirst = (a, b) => refKey(b.ref).localeCompare(refKey(a.ref));
+  const key = {
+    ref: (r) => refKey(r.ref),
+    date: (r) => { const t = Date.parse(r.reportedAt || ''); return isNaN(t) ? '' : String(t).padStart(15, '0'); },
+    tech: (r) => str(r.tech).toLowerCase(),
+  }[by];
+  return rows.slice().sort((a, b) => {
+    const ka = key(a); const kb = key(b);
+    if (!ka !== !kb) return ka ? -1 : 1;           // the blank one last, whichever the direction
+    const c = ka.localeCompare(kb);
+    return c ? sign * c : newestFirst(a, b);
+  });
+}
+
+/** "Sorted by: Technician, A–Z" -- printed under the title so the order of the sheet is not a guess. */
+const sortLabel = (sort, dir) => {
+  const s = LIST_SORTS[sort] || LIST_SORTS.ref;
+  return `Sorted by: ${s.label}, ${dir === 'asc' ? s.asc : s.desc}`;
+};
+
 /** Whole days from reported to closed, or to now while it is still open. Blank when unknown. */
 function daysOpen(reportedAt, closedAt, now) {
   const from = Date.parse(reportedAt || '');
@@ -448,8 +490,9 @@ function daysOpen(reportedAt, closedAt, now) {
  * (up to MAX_PT) and shrinks only as far as the number of tickets forces it to. The print date is
  * large at the top right, so a sheet on a wall says at a glance how old it is.
  *
- * @param {object} d { filter, search, rows[], generatedBy, generatedAt }
- *   rows: { ref, reportedAt, closedAt, client, jc, subject, category, priority, status }
+ * @param {object} d { filter, search, sort?, dir?, rows[], generatedBy, generatedAt }
+ *   rows: { ref, reportedAt, closedAt, client, jc, tech, subject, category, priority, status },
+ *   already in the order to print (sortRows); sort and dir only label it.
  * @returns {Promise<Buffer>}
  */
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -477,7 +520,8 @@ async function ticketListPdf(d) {
   const right = (t, y, size, font = fonts.reg, color = INK) => put(t, LM + cw - font.widthOfTextAtSize(safe(t), size), y, size, font, color);
 
   const showing = 'Showing: ' + (d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
-    : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + label) + (d.search ? `    Search: "${d.search}"` : '');
+    : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + label) + (d.search ? `    Search: "${d.search}"` : '')
+    + '    ' + sortLabel(d.sort, d.dir);
   const present = TICKET_STATUSES.filter((st) => rows.some((r) => (str(r.status) || 'New') === st));
   const counts = present.map((st) => [st, String(rows.filter((r) => (str(r.status) || 'New') === st).length)]);
 
@@ -485,12 +529,13 @@ async function ticketListPdf(d) {
   // and share what is left (p = share).
   const COLS = [
     { head: 'Ticket', key: 'ref', fixed: true, bold: true }, { head: 'Reported', key: 'rep', fixed: true }, { head: 'Days', key: 'days', fixed: true },
-    { head: 'Client', key: 'client', p: 18 }, { head: 'Job card', key: 'jc', fixed: true }, { head: 'Subject', key: 'subject', p: 38 },
-    { head: 'Category', key: 'category', p: 16 }, { head: 'Priority', key: 'priority', fixed: true }, { head: 'Status', key: 'status', p: 14 },
+    { head: 'Client', key: 'client', p: 16 }, { head: 'Job card', key: 'jc', fixed: true }, { head: 'Technician', key: 'tech', p: 13 },
+    { head: 'Subject', key: 'subject', p: 33 },
+    { head: 'Category', key: 'category', p: 14 }, { head: 'Priority', key: 'priority', fixed: true }, { head: 'Status', key: 'status', p: 13 },
   ];
   const data = rows.map((r) => ({
     ref: r.ref, rep: fmtDate(r.reportedAt), days: daysOpen(r.reportedAt, r.closedAt, d.generatedAt),
-    client: r.client, jc: r.jc, subject: r.subject, category: r.category,
+    client: r.client, jc: r.jc, tech: str(r.tech) || '—', subject: r.subject, category: r.category,
     priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
   }));
 
@@ -629,4 +674,5 @@ const reportFilename = (d) => {
 module.exports = {
   ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str, safe,
   ticketListPdf, listFilename, inFilter, daysOpen, filterLabel, TICKET_STATUSES, OPEN_STATUSES,
+  LIST_SORTS, LIST_DIRS, sortRows, sortLabel,
 };

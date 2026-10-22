@@ -1,5 +1,6 @@
 // POST /api/ticket-report — the Service Ticket Report for one ticket, as a PDF.
-// POST /api/ticket-report { list: { status, ids? , search? } } — the ticket LIST, as a PDF.
+// POST /api/ticket-report { list: { status, ids? , search?, sort?, dir? } } — the ticket LIST, as a PDF.
+//   sort: 'ref' | 'date' | 'tech', dir: 'asc' | 'desc'; neither = ticket number, newest first.
 //
 // The list shares this endpoint rather than taking a new one: the deployment counts against
 // the Hobby plan's twelve functions, and both are the same export right on the same table.
@@ -270,6 +271,12 @@ async function listReport(auth, ctx, base, list, res) {
   }
   // Printed as typed, so it is cut short and stripped of anything that is not text.
   const search = String(list.search || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80);
+  // Neither named = ticket number, newest first, as the list printed before it could be sorted.
+  const sort = list.sort == null ? 'ref' : String(list.sort);
+  const dir = list.dir == null ? 'desc' : String(list.dir);
+  if (!Object.prototype.hasOwnProperty.call(R.LIST_SORTS, sort) || !R.LIST_DIRS.includes(dir)) {
+    return H.fail(res, 400, 'bad_request', 'Choose how to sort the list.');
+  }
 
   try {
     const tickets = (await readAll(auth, base, 'tickets', 'ticket'))
@@ -283,7 +290,32 @@ async function listReport(auth, ctx, base, list, res) {
       for (const j of await readAll(auth, base, 'job_cards')) jcs[j.id] = j.fields;
     } catch (e) { /* no job card access */ }
 
-    const rows = tickets.map((x) => {
+    // A ticket has no technician of its own: whoever is on its most recent visit is the one
+    // working it. Cancelled visits do not count -- a technician taken off the job is not on it.
+    // Read through the role's rules like everything else; a role that cannot read visits or
+    // people still gets its list, with the column blank. The view rights are checked here, not
+    // left to readAll: filterReadFields with no rule for a table returns every field, so without
+    // this a role denied site visits would read technician names off the printout.
+    const techOf = {};
+    const mayNameTechs = P.can(auth.perms, 'site_visits', 'view').ok && P.can(auth.perms, 'people', 'view').ok;
+    if (mayNameTechs) try {
+      const names = {};
+      for (const p of await readAll(auth, base, 'people')) {
+        names[p.id] = R.str(p.fields.Name || p.fields['Full Name'] || '');
+      }
+      const visits = {};
+      for (const v of await readAll(auth, base, 'site_visits')) visits[v.id] = v.fields;
+      for (const x of tickets) {
+        const latest = ids(x.fields['Site Visits']).map((id) => visits[id])
+          .filter((v) => v && R.str(v.Status) !== 'Cancelled')
+          .sort((a, b) => String(b['Start DateTime'] || '').localeCompare(String(a['Start DateTime'] || '')))[0];
+        if (latest) {
+          techOf[x.id] = ids(latest['Assigned Technician']).map((i) => names[i]).filter(Boolean).join(', ');
+        }
+      }
+    } catch (e) { /* no visit or people access */ }
+
+    const rows = R.sortRows(tickets.map((x) => {
       const f = x.fields;
       const jc = jcs[ids(f['Job Card'])[0]] || {};
       return {
@@ -292,23 +324,23 @@ async function listReport(auth, ctx, base, list, res) {
         closedAt: f['Closed At'] || null,
         client: R.str(jc['Client Name']),
         jc: R.str(jc['JC Reference']),
+        tech: techOf[x.id] || '',
         subject: R.str(f.Subject),
         category: R.str(f['Fault Category']),
         priority: R.str(f.Priority),
         status: R.str(f.Status),
       };
-    // Newest first, the order the screen lists them in.
-    }).sort((a, b) => b.ref.localeCompare(a.ref));
+    }), sort, dir);
 
     const payload = {
-      filter, search, rows, generatedBy: auth.email, generatedAt: new Date().toISOString(),
+      filter, search, sort, dir, rows, generatedBy: auth.email, generatedAt: new Date().toISOString(),
     };
     const pdf = await R.ticketListPdf(payload);
 
     await A.auditNow({
       ...ctx, action: 'Export', result: 'Allowed', field: 'Ticket list',
       newValue: `Service ticket list: ${R.filterLabel(filter)}, ${rows.length} ticket(s)`
-        + (search ? `, search "${search}"` : ''),
+        + (search ? `, search "${search}"` : '') + `, ${R.sortLabel(sort, dir).toLowerCase()}`,
     });
 
     return H.ok(res, {

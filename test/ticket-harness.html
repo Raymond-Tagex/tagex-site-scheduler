@@ -1864,14 +1864,39 @@ async function suite(log) {
   // set and the whole suite runs against RES.
   let WANT_BASE = 'OM';
   try { if (localStorage.getItem('tagex_sched_base') === 'RES') WANT_BASE = 'RES'; } catch (e) { /* default */ }
-  t('for the chip that is selected, and nothing else', (REQ[REQ.length - 1] || {}).body, { list: { status: 'Resolved' }, base: WANT_BASE });
+  // A previous run's choice may be remembered in this browser: start from the default order.
+  $('tktPrintSort').value = 'ref'; $('tktPrintDir').value = 'desc';
+  await pressPrint();
+  t('for the chip that is selected, in the order picked, and nothing else', (REQ[REQ.length - 1] || {}).body,
+    { list: { status: 'Resolved', sort: 'ref', dir: 'desc' }, base: WANT_BASE });
+
+  log('\nSORTING THE PRINTED LIST');
+  const sortSel = () => $('tktPrintSort'), dirSel = () => $('tktPrintDir');
+  t('the sort pickers sit with the Print button', sortSel().closest('header.topbar') === printBtn().closest('header.topbar') && !!dirSel(), true);
+  t('and are offered with it', [sortSel().hidden, dirSel().hidden], [false, false]);
+  t('offering ticket no., date reported and technician', [...sortSel().options].map((o) => o.value), ['ref', 'date', 'tech']);
+  t('either way round', [...dirSel().options].map((o) => o.value), ['desc', 'asc']);
+  const choose = (el, v) => { el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
+  // Cleared first: every run here shares one localStorage, so an earlier run's choice would
+  // otherwise make "remembered" pass for a page that remembers nothing.
+  try { localStorage.removeItem('tagex_tktPrintSort'); localStorage.removeItem('tagex_tktPrintDir'); } catch (e) { /* storage off */ }
+  choose(sortSel(), 'tech'); choose(dirSel(), 'asc');
+  await pressPrint();
+  t('the order picked goes with the print', ((REQ[REQ.length - 1] || {}).body || {}).list, { status: 'Resolved', sort: 'tech', dir: 'asc' });
+  let keptOrder = null; try { keptOrder = [localStorage.getItem('tagex_tktPrintSort'), localStorage.getItem('tagex_tktPrintDir')]; } catch (e) { /* storage off */ }
+  t('and is remembered for next time', keptOrder, ['tech', 'asc']);
+  choose(sortSel(), 'date'); choose(dirSel(), 'desc');
+  await pressPrint();
+  t('by date, newest first', ((REQ[REQ.length - 1] || {}).body || {}).list, { status: 'Resolved', sort: 'date', dir: 'desc' });
+  // Back to the default, so the requests checked below are unchanged by this section.
+  choose(sortSel(), 'ref'); choose(dirSel(), 'desc');
   // STK is the shared stock catalogue, the same whichever base the scheduler is in.
   t('every Airtable call so far named the scheduler base and no other',
     [...(window.BASES_SEEN || [])].filter((x) => x !== 'STK'), [WANT_BASE]);
 
   await pickChip('Open');
   await pressPrint();
-  t('Open goes as Open', ((REQ[REQ.length - 1] || {}).body || {}).list, { status: 'OPEN' });
+  t('Open goes as Open', ((REQ[REQ.length - 1] || {}).body || {}).list, { status: 'OPEN', sort: 'ref', dir: 'desc' });
 
   await pickChip('All');
   await searchTkts('inverter');
@@ -1894,10 +1919,12 @@ async function suite(log) {
 
   tap($('ombn-dash')); await settle(6);
   t('it is not offered on the dashboard', shown(), false);
+  t('nor are its sort pickers', [sortSel().hidden, dirSel().hidden], [true, true]);
   tap($('ombn-tickets')); await settle(6);
   t('and comes back with the list', shown(), true);
   tap(document.querySelector('[data-tab="calendar"]')); await settle(4);
   t('nor on the calendar, which shares the top bar', shown(), false);
+  t('and the pickers go with it', [sortSel().hidden, dirSel().hidden], [true, true]);
   tap(document.querySelector('[data-tab="omtickets"]')); await settle(10);
   t('and returning to the tickets tab brings it back', shown(), true);
   TX.request = realRequest;
@@ -2517,8 +2544,20 @@ const MUTANTS = [
    '  b.hidden=false;'],
 
   ['Print ignores the chip that is selected',
-   '    const list={ status:omTktFilter };',
-   "    const list={ status:'ALL' };"],
+   '    const list={ status:omTktFilter, ...omTktPrintOrder() };',
+   "    const list={ status:'ALL', ...omTktPrintOrder() };"],
+
+  ['Print ignores the sort picked',
+   '    const list={ status:omTktFilter, ...omTktPrintOrder() };',
+   '    const list={ status:omTktFilter };'],
+
+  ['the sort pickers stay on screen without the Print button',
+   '    el.hidden=b.hidden;',
+   '    el.hidden=false;'],
+
+  ['the sort picked is not remembered',
+   "      el.addEventListener('change',()=>{ try{ localStorage.setItem('tagex_'+id,el.value); }catch(e){ /* not remembered */ } });",
+   ''],
 
   ['Print sends the search but not what it found',
    '    if(q){ list.search=q; list.ids=omFilteredTkts().map(r=>r.id); }',
