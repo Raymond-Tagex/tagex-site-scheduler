@@ -300,7 +300,10 @@ const FULL = {
   // ════════════════════════════════════════════════════════════════════════
   console.log('\n\x1b[1mEVERY PLACE THAT RAISES ONE PRODUCES ITS FORM\x1b[0m\n');
   {
-    const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'mod-scheduler.js'), 'utf8');
+    // LF, whatever the checkout: body() ends a function at '\n}\n', which on CRLF finds nothing,
+    // so the slice ran to the end of the file and found other functions' 'file:'.
+    const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'mod-scheduler.js'), 'utf8')
+      .replace(/\r\n/g, '\n');
     const body = (name) => {
       const i = js.indexOf('async function ' + name + '(');
       return i < 0 ? '' : js.slice(i, js.indexOf('\n}\n', i));

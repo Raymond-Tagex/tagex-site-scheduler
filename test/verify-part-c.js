@@ -888,7 +888,10 @@ console.log('\n\x1b[1mSITE SIGNING LINKS\x1b[0m\n');
 
   // ── and the client sends them ────────────────────────────────────────────
   {
-    const cl = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'siteinfo-batch.js'), 'utf8');
+    // LF, whatever the checkout: on CRLF the '\n\s*\};' below can never match, so the "false"
+    // it asserts would hold however the request was built.
+    const cl = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'siteinfo-batch.js'), 'utf8')
+      .replace(/\r\n/g, '\n');
     const pp = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'pdfpages.js'), 'utf8');
     const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 
@@ -2108,8 +2111,16 @@ console.log('\n\x1b[1mTICKETS: MONITORING NEEDS WHO AND UNTIL WHEN (server)\x1b[
   t('nor the spares lines under tickets', g({ Status: 'Monitoring' }, null, { subSymbol: 'spares' }).ok, true);
   const atSrc = fs.readFileSync(path.join(__dirname, '..', 'api', 'at.js'), 'utf8');
   t('the proxy applies it on create and on update', (atSrc.match(/G\.guardTicketMonitoring\(/g) || []).length, 2);
-  t('on update, only after the scope check', atSrc.indexOf('G.guardTicketMonitoring({\n      tableSymbol, subSymbol: resolved.sub || null, fields, existing,')
-    > atSrc.indexOf("denialReason: 'scope_excluded'"), true);
+  // Anchored on structure rather than on whitespace. This once matched a literal slab of
+  // source including its line break, which api/at.js spells CRLF in a Windows checkout and LF
+  // elsewhere: indexOf returned -1, and -1 > anything is false, so it failed against correct
+  // code. It also measured against the first 'scope_excluded' in the file, which belongs to
+  // View; the update path's own one is the one that matters here.
+  const flatSrc = atSrc.replace(/\r\n/g, '\n');
+  const guardAt = flatSrc.indexOf('const monGuard = G.guardTicketMonitoring(');
+  const scopeAt = flatSrc.indexOf("action: 'Update', result: 'Denied', denialReason: 'scope_excluded'");
+  t('the update path has a scope check and the guard to order', guardAt > 0 && scopeAt > 0, true);
+  t('on update, only after the scope check', guardAt > scopeAt, true);
 }
 
 console.log('\n' + '='.repeat(70));
