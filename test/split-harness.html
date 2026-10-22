@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Split a PDF — browser harness</title>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/siteinfo.css">
+</head>
+<body>
+<!--
+  A browser harness for "Split a PDF" (siteinfo-split.js).
+
+  Loads the REAL core.js, mod-siteinfo.js, pdfpages.js (with the vendored pdf.js), pdfwrite.js,
+  siteinfo-batch.js and siteinfo-split.js into a real document, stubs only the network, and drives
+  test/fixtures/site-pack.pdf (4 pages: job card, bank statement, job card, bank statement photo)
+  through the screen. What node cannot show and this does:
+    - pdf.js renders every page, and the grid shows them
+    - every PDF pdfwrite.js produces -- each filed FICA page and each handed-on part -- opens in
+      pdf.js with the right number of pages
+    - the other pages arrive in the batch modal as if they had been dropped
+
+  The verdicts are stubbed (real OCR is exercised in test/verify-fica-split.js). Needs the window
+  drawing: pdf.js renders nothing in a hidden tab.
+
+  Open it with:  node scripts/ui-harness.js   then   http://localhost:4321/test/split-harness.html
+-->
+<div class="mod-siteinfo" id="modSiteInfo">
+  <div id="siListView">
+    <header class="si-topbar">
+      <h2>Site Information</h2>
+      <button class="si-btn" data-act="siSplit" type="button">Split a PDF</button>
+    </header>
+    <div id="siList" class="si-list"></div>
+  </div>
+  <div id="siDetail" hidden><div id="siDetailBody"></div></div>
+  <div id="siNew" hidden></div>
+</div>
+<pre id="harnessOut" style="padding:12px;font:12px/1.6 monospace;white-space:pre-wrap;"></pre>
+
+<script src="/js/core.js"></script>
+<script>
+window.__sent = [];
+TX.me = () => ({ user: { email: 'harness@tagexenergy.co.za', fullName: 'Harness', canViewRestricted: true },
+                 role: { name: 'Administrator' } });
+TX.can = () => true;
+// Page 2 reads as FICA, page 4 could not be read, 1 and 3 are other.
+const VERDICT = { 1: 'other', 2: 'fica', 3: 'other', 4: 'unsure' };
+TX.request = async (path, body) => {
+  window.__sent.push({ path, body });
+  if (path !== '/api/fica-docs') throw new Error('unexpected endpoint ' + path);
+  if (body.op === 'classify') {
+    return { ok: true, mayFile: window.__mayFile !== false,
+      pages: body.pages.map((p) => ({ page: p.page, verdict: VERDICT[p.page], reason: 'stub' })) };
+  }
+  if (body.op === 'create') return { ok: true, id: 'recFICA0000000001' };
+  if (body.op === 'attach') return { ok: true, id: body.id, page: body.page };
+  throw new Error('unexpected op ' + body.op);
+};
+TX.api = async (q) => (q.op === 'list'
+  ? { records: q.base === 'CI' ? [{ id: 'recSITE0000000001', fields: { 'Site Name': 'H68 BOERDERYE' } }] : [] }
+  : { records: [] });
+TX.list = (base, table, params, extra = {}) => TX.api({ op: 'list', base, table, params: params || {}, ...extra });
+</script>
+<script src="/js/mod-siteinfo.js"></script>
+<script src="/js/pdfpages.js"></script>
+<script src="/js/siteinfo-batch.js"></script>
+<script src="/js/pdfwrite.js"></script>
+<script src="/js/siteinfo-split.js"></script>
+<script>
+TX.siteinfo.start();
+
+(async () => {
+  const out = document.getElementById('harnessOut');
+  let bad = 0;
+  const log = (l) => { out.textContent += l + '\n'; };
+  const t = (name, got, want) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (!ok) bad++;
+    log((ok ? '  ok    ' : '  FAIL  ') + name
+      + (ok ? '' : '\n          got ' + JSON.stringify(got) + '\n          want ' + JSON.stringify(want)));
+  };
+  const until = async (fn, ms) => {
+    const end = Date.now() + (ms || 30000);
+    while (Date.now() < end) { if (fn()) return true; await new Promise((r) => setTimeout(r, 100)); }
+    return false;
+  };
+  const b64bytes = (s) => { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+  // pdf.js, to open what the writer wrote. Loaded here as pdfpages.js would, since a stubbed render
+  // never loads it.
+  const pdfjs = () => window.pdfjsLib ? Promise.resolve(window.pdfjsLib) : new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = TX.pdfPages.LIB;
+    s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = TX.pdfPages.WORKER; res(window.pdfjsLib); };
+    s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  const pagesIn = async (bytes) => (await (await pdfjs()).getDocument({ data: bytes, isEvalSupported: false }).promise).numPages;
+
+  try {
+    // ?stubRender=1 swaps pdf.js's PAINTING (only) for the fixture JPEGs, for a pane that is not
+    // on screen: pdf.js parses there but draws nothing. Said loudly, because a skipped render must
+    // never read as a passing one. Everything after the paint -- the grid, the choices, filing,
+    // the writer's PDFs opened in pdf.js, the hand-off -- still runs for real.
+    if (/stubRender=1/.test(location.search)) {
+      log('  SKIPPED  real page rendering (stubRender=1): pages are the fixture JPEGs');
+      const jpg = async (n) => (await fetch('/test/fixtures/' + n)).blob();
+      const card = await jpg('jobcard.jpg'); const bank = await jpg('bank-statement.jpg');
+      const dims = async (b) => { const i = await createImageBitmap(b); return { width: i.width, height: i.height }; };
+      const dc = await dims(card); const db = await dims(bank);
+      TX.pdfPages.render = async (f, o) => {
+        const pages = [card, bank, card, bank].map((blob, i) => Object.assign({ page: i + 1, blob }, i % 2 ? db : dc));
+        if (o && o.onProgress) o.onProgress(4, 4);
+        return { pages, total: 4 };
+      };
+    }
+    await TX.siteinfo.reload();
+    log('SPLIT A PDF');
+    document.querySelector('[data-act="siSplit"]').click();
+    t('the modal opens', !!document.getElementById('siSplitModal'), true);
+
+    const blob = await (await fetch('/test/fixtures/site-pack.pdf')).blob();
+    const file = new File([blob], 'H68 site pack.pdf', { type: 'application/pdf' });
+    const input = document.getElementById('splitFile');
+    const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files;
+    input.dispatchEvent(new Event('change'));
+
+    t('every page is rendered and read', await until(() => TX.sitesplit.state().STAGE === 'review'), true);
+    const figs = [...document.querySelectorAll('.si-split-page')];
+    t('the grid shows all four pages', figs.length, 4);
+    // Decoded rather than waited for: the grid's images are loading="lazy", which a background
+    // page never gets round to.
+    const decoded = [];
+    for (const f of figs) {
+      const src = f.querySelector('img').src;
+      try { decoded.push(/^blob:/.test(src) && (await createImageBitmap(await (await fetch(src)).blob())).width > 0); }
+      catch (e) { decoded.push(false); }
+    }
+    t('each with a picture of its page', decoded, [true, true, true, true]);
+    t('pages are read three to a request at most',
+      window.__sent.filter((s) => s.body.op === 'classify').map((s) => s.body.pages.length), [3, 1]);
+    t('page 2 (FICA) and page 4 (unsure) start as FICA; 1 and 3 as other',
+      figs.map((f) => f.className.replace('si-split-page ', '')), ['other', 'fica', 'other', 'fica']);
+    t('the unsure page is called out', /1 page was too hard to read/.test(document.getElementById('splitBody').textContent), true);
+
+    // The person looks at page 3 and decides it is FICA after all.
+    document.querySelector('[data-act="siSplitSet"][data-a1="3"][data-a2="fica"]').click();
+    t('a person can move a page', TX.sitesplit.state().PAGES.map((p) => p.choice), ['other', 'fica', 'fica', 'fica']);
+    t('filing waits for a site', document.querySelector('[data-act="siSplitFile"]').disabled, true);
+    const sel = document.getElementById('splitSite');
+    t('the site list offers sites from every base', [...sel.options].map((o) => o.value), ['', 'CI:recSITE0000000001']);
+    sel.value = 'CI:recSITE0000000001';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('[data-act="siSplitFile"]').click();
+    t('the FICA pages are filed', await until(() => /Filed in FICA Documents: 3 pages/.test(document.getElementById('splitBody').textContent)), true);
+
+    const create = window.__sent.find((s) => s.body.op === 'create').body;
+    t('one record for the source PDF, against the chosen site', [create.siteBase, create.siteId, create.sourceFile, create.pageCount, create.pages],
+      ['CI', 'recSITE0000000001', 'H68 site pack.pdf', 4, [2, 3, 4]]);
+    const attaches = window.__sent.filter((s) => s.body.op === 'attach');
+    t('one attach per page', attaches.map((s) => s.body.page), [2, 3, 4]);
+    const counts = [];
+    for (const a of attaches) counts.push(await pagesIn(b64bytes(a.body.content)));
+    t('each filed page opens in pdf.js as a one-page PDF', counts, [1, 1, 1]);
+    t('once filed, a page can no longer be moved', document.querySelector('[data-act="siSplitSet"]').disabled, true);
+
+    // The other page goes on to the ordinary import.
+    document.querySelector('[data-act="siSplitOn"][data-a1="site"]').click();
+    t('the batch modal opens in its place', await until(() => !!document.getElementById('siBatchModal') && !document.getElementById('siSplitModal')), true);
+    const files = TX.sitebatch.state().FILES.map((r) => r.file);
+    t('holding the other pages, named for them', files.map((f) => f.name), ['H68 site pack — page 1.pdf']);
+    t('which open in pdf.js with the right page count', await pagesIn(new Uint8Array(await files[0].arrayBuffer())), 1);
+    t('nothing but /api/fica-docs was called', window.__sent.every((s) => s.path === '/api/fica-docs'), true);
+    TX.sitebatch.close();
+
+    // Someone who may not file: told so, and the FICA pages are never uploaded.
+    log('\nWITHOUT THE DOUBLE GATE');
+    window.__mayFile = false; window.__sent = [];
+    TX.me = () => ({ user: { email: 'tech@tagexenergy.co.za', canViewRestricted: false }, role: { name: 'Technician' } });
+    TX.can = (m) => m !== 'restricted_personal';
+    document.querySelector('[data-act="siSplit"]').click();
+    const input2 = document.getElementById('splitFile');
+    const dt2 = new DataTransfer(); dt2.items.add(file); input2.files = dt2.files;
+    input2.dispatchEvent(new Event('change'));
+    await until(() => TX.sitesplit.state().STAGE === 'review');
+    t('they are told the FICA pages will not be uploaded',
+      /These pages will not be uploaded/.test(document.getElementById('splitBody').textContent), true);
+    t('and offered no way to file them', !!document.querySelector('[data-act="siSplitFile"]'), false);
+    document.querySelector('[data-act="siSplitOn"][data-a1="jobcard"]').click();
+    await until(() => !!document.getElementById('siBatchModal'));
+    t('the other pages still go on', TX.sitebatch.state().FILES.map((r) => r.file.name), ['H68 site pack — pages 1, 3.pdf']);
+    t('and no FICA page was sent anywhere but to be read',
+      window.__sent.every((s) => s.body.op === 'classify'), true);
+    TX.sitebatch.close();
+  } catch (e) {
+    bad++;
+    log('  CRASH ' + (e && e.stack || e));
+  }
+  log('\n' + (bad ? bad + ' FAILED' : 'ALL PASSED'));
+  window.__done = { bad };
+})();
+</script>
+</body>
+</html>

@@ -372,7 +372,7 @@
     const files = [];
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
-      const name = stem() + ' — pages ' + ranges(g.map((p) => p.page))
+      const name = stem() + (g.length === 1 ? ' — page ' : ' — pages ') + ranges(g.map((p) => p.page))
         + (groups.length > 1 ? ' (part ' + (i + 1) + ' of ' + groups.length + ')' : '') + '.pdf';
       files.push(new File([await pdfOf(g)], name, { type: 'application/pdf' }));
     }
