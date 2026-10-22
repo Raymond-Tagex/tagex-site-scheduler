@@ -888,7 +888,10 @@ console.log('\n\x1b[1mSITE SIGNING LINKS\x1b[0m\n');
 
   // ── and the client sends them ────────────────────────────────────────────
   {
-    const cl = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'siteinfo-batch.js'), 'utf8');
+    // LF, whatever the checkout: on CRLF the '\n\s*\};' below can never match, so the "false"
+    // it asserts would hold however the request was built.
+    const cl = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'siteinfo-batch.js'), 'utf8')
+      .replace(/\r\n/g, '\n');
     const pp = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'pdfpages.js'), 'utf8');
     const page = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
 
