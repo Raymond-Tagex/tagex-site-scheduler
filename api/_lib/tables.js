@@ -162,6 +162,13 @@ const TABLES = {
       direct_purchases:   'tblBMNIQ5rgTZ9BhG', // personal details + FICA Uploaded
       commercial_leads:   'tblANaQPamedxc8xV', // contact person, phone, email
     },
+    // FICA pages split out of scanned PDFs (api/fica-docs.js), for sites in EVERY base. One
+    // table, in O&M only (Raymond, 22 Oct 2026): personal documents kept in one place rather
+    // than three, referenced by Site Base + Site Record ID since Airtable cannot link across
+    // bases. O&M-only, so it is in OM_ONLY below and RES never mirrors it.
+    OM: {
+      fica_documents:     'tbl5z9m0gfMV6QPXB',
+    },
   },
 
   // ── Identity base — IAM only ────────────────────────────────
@@ -325,9 +332,16 @@ const SCOPE_FIELDS = {
 //
 // This holds only while the bases stay identical. A table or field added to one and not the
 // other must be mapped explicitly; test/verify-res-mirror.js compares the live schemas.
+//
+// OM_ONLY is the deliberate exception: a module whose O&M table is the single store for every
+// base. Mirroring it would point RES at a table id that does not exist there -- and for FICA
+// data, would open a second door to it.
 // ─────────────────────────────────────────────────────────────
+const OM_ONLY = new Set(['restricted_personal']);
+
 function mirrorOmToRes(map) {
-  for (const entry of Object.values(map)) {
+  for (const [key, entry] of Object.entries(map)) {
+    if (OM_ONLY.has(key)) continue;
     if (!entry || typeof entry !== 'object') continue;
     if ('OM' in entry && !('RES' in entry)) entry.RES = entry.OM;
     // SCOPE_FIELDS nests per-base maps one level down ({ ownerEmail: { CI, OM } }).
@@ -615,6 +629,7 @@ function expandFieldRules(rule, module, baseSymbol) {
 module.exports = {
   BASES,
   OPS_BASES,
+  OM_ONLY,
   SCHEDULER_BASES,
   schedulerBase,
   TABLES,

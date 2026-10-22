@@ -49,6 +49,24 @@ pdf.js vendored under `public/vendor/`) and the server reads those. Pages are sa
 front of the document **plus a spread through the rest**, because a bank statement bound into
 the back of a long agreement has to reach the FICA check.
 
+## FICA pages are split out of a scan, not refused with it
+
+Site Information → **Split a PDF** (`public/js/siteinfo-split.js`, `api/fica-docs.js`) renders every
+page, asks the server for a verdict per page (FICA / other / unsure), and has a person confirm each
+one. **Unsure starts as FICA**: unreadable never clears. Confirmed FICA pages are filed in **FICA
+Documents** (`tbl5z9m0gfMV6QPXB`), one record per source PDF and one PDF per page. The other
+pages are handed to the existing import flows, which check every file again on the server.
+
+- **One table, in O&M only, for sites in every base** (Raymond, 22 Oct 2026). A site is named
+  by Site Base + Site Record ID because Airtable cannot link across bases.
+  `restricted_personal` is in `OM_ONLY` in `tables.js`, so RES never mirrors it.
+- **Both flags, always.** The endpoint requires the role's and the person's Can View Restricted
+  Documents flags whatever the rule's `require_user_flag` says. Anyone else is told that their
+  FICA pages will not be uploaded, and they are dropped.
+- **classify writes nothing and never returns the text it read.** On an ID page that text is the
+  ID number. `open` returns bytes rather than Airtable's link, because that link works for anyone
+  holding it for hours. `index` and `open` are both audited as Restricted Document Viewed.
+
 ## Layout
 
 ```
@@ -127,7 +145,7 @@ on a third party being up stops working for reasons nobody here can fix. Keep it
 ## Testing
 
 ```bash
-npm test                       # eight node suites; verify-part-c needs AIRTABLE_PAT
+npm test                       # nine node suites; verify-part-c needs AIRTABLE_PAT
 node scripts/ui-harness.js     # then http://localhost:4321/test/<name>.html
 ```
 

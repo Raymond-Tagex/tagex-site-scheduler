@@ -40,6 +40,9 @@
   // A ceiling on the render, not on the document. A 300-page file is opened and its first pages
   // read; the old path refused the whole thing because the FILE was too big to send.
   const MAX_PAGES = 12;
+  // Splitting a PDF (siteinfo-split.js) needs every page, not a sample: a page that is never
+  // rendered is a page nobody decided about. This ceiling is what a browser holds comfortably.
+  const ALL_MAX_PAGES = 80;
 
   let libPromise = null;
 
@@ -93,8 +96,12 @@
    * Render a PDF's pages to JPEG.
    *
    * @param {File|Blob} file
-   * @param {{front?:number, sample?:number, onProgress?:function}} [opts]
-   * @returns {Promise<{pages:Array<{page:number, blob:Blob}>, total:number}>}
+   * `all` renders every page up to ALL_MAX_PAGES instead of the sampled plan, and refuses a
+   * longer file rather than quietly splitting part of it.
+   *
+   * @param {File|Blob} file
+   * @param {{front?:number, sample?:number, all?:boolean, onProgress?:function}} [opts]
+   * @returns {Promise<{pages:Array<{page:number, blob:Blob, width:number, height:number}>, total:number}>}
    */
   async function render(file, opts) {
     const o = opts || {};
@@ -115,7 +122,14 @@
         : 'That PDF could not be opened. It may be damaged.');
     }
 
-    const plan = pagePlan(doc.numPages, front, sample);
+    if (o.all && doc.numPages > ALL_MAX_PAGES) {
+      try { await doc.destroy(); } catch (e) { /* already gone */ }
+      throw new Error('That PDF has ' + doc.numPages + ' pages. Split files of up to '
+        + ALL_MAX_PAGES + ' pages at a time.');
+    }
+    const plan = o.all
+      ? Array.from({ length: doc.numPages }, (x, i) => i + 1)
+      : pagePlan(doc.numPages, front, sample);
     const pages = [];
 
     for (const n of plan) {
@@ -148,7 +162,7 @@
       page.cleanup();
 
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', QUALITY));
-      if (blob) pages.push({ page: n, blob });
+      if (blob) pages.push({ page: n, blob, width: canvas.width, height: canvas.height });
       if (o.onProgress) o.onProgress(pages.length, plan.length);
     }
 
@@ -156,5 +170,5 @@
     return { pages, total: doc.numPages };
   }
 
-  TX.pdfPages = { render, isPdf, pagePlan, EDGE, QUALITY, MAX_PAGES, LIB, WORKER };
+  TX.pdfPages = { render, isPdf, pagePlan, EDGE, QUALITY, MAX_PAGES, ALL_MAX_PAGES, LIB, WORKER };
 })();

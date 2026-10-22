@@ -117,7 +117,13 @@ console.log('\n\x1b[1mSYMBOL RESOLUTION\x1b[0m\n');
 t('restricted_personal without a sub symbol is refused', T.resolve('CI', 'restricted_personal').reason, 'sub_symbol_required');
 t('restricted_personal with a valid sub resolves', T.resolve('CI', 'restricted_personal', 'financial_vetting').tableId, 'tblVUssahq7fBFOQh');
 t('unknown sub symbol is refused', T.resolve('CI', 'restricted_personal', 'nope').reason, 'unknown_symbol');
-t('FICA is not reachable in the O&M base', T.resolve('OM', 'restricted_personal', 'financial_vetting').reason, 'wrong_base');
+// O&M has held one restricted table since 22 Oct 2026, FICA Documents (split out of scans by
+// api/fica-docs.js). C&I's FICA tables are still unreachable through O&M, and that one is
+// reachable only there: not through C&I, and never through RES.
+t('C&I FICA is not reachable in the O&M base', T.resolve('OM', 'restricted_personal', 'financial_vetting').ok, false);
+t('FICA Documents resolves in O&M', T.resolve('OM', 'restricted_personal', 'fica_documents').tableId, 'tbl5z9m0gfMV6QPXB');
+t('and not through C&I', T.resolve('CI', 'restricted_personal', 'fica_documents').ok, false);
+t('and not through RES', T.resolve('RES', 'restricted_personal', 'fica_documents').reason, 'wrong_base');
 t('identity tables are not reachable from an operational base', T.resolve('CI', 'users').reason, 'wrong_base');
 // This used to name 'tickets'. Tickets now exist, so the example had to move to a module that
 // is still only a line in the permission matrix — otherwise the assertion quietly stopped
