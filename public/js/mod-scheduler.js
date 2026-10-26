@@ -1525,13 +1525,65 @@ let omTktFilter='OPEN', omTktSearchQ='', omTktDetailId=null;
 let omTktSpares=[];
 let omCurrentView='dash', omPrevView='dash', omDetailId=null, omLoaded=false;
 
+// ── Clients: the register ──
+//
+// Client lists read the one register (TAGEX Clients base) through /api/client-register, not this
+// base's own Clients table (CLAUDE.md, "One client register"). Each entry carries its copies in
+// this base: a job card or ticket links to one of those, never to the register, because links
+// cannot cross bases. A client with no copy here yet has id '' and is offered as "reg:<id>"; one
+// is made on the server when it is first used. If the register cannot be read the lists fall back
+// to this base's Clients, as before, so nobody is stopped from working.
+
+/** A client's value in a picker: its copy in this base, or "reg:<register id>" until it has one. */
+const omCliVal=(c)=>c.id||('reg:'+c.regId);
+const omCliByVal=(v)=>v?omCliData.find(c=>omCliVal(c)===v)||null:null;
+/** The client a link in this base points at, by any of its copies. */
+const omCliByLink=(id)=>id?omCliData.find(c=>c.mirrors.includes(id))||null:null;
+const omCliName=(c)=>omFstr(c.fields,OM_F.CL_NAME)||'(unnamed)';
+
+async function omLoadClients(){
+  try{
+    const r=await TX.request('/api/client-register',{op:'list',base:SCHED_BASE});
+    if(r&&Array.isArray(r.clients)) return r.clients.map(c=>({
+      id:(c.mirrors||[])[0]||'', regId:c.id||'', mirrors:c.mirrors||[], status:c.status||'Active',
+      contracts:c.contracts||[], unregistered:!!c.unregistered,
+      fields:{[OM_F.CL_NAME]:c.name||'',[OM_F.CL_CONT]:c.contact||'',[OM_F.CL_EMAIL]:c.email||'',[OM_F.CL_SITE]:c.sites||''},
+    }));
+  }catch(e){ console.warn('Client register unavailable; reading this base\u2019s Clients instead.',e); }
+  const rows=await omFetchAll(OM_T.CLI,[OM_F.CL_NAME,OM_F.CL_CONT,OM_F.CL_EMAIL],true);
+  return rows.map(r=>({id:r.id,regId:'',mirrors:[r.id],status:'Active',contracts:[],fallback:true,fields:r.fields}));
+}
+
+/**
+ * The clients a picker offers. One with no copy in this base needs clients:create to be given
+ * one, so a role without it is offered only clients it can link to now -- rather than a choice
+ * that fails when the form is saved.
+ */
+function omPickableClis(){
+  const mayCopy=TX.can('clients','create');
+  return omCliData.filter(c=>c.status!=='Inactive'&&(c.id||mayCopy))
+    .sort((a,b)=>omCliName(a).localeCompare(omCliName(b)));
+}
+/** Name, then contract numbers, so typing "SUB-148" in a picker finds the client. */
+const omCliLabel=(c)=>omCliName(c)+(c.contracts&&c.contracts.length?' \u00b7 '+c.contracts.slice(0,4).join(', ')+(c.contracts.length>4?'\u2026':''):'');
+
+/** This base's record for a picker value, making the copy first when there is none. */
+async function omResolveCli(v){
+  const c=omCliByVal(v);
+  if(!c) throw new Error('That client is no longer in the list. Reload and choose again.');
+  if(c.id) return c.id;
+  const r=await TX.request('/api/client-register',{op:'ensure',base:SCHED_BASE,clientId:c.regId});
+  c.id=r.mirrorId; c.mirrors=[r.mirrorId].concat(c.mirrors);
+  return c.id;
+}
+
 // ── API: see the shim at the top of this file ──
 async function omLoadAll(silent){
   if(!silent) omSetDot('loading');
   try{
     const[jcR,clR,ppR]=await Promise.all([
       omFetchAll(OM_T.JC,OM_JC_FIELDS,true),
-      omFetchAll(OM_T.CLI,[OM_F.CL_NAME,OM_F.CL_CONT,OM_F.CL_EMAIL],true),
+      omLoadClients(),
       omFetchAll(OM_T.PPL,[]),
     ]);
     omJcData=jcR; omCliData=clR; omPplData=ppR;
@@ -1797,8 +1849,7 @@ function omTktCli(rec){
   const jc=omTktJc(rec);
   const n=jc?omCli(jc.fields):'';
   if(n&&n!=='\u2014') return n;
-  const id=omLinkIds(rec.fields[TK.client])[0];
-  const c=id?omCliData.find(r=>r.id===id):null;
+  const c=omCliByLink(omLinkIds(rec.fields[TK.client])[0]);
   return c?omFstr(c.fields,OM_F.CL_NAME):'';
 }
 
@@ -2814,7 +2865,7 @@ function omTktNewJc(id){
   omGoView('newjc');
   omNjcForTkt=id;
   const set=(elId,v)=>{const e=document.getElementById(elId); if(e&&v) e.value=v;};
-  const cli=omLinkIds(f[TK.client])[0];
+  const tc=omCliByLink(omLinkIds(f[TK.client])[0]), cli=tc?omCliVal(tc):'';
   const cs=document.getElementById('njc-cli');
   if(cs&&cli&&[...cs.options].some(o=>o.value===cli)){ cs.value=cli; if(TX.pick) TX.pick.refresh(cs); omCliPick(); }
   set('njc-title',omFstr(f,TK.subject));
@@ -3357,11 +3408,10 @@ function omPopTktCliDropdown(){
   const sel=document.getElementById('om-clisel');
   if(!sel)return;
   const was=sel.value;
-  const clients=omCliData.map(r=>({id:r.id,name:omFstr(r.fields,OM_F.CL_NAME)||'(unnamed)'}))
-    .sort((a,b)=>a.name.localeCompare(b.name));
+  const clients=omPickableClis();
   sel.innerHTML='<option value="">\u2014 Select client \u2014</option>'
-    +clients.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join('');
-  if(was&&clients.some(c=>c.id===was)) sel.value=was;
+    +clients.map(c=>'<option value="'+esc(omCliVal(c))+'">'+esc(omCliLabel(c))+'</option>').join('');
+  if(was&&clients.some(c=>omCliVal(c)===was)) sel.value=was;
   if(TX.pick) TX.pick.refresh(sel);
 }
 /** A client chosen first narrows the job cards to that client's, and drops one that is not. */
@@ -3369,7 +3419,8 @@ function omTktCliPick(sel){
   const cli=sel.value;
   if(omSelJCId&&cli){
     const jc=omJcData.find(r=>r.id===omSelJCId);
-    if(!jc||!omLinkIds(jc.fields[OM_F.JC_CLI]).includes(cli)){
+    const mir=(omCliByVal(cli)||{mirrors:[]}).mirrors;
+    if(!jc||!omLinkIds(jc.fields[OM_F.JC_CLI]).some(id=>mir.includes(id))){
       omSelJCId='';
       const p=document.getElementById('om-jcprev'); if(p) p.style.display='none';
     }
@@ -3381,8 +3432,10 @@ function omPopJCDropdown(){
   if(!sel)return;
   const cliSel=document.getElementById('om-clisel');
   const cli=cliSel?cliSel.value:'';
+  // A client's job cards may link to any of its copies in this base.
+  const mir=cli?(omCliByVal(cli)||{mirrors:[]}).mirrors:null;
   sel.innerHTML='<option value="">— Select Job Card ('+TX.esc(SCHED_LABEL)+') —</option>';
-  [...omJcData].filter(r=>!cli||omLinkIds(r.fields[OM_F.JC_CLI]).includes(cli)).sort((a,b)=>(b.fields[OM_F.JC_REF]||'').localeCompare(a.fields[OM_F.JC_REF]||'')).forEach(r=>{
+  [...omJcData].filter(r=>!mir||omLinkIds(r.fields[OM_F.JC_CLI]).some(id=>mir.includes(id))).sort((a,b)=>(b.fields[OM_F.JC_REF]||'').localeCompare(a.fields[OM_F.JC_REF]||'')).forEach(r=>{
     const ref=r.fields[OM_F.JC_REF]||r.id,ttl=omFstr(r.fields,OM_F.JC_TITLE),stat=omFstr(r.fields,OM_F.JC_STAT),cli=omCli(r.fields),own=omFstr(r.fields,OM_F.JC_OWNER);
     const opt=document.createElement('option');
     opt.value=r.id; opt.dataset.ref=ref; opt.dataset.ttl=ttl; opt.dataset.stat=stat; opt.dataset.cli=cli; opt.dataset.own=own;
@@ -3398,7 +3451,7 @@ function omJCPick(sel){
   if(opt?.value){
     omSelJCId=opt.value;
     const jc=omJcData.find(r=>r.id===opt.value), cs=document.getElementById('om-clisel');
-    const cli=jc?omLinkIds(jc.fields[OM_F.JC_CLI])[0]:'';
+    const c=jc?omCliByLink(omLinkIds(jc.fields[OM_F.JC_CLI])[0]):null, cli=c?omCliVal(c):'';
     if(cs&&cli&&cs.value!==cli&&[...cs.options].some(o=>o.value===cli)){ cs.value=cli; if(TX.pick) TX.pick.refresh(cs); }
     prev.style.display='block';prev.innerHTML=`<strong style="color:var(--accent)">${opt.dataset.ref||opt.value}</strong><br>${opt.dataset.ttl||''}<br>🏢 ${opt.dataset.cli||'—'}${opt.dataset.own?' · Owner: <span style="color:#a16207">'+opt.dataset.own+'</span>':''}<br>Status: <span style="color:var(--accent)">${opt.dataset.stat||'—'}</span>`;}
   else{omSelJCId='';prev.style.display='none';}
@@ -3456,7 +3509,7 @@ async function omSubmit(){
     // rather than failing the save. With no job card, the client picked is the client.
     const jc=jcId?omJcData.find(r=>r.id===jcId):null;
     const jcCli=jc?omLinkIds(jc.fields[OM_F.JC_CLI]):[];
-    const cli=jcCli.length?jcCli:(cliId?[cliId]:[]);
+    const cli=jcCli.length?jcCli:(cliId?[await omResolveCli(cliId)]:[]);
 
     const f={
       [TK.channel]:omChannel,
@@ -3554,10 +3607,21 @@ async function omCliTab(el,tab){document.querySelectorAll('.om-tab').forEach(t=>
 async function omRenderCli(tab){
   const el=document.getElementById('om-cli');
   if(tab==='clients'){
-    el.innerHTML=omCliData.length?omCliData.map(r=>{
-      const f=r.fields,n=f[OM_F.CL_NAME]||f['Name']||'—',c=f[OM_F.CL_CONT]||'',em=f[OM_F.CL_EMAIL]||'';
-      return`<div class="om-clic"><div style="font-size:13px;font-weight:500;margin-bottom:3px;">${n}</div>${c?`<div style="font-family:monospace;font-size:9px;color:var(--muted)">👤 ${c}</div>`:''} ${em?`<div style="font-family:monospace;font-size:9px;color:var(--muted)">✉ ${em}</div>`:''}</div>`;
-    }).join(''):'<div class="om-empty">No clients</div>';
+    // The register, not this base's copies: every client, with its contracts, and whether this
+    // base has a copy yet. Escaped -- client details are typed by people and imported from files.
+    const src=omCliData.some(c=>c.fallback)?'This base\u2019s clients (the client register could not be read)'
+      :'Client register \u00b7 '+omCliData.length+' clients';
+    const m=(s)=>'<div style="font-family:monospace;font-size:9px;color:var(--muted)">'+s+'</div>';
+    el.innerHTML='<div class="om-hint" style="margin-bottom:8px">'+esc(src)+'</div>'+(omCliData.length
+      ?omCliData.slice().sort((a,b)=>omCliName(a).localeCompare(omCliName(b))).map(r=>{
+        const f=r.fields,c=f[OM_F.CL_CONT]||'',em=f[OM_F.CL_EMAIL]||'';
+        return '<div class="om-clic"><div style="font-size:13px;font-weight:500;margin-bottom:3px;">'+esc(omCliName(r))+'</div>'
+          +(c?m('\ud83d\udc64 '+esc(c)):'')+(em?m('\u2709 '+esc(em)):'')
+          +(r.contracts&&r.contracts.length?m('\ud83d\udcc4 '+esc(r.contracts.join(', '))):'')
+          +(r.unregistered?m('Not in the register yet'):!r.id&&!r.fallback?m('No copy in '+esc(SCHED_LABEL)+' yet \u2014 made when first used'):'')
+          +'</div>';
+      }).join('')
+      :'<div class="om-empty">No clients</div>');
   }else if(tab==='people'){
     el.innerHTML=omPplData.length?omPplData.map(r=>{
       const f=r.fields,n=f['Name']||'—',role=f['Role']||'',em=f['Email']||'',ph=f['Phone']||'';
@@ -3707,8 +3771,10 @@ function omRenderNewJC(){
   document.getElementById('njc-title').value='';
   // client list (existing + new)
   const sel=document.getElementById('njc-cli');
-  const clients=[...omCliData].map(r=>({id:r.id,name:omFstr(r.fields,OM_F.CL_NAME)||'(unnamed)'})).sort((a,b)=>a.name.localeCompare(b.name));
-  sel.innerHTML='<option value="">— Select client —</option>'+clients.map(c=>`<option value="${c.id}">${c.name.replace(/</g,'&lt;')}</option>`).join('')+'<option value="__new__">➕ New client…</option>';
+  const clients=omPickableClis();
+  sel.innerHTML='<option value="">— Select client —</option>'+clients.map(c=>'<option value="'+esc(omCliVal(c))+'">'+esc(omCliLabel(c))+'</option>').join('')
+    +(TX.can('clients','create')?'<option value="__new__">➕ New client…</option>':'');
+  if(TX.pick) TX.pick.refresh(sel);
   document.getElementById('njc-newcli').style.display='none';
   ['njc-clinew-name','njc-clinew-cont','njc-clinew-email','njc-clinew-site'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});
   document.getElementById('njc-msg').innerHTML='';
@@ -3735,12 +3801,25 @@ async function omSubmitNewJC(){
     if(cliVal==='__new__'){
       const cn=document.getElementById('njc-clinew-name').value.trim();
       if(!cn){ msg.innerHTML='<div class="om-err">⚠ New client name is required</div>'; btn.textContent='➕ Create Job Card in Airtable'; return; }
-      const cf={[OM_F.CL_NAME]:cn};
-      const cont=document.getElementById('njc-clinew-cont').value.trim(); if(cont)cf[OM_F.CL_CONT]=cont;
-      const em=document.getElementById('njc-clinew-email').value.trim(); if(em)cf[OM_F.CL_EMAIL]=em;
-      const st=document.getElementById('njc-clinew-site').value.trim(); if(st)cf[OM_F.CL_SITE]=st;
-      const cRec=await omPost(OM_T.CLI,cf);
-      clientId=cRec.id;
+      // A new client goes into the register first and gets its copy here; the server does
+      // both. A name already in the register is refused with that client named, so it is
+      // chosen rather than made twice.
+      const body={op:'create',base:SCHED_BASE,name:cn,
+        contact:document.getElementById('njc-clinew-cont').value.trim(),
+        email:document.getElementById('njc-clinew-email').value.trim(),
+        sites:document.getElementById('njc-clinew-site').value.trim()};
+      try{
+        clientId=(await TX.request('/api/client-register',body)).mirrorId;
+      }catch(e){
+        if(e&&e.reason==='client_exists'){
+          msg.innerHTML='<div class="om-err">\u26a0 '+esc((e.payload&&e.payload.name)||cn)
+            +' is already in the client register. Choose them from the client list.</div>';
+          btn.textContent='➕ Create Job Card in Airtable'; return;
+        }
+        throw e;
+      }
+    }else{
+      clientId=await omResolveCli(cliVal);
     }
     // 2. assemble job card fields (write by field ID; selects as option-name strings)
     const f={[OM_F.JC_REF]:ref,[OM_F.JC_TITLE]:title,[OM_F.JC_CLI]:[clientId]};

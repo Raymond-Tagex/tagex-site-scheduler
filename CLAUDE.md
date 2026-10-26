@@ -112,7 +112,16 @@ register: **Clients** and **Contracts** (SUB/C&I numbers from the SxE cost log; 
   only** and reports differences; `--overwrite` once the register is checked, `--names` once its
   names are tidy. A client whose **Use In** lists a base without a copy gets one there. Run
   `load-client-register.js` with no spreadsheet to adopt clients added straight into a base.
-- **Not yet:** apps reading the register.
+- **This app reads the register** through `/api/client-register` (list / ensure / create), under
+  each role's `clients` rule with the proxy's own gates, field denies and record scope. The
+  register is **not a module**: its ids are `T.CLIENT_REGISTER`, outside `TABLES`, so `/api/at`
+  cannot resolve it and the role editor has no switch for it. A ticket or job card still links to
+  this base's copy; choosing a client with no copy here makes one (`ensure`), which needs
+  `clients:create` — so roles without it are offered only clients that already have a copy. A new
+  client is made in the register first (`create`); a name already there is refused with that
+  client named. If the register cannot be read, the lists fall back to the base's own Clients.
+- **Not yet:** the other apps (delivery, residential, RMA, C&I scheduler) and Site Information's
+  client matching, which still read their own base's Clients.
 - The cost log holds personal information. It is read from the .xlsx and never committed.
 
 ## Printed forms are made when the record is

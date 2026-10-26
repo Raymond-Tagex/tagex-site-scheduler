@@ -332,9 +332,10 @@ const FULL = {
     t('and the ticket form sits behind the same export check as the report',
       tkApi.indexOf("P.can(auth.perms, 'tickets', 'export')") < tkApi.indexOf('body.form === true'), true);
     // Still one endpoint each: the Hobby plan allows twelve functions. The eighth is
-    // fica-docs.js (splitting FICA pages out of a scan), which is not a form.
+    // fica-docs.js (splitting FICA pages out of a scan), which is not a form; the ninth is
+    // client-register.js (the one client register, 26 Oct 2026). Raise this only on purpose.
     t('no new serverless function was added',
-      fs.readdirSync(path.join(__dirname, '..', 'api')).filter((f) => f.endsWith('.js')).length, 8);
+      fs.readdirSync(path.join(__dirname, '..', 'api')).filter((f) => f.endsWith('.js')).length, 9);
   }
 
   console.log('\n' + '='.repeat(70));
