@@ -22,54 +22,16 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const zlib = require('zlib');
 const T = require('../api/_lib/tables.js');
+const { call, all, inTens } = require('./_airtable.js');
 
+// With no spreadsheet it loads from the mirrors alone: that is how a client added straight into
+// a base's Clients table is adopted into the register and stamped.
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
 const xlsx = args.find((a) => /\.xlsx$/i.test(a));
 const reportAt = args.includes('--report') ? args[args.indexOf('--report') + 1] : null;
-if (!xlsx) { console.error('usage: load-client-register.js <cost-log.xlsx> [--report file] [--apply]'); process.exit(2); }
-
-// ── Airtable ───────────────────────────────────────────────────────────────
-
-function pat() {
-  if (process.env.AIRTABLE_PAT) return process.env.AIRTABLE_PAT;
-  const f = path.join(__dirname, '..', '.env.local');
-  const m = fs.existsSync(f) && /^AIRTABLE_PAT=(.*)$/m.exec(fs.readFileSync(f, 'utf8'));
-  if (!m) throw new Error('AIRTABLE_PAT is not set');
-  return m[1].trim().replace(/^"|"$/g, '');
-}
-const H = { Authorization: 'Bearer ' + pat(), 'Content-Type': 'application/json' };
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function call(method, url, body) {
-  for (let i = 0; ; i++) {
-    const r = await fetch('https://api.airtable.com/v0/' + url, { method, headers: H, body: body && JSON.stringify(body) });
-    if (r.status === 429 && i < 5) { await sleep(1000 * (i + 1)); continue; }
-    const j = await r.json();
-    if (!r.ok) throw new Error(method + ' ' + url + ' -> ' + r.status + ' ' + JSON.stringify(j));
-    await sleep(220);                        // five requests a second per base
-    return j;
-  }
-}
-async function all(base, table) {
-  const out = []; let off = '';
-  do {
-    const j = await call('GET', base + '/' + table + '?pageSize=100' + (off ? '&offset=' + off : ''));
-    out.push(...j.records); off = j.offset || '';
-  } while (off);
-  return out;
-}
-async function inTens(method, base, table, records) {
-  const out = [];
-  for (let i = 0; i < records.length; i += 10) {
-    const j = await call(method, base + '/' + table, { records: records.slice(i, i + 10), typecast: false });
-    out.push(...j.records);
-  }
-  return out;
-}
 
 // ── the spreadsheet ────────────────────────────────────────────────────────
 
@@ -166,7 +128,7 @@ const clean = (s) => bare(s).replace(/\s*-\s*$/, '');
 const PORTFOLIOS = ['PPA', 'Alpine', 'PrefCap', 'TxE'];
 
 (async () => {
-  const sheet = readCostLog(xlsx);
+  const sheet = xlsx ? readCostLog(xlsx) : [];
 
   const CLI = T.BASES.CLI;
   const meta = await call('GET', 'meta/bases/' + CLI + '/tables');
@@ -306,6 +268,8 @@ const PORTFOLIOS = ['PPA', 'Alpine', 'PrefCap', 'TxE'];
     if (e.records.CI.length) f['CI Client Record'] = ids(e)('CI');
     if (e.records.OM.length) f['OM Client Record'] = ids(e)('OM');
     if (e.records.RES.length) f['RES Client Record'] = ids(e)('RES');
+    // Every base it is already in needs it there; sync-client-register.js keeps those copies.
+    f['Use In'] = ['CI', 'OM', 'RES'].filter((s) => e.records[s].length);
     f.Source = [e.rows.length && 'SxE Cost Log 26 Oct 2026', e.records.CI.length && 'CI Clients',
       e.records.OM.length && 'OM Clients', e.records.RES.length && 'RES Clients'].filter(Boolean);
     if (e.conflicts.length) f.Notes = 'Loaded with differences between bases:\n' + e.conflicts.join('\n');

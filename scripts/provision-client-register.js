@@ -55,6 +55,9 @@ const CLIENT_FIELDS = [
   { name: 'CI Client Record', type: 'singleLineText' },
   { name: 'OM Client Record', type: 'singleLineText' },
   { name: 'RES Client Record', type: 'singleLineText' },
+  // Which operating bases need a copy. sync-client-register.js creates one where it is missing,
+  // which is how a client added here reaches the apps. Clearing a base never deletes its copy.
+  { name: 'Use In', type: 'multipleSelects', options: { choices: [{ name: 'CI' }, { name: 'OM' }, { name: 'RES' }] } },
   { name: 'Source', type: 'multipleSelects', options: { choices: [
     { name: 'SxE Cost Log 26 Oct 2026' }, { name: 'CI Clients' }, { name: 'OM Clients' }, { name: 'RES Clients' }, { name: 'Entered here' }] } },
 ];
