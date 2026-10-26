@@ -27,3 +27,6 @@ tmp/
 # Client site documents. These are FICA / POPIA material and must never enter version
 # control — keep them outside the repository, not merely untracked.
 /*.pdf
+
+# Client lists and cost logs carry personal information (POPIA). Read them, never commit them.
+docs/*.xlsx
