@@ -108,8 +108,11 @@ register: **Clients** and **Contracts** (SUB/C&I numbers from the SxE cost log; 
 - `scripts/provision-client-register.js` makes the tables; `scripts/load-client-register.js
   <cost-log.xlsx>` loads and stamps (dry run by default). It merges only on an exact name or a
   shared contract number; anything merely similar is reported, never merged.
-- **Not yet:** a sync that copies register edits down to the mirrors, and apps reading the
-  register. Until then a new client must be added to the register and to its base.
+- `scripts/sync-client-register.js` copies the register down. It **fills empty mirror fields
+  only** and reports differences; `--overwrite` once the register is checked, `--names` once its
+  names are tidy. A client whose **Use In** lists a base without a copy gets one there. Run
+  `load-client-register.js` with no spreadsheet to adopt clients added straight into a base.
+- **Not yet:** apps reading the register.
 - The cost log holds personal information. It is read from the .xlsx and never committed.
 
 ## Printed forms are made when the record is
