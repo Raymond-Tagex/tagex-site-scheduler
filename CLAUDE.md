@@ -96,6 +96,22 @@ it reloads the page**, so nothing cached from one base can be written into the o
 `mod-scheduler.js` names `SCHED_BASE`, never a literal; `/api/jobcard-form` and `/api/ticket-report`
 take `base` and refuse anything but O&M or RES (none named = O&M).
 
+## One client register: the TAGEX Clients base (`CLI`)
+
+Every app used to keep its own clients, and the bases drifted (65 in C&I, 159 in O&M, none in
+RES). Since 26 Oct 2026 (Raymond) the **TAGEX Clients** base (`app36yfax3oKYJOdI`) holds the one
+register: **Clients** and **Contracts** (SUB/C&I numbers from the SxE cost log; no money).
+
+- **Each base's Clients table stays**, because job cards, delivery notes, tickets and site
+  information link to it and links cannot cross bases. Each row's **Master Client ID** names its
+  register record; the register's `CI/OM/RES Client Record` fields point back.
+- `scripts/provision-client-register.js` makes the tables; `scripts/load-client-register.js
+  <cost-log.xlsx>` loads and stamps (dry run by default). It merges only on an exact name or a
+  shared contract number; anything merely similar is reported, never merged.
+- **Not yet:** a sync that copies register edits down to the mirrors, and apps reading the
+  register. Until then a new client must be added to the register and to its base.
+- The cost log holds personal information. It is read from the .xlsx and never committed.
+
 ## Printed forms are made when the record is
 
 Every job card and every ticket raised in the scheduler gets its printed form straight away

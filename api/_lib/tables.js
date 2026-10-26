@@ -24,6 +24,10 @@ const BASES = {
   // operations base: it carries no job cards, no delivery notes and no personal data, so the
   // only module mapped into it is stock_items.
   STK: 'appeEsQofgu9tgngN', // TAGEX – Palladium Stock Master
+  // The one client register (Raymond, 26 Oct 2026). Every base's Clients table is a mirror of
+  // it, kept by scripts/sync-client-register.js, because links cannot cross bases. No module is
+  // mapped into it yet, so nothing in the browser can read it: deny by default.
+  CLI: 'app36yfax3oKYJOdI', // TAGEX Clients
 };
 
 // ─────────────────────────────────────────────────────────────
