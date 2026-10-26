@@ -2063,7 +2063,7 @@ console.log('\n\x1b[1mEVERY JOB CARD AND CLIENT PICKER IS SEARCHABLE\x1b[0m\n');
     && !/^all\b|filter/i.test(s.label));
 
   t('the scan reads real markup, not an empty file', all.length > 8, true);
-  t('every job card and client picker was found', pickers.map((s) => s.id).sort(), ['mJC', 'njc-cli', 'om-jcsel']);
+  t('every job card and client picker was found', pickers.map((s) => s.id).sort(), ['mJC', 'njc-cli', 'om-clisel', 'om-jcsel']);
   t('and every one of them is searchable',
     pickers.filter((s) => !s.declared).map((s) => s.where + ' #' + s.id), []);
 

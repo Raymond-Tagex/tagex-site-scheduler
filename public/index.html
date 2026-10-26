@@ -380,8 +380,10 @@
           </div>
         </div>
         <div class="om-fcard">
-          <div class="om-fttl">Link to Job Card</div>
-          <div class="om-fld"><label>Job Card *</label><select id="om-jcsel" data-search="job cards" data-on="change" data-act="omJCPick" data-a1="@el"><option value="">— Select —</option></select></div>
+          <div class="om-fttl">Client and Job Card</div>
+          <div class="om-fld"><label>Client *</label><select id="om-clisel" data-search="clients" data-on="change" data-act="omTktCliPick" data-a1="@el"><option value="">— Select —</option></select></div>
+          <div class="om-fld"><label>Job Card</label><select id="om-jcsel" data-search="job cards" data-on="change" data-act="omJCPick" data-a1="@el"><option value="">— Select —</option></select>
+            <div class="om-hint">Optional. If a site visit is needed, attach or create one from the ticket later.</div></div>
           <div id="om-jcprev" class="om-jcprev"></div>
           <div class="om-fld" style="margin-top:8px"><label>Reported By</label><input type="text" id="om-rep" placeholder="Technician / client"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">

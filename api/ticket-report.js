@@ -40,6 +40,21 @@ const MAX_ACTS = 500;
 /** A link field as a plain array of record ids. */
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 
+/**
+ * Client names by record id. A ticket may be raised against a client before it has a job card,
+ * and then its own Client link is the only place its client is named. A role that cannot read
+ * clients gets an empty map, and the client is left blank as it was before.
+ */
+async function clientNames(auth, base) {
+  const out = {};
+  // Checked here, not left to readAll: filterReadFields with no rule returns every field.
+  if (!P.can(auth.perms, 'clients', 'view').ok) return out;
+  try {
+    for (const c of await readAll(auth, base, 'clients')) out[c.id] = R.str(c.fields['Client Name']);
+  } catch (e) { /* no client access */ }
+  return out;
+}
+
 /** Read one table's rows, already stripped of whatever this role may not read. */
 async function readAll(auth, base, moduleKey, sub, tableSymbolForRule) {
   const r = T.resolve(base, moduleKey, sub);
@@ -171,8 +186,16 @@ module.exports = async function handler(req, res) {
       activityNote = 'The activity log could not be read for this report.';
     }
 
+    // Only looked up when the job card does not already name the client.
+    let clientName = '';
+    if (!R.str(jobcard['Client Name']) && ids(ticket.fields.Client).length) {
+      const cn = await clientNames(auth, base);
+      clientName = ids(ticket.fields.Client).map((i) => cn[i]).filter(Boolean).join(', ');
+    }
+
     const payload = {
       ticket: ticket.fields,
+      clientName,
       ticketCreated: ticket.createdTime,
       jobcard,
       visits,
@@ -315,6 +338,9 @@ async function listReport(auth, ctx, base, list, res) {
       }
     } catch (e) { /* no visit or people access */ }
 
+    const cn = tickets.some((x) => !ids(x.fields['Job Card']).length && ids(x.fields.Client).length)
+      ? await clientNames(auth, base) : {};
+
     const rows = R.sortRows(tickets.map((x) => {
       const f = x.fields;
       const jc = jcs[ids(f['Job Card'])[0]] || {};
@@ -322,7 +348,7 @@ async function listReport(auth, ctx, base, list, res) {
         ref: R.str(f['Ticket Ref']),
         reportedAt: f['Reported At'] || null,
         closedAt: f['Closed At'] || null,
-        client: R.str(jc['Client Name']),
+        client: R.str(jc['Client Name']) || ids(f.Client).map((i) => cn[i]).filter(Boolean).join(', '),
         jc: R.str(jc['JC Reference']),
         tech: techOf[x.id] || '',
         subject: R.str(f.Subject),

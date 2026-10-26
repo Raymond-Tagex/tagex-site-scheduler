@@ -113,6 +113,11 @@ downloaded. Reprints from the Print buttons are never filed.
 - One filed copy per name ("Job Card form — REF", "Ticket form — TKT-…"); a failed upload is
   retired with Record Status = Deleted, never deleted. Document Type is "Other" because the
   select has no "Job Card" choice and the API cannot add one.
+- **A ticket needs a client, not a job card** (Raymond, 26 Oct 2026). Many faults are settled
+  remotely; a job card is made only when somebody must go to site, from the ticket ("Create job
+  card for this ticket") or by attaching one (`omTktLinkJc`). Until then the ticket's own Client
+  link names the client, its form is downloaded but not filed (`no_job_card`), and it is filed on
+  attach.
 - Both forms open with the TAGEX logo, laid out as the delivery note's head
   (`api/_lib/assets/tagex-logo.png`, copied from tagex-delivery). It is read from disk, so
   `vercel.json` ships it with `jobcard-form.js` and `ticket-report.js` via `includeFiles` — a
