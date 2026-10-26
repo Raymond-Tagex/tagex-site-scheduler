@@ -112,6 +112,13 @@ const JOBCARDS = [
       [FID.jcClientName]:['Standerton'], [FID.jcStatus]:'Cancelled' } },
 ];
 
+// Clients, by field id as omLoadAll asks for them. recCLI2 has no job card at all: a ticket
+// raised for it can only be raised against the client.
+const CLIENTS = [
+  { id:'recCLI1', fields:{ fldKeSstygWbQ07lm:'Grootvlei' } },
+  { id:'recCLI2', fields:{ fldKeSstygWbQ07lm:'Delmas Dairy' } },
+];
+
 const TICKETS = [
   { id:'recTKTa', createdTime:'2026-09-20T06:00:00.000Z', fields:{
       [FID.ref]:'TKT-2026-0007', [FID.jc]:['recJC1'], [FID.subject]:'Inverter alarm 0x33',
@@ -287,7 +294,7 @@ function stubTX() {
     window.FORMS.push({ url, body: JSON.parse(JSON.stringify(body)) });
     if (window.FAIL_FORM) throw new Error(window.FAIL_FORM);
     return { content: btoa('%PDF-1.4\n'), filename: 'form.pdf', contentType: 'application/pdf',
-      filed: { ok: true, reason: '', detail: '', documentId: 'recDOC1' } };
+      filed: window.FORM_FILED || { ok: true, reason: '', detail: '', documentId: 'recDOC1' } };
   };
   const realBlobUrl = URL.createObjectURL.bind(URL);
   URL.createObjectURL = (b) => { window.BLOBS += 1; return realBlobUrl(b); };
@@ -302,6 +309,7 @@ function stubTX() {
     }
     if (q.op === 'list' || q.op === 'get') {
       if (q.table === 'job_cards') return { records: JOBCARDS };
+      if (q.table === 'clients') return { records: CLIENTS };
       if (q.table === 'activity_log') return { records: ACTS };
       if (q.table === 'tickets' && q.sub === 'ticket') return { records: TICKETS };
       if (q.table === 'tickets' && q.sub === 'spares') {
@@ -444,6 +452,7 @@ async function suite(log) {
     $('om-err').value = o.err || '';
     $('om-chandetail').value = o.detail || '';
     if (o.reportedAt !== undefined) $('om-reportedat').value = o.reportedAt;
+    $('om-clisel').value = o.cli || '';
     $('om-jcsel').value = o.jc || '';
     if (o.chan) tap(chip('om-chanopt', o.chan));
     if (o.pri) tap(chip('om-priopt', o.pri));
@@ -507,7 +516,7 @@ async function suite(log) {
 
   fill({ cat:'Inverter Fault', subj:'No job card', chan:'Email' });
   await submit();
-  t('a missing job card refuses', /Select a Job Card/.test(msg()), true);
+  t('neither a client nor a job card refuses', /Select a client/.test(msg()), true);
 
   log('\nA GOOD TICKET');
   window.SENT = [];
@@ -574,6 +583,37 @@ async function suite(log) {
   const tk2 = lastCreate('tickets:ticket');
   t('the ticket is still created', !!tk2, true);
   t('with no client link rather than an empty one', FID.client in tk2.fields, false);
+
+  log('\nA TICKET FOR A CLIENT, WITH NO JOB CARD YET');
+  t('the client picker is searchable', !!$('om-clisel').__txPick, true);
+  t('and holds the clients', [...$('om-clisel').options].map((o) => o.value).filter(Boolean), ['recCLI2', 'recCLI1']);
+  window.SENT = [];
+  window.FORMS = [];
+  window.FORM_FILED = { ok: false, reason: 'no_job_card', detail: 'It has no job card to be filed against.' };
+  fill({ cat:'Inverter Fault', subj:'Phoned in, no visit yet', chan:'Phone Call', cli:'recCLI2' });
+  await submit();
+  await settle(6);
+  window.FORM_FILED = null;
+  const tk3 = lastCreate('tickets:ticket');
+  t('the ticket is created', !!tk3, true);
+  t('against the client picked', tk3 && tk3.fields[FID.client], ['recCLI2']);
+  t('with no job card link rather than an empty one', !!tk3 && FID.jc in tk3.fields, false);
+  const al3 = lastCreate('activity_log');
+  t('its entry is written', !!al3, true);
+  t('linked to the ticket and to no job card', !!al3 && FID.alJc in al3.fields, false);
+  t('its form is still built', window.FORMS.length, 1);
+  t('and the screen does not call the unfiled form a failure', /not saved/.test(msg()), false);
+  t('but says it is filed once a job card is attached', /once one is attached/.test(msg()), true);
+
+  log('\nTHE CLIENT AND THE JOB CARD AGREE');
+  const change = async (el, v) => { el.value = v; el.dispatchEvent(new Event('change', { bubbles:true })); await tick(); };
+  await change($('om-jcsel'), 'recJC1');
+  t('picking a job card names its client', $('om-clisel').value, 'recCLI1');
+  await change($('om-clisel'), 'recCLI2');
+  t('another client drops a job card that is not theirs', $('om-jcsel').value, '');
+  t('and lists only theirs', [...$('om-jcsel').options].map((o) => o.value).filter(Boolean), []);
+  await change($('om-clisel'), '');
+  t('no client lists every job card again', [...$('om-jcsel').options].some((o) => o.value === 'recJC1'), true);
 
   log('\nA HALF-FAILED SAVE SAYS SO');
   window.SENT = [];
@@ -1012,6 +1052,7 @@ async function suite(log) {
     /No job card is linked/.test(d().textContent), true);
   const jcPick = () => document.getElementById('om-tktjcsel');
   t('a picker is offered', !!jcPick(), true);
+  t('and a job card can be made for it', !!d().querySelector('[data-act="omTktNewJc"]'), true);
   t('and it is searchable, not a scroll of 111', !!jcPick().__txPick, true);
   t('every job card is in it', [...jcPick().options].map((o) => o.value).includes('recJC1'), true);
   t('no visit can be booked from it',
@@ -1023,6 +1064,7 @@ async function suite(log) {
   t('attaching nothing refuses', /Choose a job card first/.test(d().textContent), true);
   t('and writes nothing', window.SENT.length, 0);
 
+  window.FORMS = [];
   jcPick().value = 'recJC1';
   d().querySelector('[data-act="omTktAttachJc"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
   await settle(14);
@@ -1030,8 +1072,10 @@ async function suite(log) {
   t('the job card is attached', att.fields[FID.jc], ['recJC1']);
   t('and its client comes with it', att.fields[FID.client], ['recCLI1']);
   const attLog = window.SENT.find((x) => x.op === 'create' && x.table === 'activity_log');
-  t('it is written down, with the reason', /was not recorded when the ticket was raised/
+  t('it is written down, naming the job card', /Job card attached: OM-2026-0157/
     .test(attLog.fields[FID.alNote]), true);
+  t('and the ticket form, which had nowhere to go, is filed now and not downloaded',
+    window.FORMS.map((r) => [r.url, r.body.file, r.body.ticketId]), [['/api/ticket-report', true, 'recTKTd']]);
   t('linked to the ticket', attLog.fields[FID.alTicket], ['recTKTd']);
 
   log('\nSPARES WITHOUT A VISIT');
@@ -2090,8 +2134,27 @@ const MUTANTS = [
    "if(!omChannel) return fail('Choose how this was reported');", '// MUTANT: not required'],
 
   ['the activity entry is linked to the job card but not the ticket',
-   '        [OM_F.AL_JC]:[jcId],\n        [OM_F.AL_TICKET]:[rec.id],\n        [OM_F.AL_TYPE]:\'Ticket Logged\',',
-   '        [OM_F.AL_JC]:[jcId],\n        [OM_F.AL_TYPE]:\'Ticket Logged\','],
+   "          +(detail?'\\nSource: '+detail:''),\n        [OM_F.AL_TICKET]:[rec.id],",
+   "          +(detail?'\\nSource: '+detail:''),"],
+
+  ['the activity entry is not linked to the job card',
+   '      if(jcId) entry[OM_F.AL_JC]=[jcId];', '      // MUTANT: no job card link'],
+
+  ['a ticket needs a job card again',
+   "  if(!jcId&&!cliId) return fail('Select a client (the job card can be added later)');",
+   "  if(!jcId) return fail('Select a client (the job card can be added later)');"],
+
+  ['a ticket with no job card is not given the client picked',
+   '    const cli=jcCli.length?jcCli:(cliId?[cliId]:[]);', '    const cli=jcCli;'],
+
+  ['picking a job card leaves the client as it was',
+   '    if(cs&&cli&&cs.value!==cli&&', '    if(false&&'],
+
+  ['a form with no job card to file against is reported as a failure',
+   "    if(f.reason==='no_job_card'){", "    if(false){"],
+
+  ['attaching a job card does not file the ticket form',
+   "    const form=await omAutoForm('tkt',id,{download:false});", "    const form={problem:''};"],
 
   ['created-by is whatever the browser says, not who is signed in',
    '      [TK.status]:\'New\',\n      [TK.createdBy]:(TX.me()&&TX.me().user&&TX.me().user.email)||\'\',',
@@ -2132,7 +2195,7 @@ const MUTANTS = [
    'omTktData.sort((a,b)=>String(a.fields[TK.ref]||\'\').localeCompare(String(b.fields[TK.ref]||\'\')));'],
 
   ['search stops covering the job card and its client',
-   'jc?omFstr(jc.fields,OM_F.JC_REF):\'\', jc?omCli(jc.fields):\'\'].join(\' \').toLowerCase();',
+   'jc?omFstr(jc.fields,OM_F.JC_REF):\'\', omTktCli(r)].join(\' \').toLowerCase();',
    '\'\'].join(\' \').toLowerCase();'],
 
   ['the detail shows every ticket’s activity, not just this one’s',
@@ -2419,7 +2482,7 @@ const MUTANTS = [
    '          );'],
 
   ['attaching a job card does not bring its client',
-   '    if(cli.length && !(rec.fields[TK.client]||[]).length) patch[TK.client]=cli;',
+   '  if(cli.length && !omLinkIds(rec.fields[TK.client]).length) patch[TK.client]=cli;',
    '    // MUTANT: no client'],
 
   ['a job card can be attached without choosing one',
@@ -2427,8 +2490,8 @@ const MUTANTS = [
    '  if(!jcId){ /* MUTANT: carry on */ }'],
 
   ['attaching a job card is not written down',
-   '          +\' \\u2014 it was not recorded when the ticket was raised.\',',
-   '          +\'.\','],
+   "        +(jcRef||(jc?omFstr(jc.fields,OM_F.JC_REF):jcId)),",
+   "        +'',"],
 
   ['the ticket screen offers no way to ask for spares',
    '        ${canEdit&&!closed?`',

@@ -51,7 +51,8 @@ async function ticketFormPdf(d) {
   s.field('Job Card Number:', jc['JC Reference']);
   s.field('Project Reference Number:',
     [].concat(jc['Generated Reference String (from Job Card References)'] || []).map(str).join(', '));
-  s.field('Client Name:', first(jc['Client Name']));
+  // A ticket raised against a client before it had a job card names its client itself.
+  s.field('Client Name:', first(jc['Client Name']) || str(d.clientName));
   s.field('Site Address:', first(jc['Site / Address']));
   // Reported At is when the client reported it; the record's own creation is when it was
   // logged. They differ whenever a fault is logged after the phone call, and both matter.
@@ -98,7 +99,7 @@ async function ticketFormPdf(d) {
 
   // The client's acceptance prints the job card's client and nothing more: the ticket holds no
   // contact details of its own, and the job card's acceptance block belongs to that job.
-  s.terms({ name: first(jc['Client Name']) });
+  s.terms({ name: first(jc['Client Name']) || str(d.clientName) });
 
   s.footer(ref, d.generatedBy);
   return doc.save();

@@ -294,7 +294,9 @@ async function ticketReportPdf(d) {
   s.heading('Ticket');
   s.fact('Job card', jc['JC Reference']);
   s.fact('Job card title', jc.Title);
-  s.fact('Client', t.Client && t.Client.length ? jc['Client Name'] || t.Client : jc['Client Name']);
+  // The ticket's Client link holds record ids, never a name: printed raw it read "rec…". A
+  // ticket with no job card yet gets the name the endpoint looked up for it.
+  s.fact('Client', str(jc['Client Name']) || d.clientName);
   s.fact('Site', jc['Site / Address']);
   s.fact('Reported via', t['Source Channel']);
   s.fact('Source detail', t['Source Detail']);

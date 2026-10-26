@@ -1517,6 +1517,9 @@ const spareAll = async () => (await TX.list(SCHED_BASE, 'tickets',
 
 let omJcData=[], omCliData=[], omPplData=[], omTktData=[];
 let omFilter='ALL', omSelJCId='', omPriVal='High', omChannel='';
+// The ticket a New Job Card was opened from, so the job card is attached to it once created.
+// Cleared whenever the New Job Card view is opened any other way.
+let omNjcForTkt='';
 let omTktFilter='OPEN', omTktSearchQ='', omTktDetailId=null;
 // Parts staged on the ticket screen, not yet written. Same shape as the visit modal's list.
 let omTktSpares=[];
@@ -1539,6 +1542,7 @@ async function omLoadAll(silent){
     omLoadTickets().then(omUpdateTktBadge).catch(()=>{});
     if(omCurrentView==='jc') omRenderList(omFilteredJCs());
     if(omCurrentView==='triage') omRenderTriage();
+    omPopTktCliDropdown();
     omPopJCDropdown();
   }catch(e){ omSetDot('err'); toast(SCHED_LABEL+': '+e.message,'bad'); }
 }
@@ -1781,6 +1785,23 @@ function omTktJc(rec){
   return id?omJcData.find(r=>r.id===id):null;
 }
 
+/** Record ids out of a link cell, whether it came back as ids or as {id,name}. */
+const omLinkIds=(v)=>[].concat(v||[]).map(x=>x&&typeof x==='object'?x.id:x).filter(Boolean);
+
+/**
+ * A ticket's client: its job card's when it has one, otherwise the client it was raised
+ * against. A ticket need not have a job card -- one is made when somebody has to go to site --
+ * so the ticket's own Client link is what names the client until then. '' when neither does.
+ */
+function omTktCli(rec){
+  const jc=omTktJc(rec);
+  const n=jc?omCli(jc.fields):'';
+  if(n&&n!=='\u2014') return n;
+  const id=omLinkIds(rec.fields[TK.client])[0];
+  const c=id?omCliData.find(r=>r.id===id):null;
+  return c?omFstr(c.fields,OM_F.CL_NAME):'';
+}
+
 function omTktCard(rec){
   const f=rec.fields;
   const jc=omTktJc(rec);
@@ -1804,7 +1825,7 @@ function omTktCard(rec){
         ${f[TK.reportedAt]?esc(fmtDateTime(f[TK.reportedAt])):''}
       </div>
     </div>
-    <div class="om-jccli">\ud83c\udfe2 ${jc?esc(omCli(jc.fields)):'\u2014'}</div>
+    <div class="om-jccli">\ud83c\udfe2 ${esc(omTktCli(rec)||'\u2014')}</div>
   </div>`;
 }
 
@@ -1818,7 +1839,7 @@ function omFilteredTkts(){
       const f=r.fields, jc=omTktJc(r);
       const hay=[omFstr(f,TK.ref),omFstr(f,TK.subject),omFstr(f,TK.desc),omFstr(f,TK.reportedBy),
         omFstr(f,TK.channel),omFstr(f,TK.category),omFstr(f,TK.status),
-        jc?omFstr(jc.fields,OM_F.JC_REF):'', jc?omCli(jc.fields):''].join(' ').toLowerCase();
+        jc?omFstr(jc.fields,OM_F.JC_REF):'', omTktCli(r)].join(' ').toLowerCase();
       return hay.includes(q);
     });
   }
@@ -2127,7 +2148,7 @@ function omBuildTicket(rec,acts,spares){
 
   const facts=[
     ['Job card', jc?omFstr(jc.fields,OM_F.JC_REF):''],
-    ['Client', jc?omCli(jc.fields):''],
+    ['Client', omTktCli(rec)],
     ['Site', jc?omFstr(jc.fields,OM_F.JC_SITE):''],
     ['Reported via', omFstr(f,TK.channel)],
     ['Source', omFstr(f,TK.channelDetail)],
@@ -2202,10 +2223,11 @@ function omBuildTicket(rec,acts,spares){
       <div class="om-fcard"><div class="om-fttl">Ticket</div><div class="om-facts">${facts}</div>
         ${canEdit&&!jc?`
         <div style="margin-top:10px">
-          <div class="om-hint">No job card is linked to this ticket. Without one it cannot carry a site visit, and its report prints without the client and site.</div>
+          <div class="om-hint">No job card is linked to this ticket yet. A site visit can only be booked against one, so attach an existing job card or create one for this ticket.</div>
           <select id="om-tktjcsel" data-search="job cards" style="margin-top:6px"></select>
           <div id="om-tktjcmsg"></div>
           <button class="btn sm" data-act="omTktAttachJc" data-a1="${esc(rec.id)}" style="margin-top:8px">Attach job card</button>
+          ${TX.can('job_cards','create')?`<button class="btn ghost sm" data-act="omTktNewJc" data-a1="${esc(rec.id)}" style="margin-top:8px">+ Create job card for this ticket</button>`:''}
         </div>`:''}
       </div>
       ${omFstr(f,TK.desc)?`<div class="om-fcard"><div class="om-fttl">Description</div><div class="om-tltx">${esc(omFstr(f,TK.desc))}</div></div>`:''}
@@ -2285,7 +2307,7 @@ function omBuildTicket(rec,acts,spares){
 function omBookVisit(id){
   const rec=omTktData.find(r=>r.id===id); if(!rec)return;
   const jcId=[].concat(rec.fields[TK.jc]||[])[0];
-  if(!jcId){ toast('That ticket has no job card, so a visit cannot be booked from it','bad'); return; }
+  if(!jcId){ toast('That ticket has no job card yet. Attach or create one below, then book the visit','bad'); return; }
   const already=[].concat(rec.fields[TK.visits]||[]).length;
   openVisitModal(null,{
     jcId, ticketId:id,
@@ -2547,6 +2569,12 @@ async function omAutoForm(kind,id,opts){
     if(f.ok||f.reason==='already_filed'){
       return { html:'<div class="om-ok">\u2713 '+what+' saved to the job card\u2019s documents'+got+'</div>', problem:'' };
     }
+    // Not a fault: a ticket raised against a client alone has nowhere to file it yet.
+    // omTktLinkJc files it once a job card is attached.
+    if(f.reason==='no_job_card'){
+      return { html:'<div class="om-ok">\u2713 '+what+(download?' downloaded':' built')
+        +'. It is saved to the job card\u2019s documents once one is attached.</div>', problem:'' };
+    }
     const why=f.detail||f.reason||'unknown reason';
     return { html:'<div class="om-err">\u26a0 '+what+(download?' downloaded, but':'')
       +' not saved to the job card\u2019s documents: '+esc(why)+'</div>', problem:'not saved: '+why };
@@ -2737,30 +2765,65 @@ async function omTktAttachJc(id){
   const jcId=sel?sel.value:'';
   const msg=document.getElementById('om-tktjcmsg');
   if(!jcId){ if(msg) msg.innerHTML='<div class="om-err">\u26a0 Choose a job card first</div>'; return; }
-  const rec=omTktData.find(r=>r.id===id); if(!rec)return;
-  const jc=omJcData.find(r=>r.id===jcId);
+  if(!omTktData.find(r=>r.id===id))return;
   if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Attaching\u2026</div>';
   try{
-    const patch={[TK.jc]:[jcId]};
-    // The client comes with it, unless the ticket already names one.
-    const cli=jc?[].concat(jc.fields[OM_F.JC_CLI]||[]):[];
-    if(cli.length && !(rec.fields[TK.client]||[]).length) patch[TK.client]=cli;
-    const up=await tktUpdate(id,patch);
-    if(up) Object.assign(rec.fields,up.fields);
-    try{
-      await omPost(OM_T.ACT,{
-        [OM_F.AL_NOTE]:'['+(omFstr(rec.fields,TK.ref)||'')+'] Job card attached: '
-          +(jc?omFstr(jc.fields,OM_F.JC_REF):jcId)
-          +' \u2014 it was not recorded when the ticket was raised.',
-        [OM_F.AL_JC]:[jcId],
-        [OM_F.AL_TICKET]:[id],
-        [OM_F.AL_TYPE]:'Comment',
-      });
-    }catch(e){ toast('Job card attached, but not logged: '+e.message,'bad'); }
+    await omTktLinkJc(id,jcId);
     omOpenTicket(id);
   }catch(e){
     if(msg) msg.innerHTML='<div class="om-err">\u2715 '+esc(e.message)+'</div>';
   }
+}
+
+/**
+ * Link a job card to a ticket that has none. A ticket may be raised against a client alone and
+ * get its job card only when somebody has to go to site, so this is a normal step, not a repair.
+ * Throws if the link is not saved; a log entry or form that fails after it is only reported.
+ * jcRef is passed when the job card is too new to be in omJcData yet.
+ */
+async function omTktLinkJc(id,jcId,jcRef){
+  const rec=omTktData.find(r=>r.id===id); if(!rec) throw new Error('That ticket is not loaded');
+  const jc=omJcData.find(r=>r.id===jcId);
+  const patch={[TK.jc]:[jcId]};
+  // The client comes with it, unless the ticket already names one.
+  const cli=jc?omLinkIds(jc.fields[OM_F.JC_CLI]):[];
+  if(cli.length && !omLinkIds(rec.fields[TK.client]).length) patch[TK.client]=cli;
+  const up=await tktUpdate(id,patch);
+  if(up) Object.assign(rec.fields,up.fields);
+  try{
+    await omPost(OM_T.ACT,{
+      [OM_F.AL_NOTE]:'['+(omFstr(rec.fields,TK.ref)||'')+'] Job card attached: '
+        +(jcRef||(jc?omFstr(jc.fields,OM_F.JC_REF):jcId)),
+      [OM_F.AL_JC]:[jcId],
+      [OM_F.AL_TICKET]:[id],
+      [OM_F.AL_TYPE]:'Comment',
+    });
+  }catch(e){ toast('Job card attached, but not logged: '+e.message,'bad'); }
+  // Its form could not be filed while it had no job card to hang off. Filed now, not
+  // downloaded: nobody asked for a printout by attaching a job card.
+  if(TX.can('tickets','export')){
+    const form=await omAutoForm('tkt',id,{download:false});
+    if(form.problem) toast('Job card attached. The ticket form was '+form.problem,'bad');
+  }
+}
+
+/** Open New Job Card filled in from the ticket; the job card is attached to it once created. */
+function omTktNewJc(id){
+  const rec=omTktData.find(r=>r.id===id); if(!rec)return;
+  const f=rec.fields;
+  omGoView('newjc');
+  omNjcForTkt=id;
+  const set=(elId,v)=>{const e=document.getElementById(elId); if(e&&v) e.value=v;};
+  const cli=omLinkIds(f[TK.client])[0];
+  const cs=document.getElementById('njc-cli');
+  if(cs&&cli&&[...cs.options].some(o=>o.value===cli)){ cs.value=cli; if(TX.pick) TX.pick.refresh(cs); omCliPick(); }
+  set('njc-title',omFstr(f,TK.subject));
+  set('njc-raisedby',omFstr(f,TK.reportedBy));
+  set('njc-prevnotes',[omFstr(f,TK.desc),omFstr(f,TK.asset)&&'Asset: '+omFstr(f,TK.asset),
+    omFstr(f,TK.errCode)&&'Error code: '+omFstr(f,TK.errCode)].filter(Boolean).join('\n'));
+  const msg=document.getElementById('njc-msg');
+  if(msg) msg.innerHTML='<div class="om-hint">For ticket <strong>'+esc(omFstr(f,TK.ref))
+    +'</strong>: it is attached to that ticket once created.</div>';
 }
 
 /** Enough words to be worth reading. "ok" and "." are not an account of anything. */
@@ -3289,11 +3352,37 @@ async function omLogNote(jcId,note,type='Comment'){
 async function omAddNote(jcId){const el=document.getElementById('om-note-in');const t=el.value.trim();if(!t)return;el.value='';await omLogNote(jcId,t,'Comment');}
 
 // ── New Ticket ──
+/** The New Ticket client list. A ticket is raised against a client; the job card is optional. */
+function omPopTktCliDropdown(){
+  const sel=document.getElementById('om-clisel');
+  if(!sel)return;
+  const was=sel.value;
+  const clients=omCliData.map(r=>({id:r.id,name:omFstr(r.fields,OM_F.CL_NAME)||'(unnamed)'}))
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  sel.innerHTML='<option value="">\u2014 Select client \u2014</option>'
+    +clients.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join('');
+  if(was&&clients.some(c=>c.id===was)) sel.value=was;
+  if(TX.pick) TX.pick.refresh(sel);
+}
+/** A client chosen first narrows the job cards to that client's, and drops one that is not. */
+function omTktCliPick(sel){
+  const cli=sel.value;
+  if(omSelJCId&&cli){
+    const jc=omJcData.find(r=>r.id===omSelJCId);
+    if(!jc||!omLinkIds(jc.fields[OM_F.JC_CLI]).includes(cli)){
+      omSelJCId='';
+      const p=document.getElementById('om-jcprev'); if(p) p.style.display='none';
+    }
+  }
+  omPopJCDropdown();
+}
 function omPopJCDropdown(){
   const sel=document.getElementById('om-jcsel');
   if(!sel)return;
+  const cliSel=document.getElementById('om-clisel');
+  const cli=cliSel?cliSel.value:'';
   sel.innerHTML='<option value="">— Select Job Card ('+TX.esc(SCHED_LABEL)+') —</option>';
-  [...omJcData].sort((a,b)=>(b.fields[OM_F.JC_REF]||'').localeCompare(a.fields[OM_F.JC_REF]||'')).forEach(r=>{
+  [...omJcData].filter(r=>!cli||omLinkIds(r.fields[OM_F.JC_CLI]).includes(cli)).sort((a,b)=>(b.fields[OM_F.JC_REF]||'').localeCompare(a.fields[OM_F.JC_REF]||'')).forEach(r=>{
     const ref=r.fields[OM_F.JC_REF]||r.id,ttl=omFstr(r.fields,OM_F.JC_TITLE),stat=omFstr(r.fields,OM_F.JC_STAT),cli=omCli(r.fields),own=omFstr(r.fields,OM_F.JC_OWNER);
     const opt=document.createElement('option');
     opt.value=r.id; opt.dataset.ref=ref; opt.dataset.ttl=ttl; opt.dataset.stat=stat; opt.dataset.cli=cli; opt.dataset.own=own;
@@ -3301,11 +3390,17 @@ function omPopJCDropdown(){
     opt.textContent=`${ref}${lbl?' — '+lbl.slice(0,40):''}${own?' ['+own+']':''}`;
     sel.appendChild(opt);
   });
-  if(omSelJCId)sel.value=omSelJCId;
+  sel.value=omSelJCId||'';
+  if(TX.pick) TX.pick.refresh(sel);
 }
 function omJCPick(sel){
   const opt=sel.options[sel.selectedIndex],prev=document.getElementById('om-jcprev');
-  if(opt?.value){omSelJCId=opt.value;prev.style.display='block';prev.innerHTML=`<strong style="color:var(--accent)">${opt.dataset.ref||opt.value}</strong><br>${opt.dataset.ttl||''}<br>🏢 ${opt.dataset.cli||'—'}${opt.dataset.own?' · Owner: <span style="color:#a16207">'+opt.dataset.own+'</span>':''}<br>Status: <span style="color:var(--accent)">${opt.dataset.stat||'—'}</span>`;}
+  if(opt?.value){
+    omSelJCId=opt.value;
+    const jc=omJcData.find(r=>r.id===opt.value), cs=document.getElementById('om-clisel');
+    const cli=jc?omLinkIds(jc.fields[OM_F.JC_CLI])[0]:'';
+    if(cs&&cli&&cs.value!==cli&&[...cs.options].some(o=>o.value===cli)){ cs.value=cli; if(TX.pick) TX.pick.refresh(cs); }
+    prev.style.display='block';prev.innerHTML=`<strong style="color:var(--accent)">${opt.dataset.ref||opt.value}</strong><br>${opt.dataset.ttl||''}<br>🏢 ${opt.dataset.cli||'—'}${opt.dataset.own?' · Owner: <span style="color:#a16207">'+opt.dataset.own+'</span>':''}<br>Status: <span style="color:var(--accent)">${opt.dataset.stat||'—'}</span>`;}
   else{omSelJCId='';prev.style.display='none';}
 }
 // Scoped to its own row. The visit modal has a chip row of its own, and a document-wide
@@ -3320,10 +3415,11 @@ function omSetReportedNow(){
   if(e&&!e.value) e.value=isoToLocalInput(new Date().toISOString());
 }
 function omResetTicketForm(){
-  ['om-cat','om-jcsel','om-subj','om-desc','om-rep','om-asset','om-err','om-chandetail']
+  ['om-cat','om-clisel','om-jcsel','om-subj','om-desc','om-rep','om-asset','om-err','om-chandetail']
     .forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   const jp=document.getElementById('om-jcprev'); if(jp)jp.style.display='none';
   omSelJCId=''; omPriVal='High'; omChannel='';
+  omPopTktCliDropdown(); omPopJCDropdown();   // the job card list un-narrowed again
   document.querySelectorAll('.om-priopt').forEach(o=>o.classList.remove('sel'));
   document.querySelector('.om-priopt.phigh')?.classList.add('sel');
   document.querySelectorAll('.om-chanopt').forEach(o=>o.classList.remove('sel'));
@@ -3336,8 +3432,12 @@ async function omSubmit(){
   const cat=document.getElementById('om-cat').value;
   const subj=document.getElementById('om-subj').value.trim();
   const jcId=omSelJCId||document.getElementById('om-jcsel').value;
+  const cliEl=document.getElementById('om-clisel');
+  const cliId=cliEl?cliEl.value:'';
   if(!cat||!subj) return fail('Category and Subject are required');
-  if(!jcId) return fail('Select a Job Card');
+  // A job card is made when somebody has to go to site, so many tickets start without one.
+  // The client is what every ticket must name; a job card names it for them.
+  if(!jcId&&!cliId) return fail('Select a client (the job card can be added later)');
   // Mandatory: "how did this reach us" is the question nobody remembers to ask later.
   if(!omChannel) return fail('Choose how this was reported');
 
@@ -3352,12 +3452,13 @@ async function omSubmit(){
   msg.innerHTML='';
   try{
     // The job card's client comes across so the ticket stands on its own. A job card whose
-    // client the role may not read simply yields no link rather than failing the save.
-    const jc=omJcData.find(r=>r.id===jcId);
-    const cli=jc?[].concat(jc.fields[OM_F.JC_CLI]||[]):[];
+    // client the role may not read falls back to the client picked, or to no link at all
+    // rather than failing the save. With no job card, the client picked is the client.
+    const jc=jcId?omJcData.find(r=>r.id===jcId):null;
+    const jcCli=jc?omLinkIds(jc.fields[OM_F.JC_CLI]):[];
+    const cli=jcCli.length?jcCli:(cliId?[cliId]:[]);
 
     const f={
-      [TK.jc]:[jcId],
       [TK.channel]:omChannel,
       [TK.category]:cat,
       [TK.subject]:subj,
@@ -3366,6 +3467,7 @@ async function omSubmit(){
       [TK.createdBy]:(TX.me()&&TX.me().user&&TX.me().user.email)||'',
       [TK.reportedAt]:atRaw?sastFieldsToUtcISO(atRaw):new Date().toISOString(),
     };
+    if(jcId) f[TK.jc]=[jcId];
     if(cli.length) f[TK.client]=cli;
     if(desc)   f[TK.desc]=desc;
     if(rep)    f[TK.reportedBy]=rep;
@@ -3380,15 +3482,17 @@ async function omSubmit(){
 
     // Linked to BOTH the job card and the ticket. Filtering the log by job card and a date
     // window would sweep in entries belonging to other tickets on the same installation.
+    // A ticket with no job card yet links to the ticket alone.
     try{
-      await omPost(OM_T.ACT,{
+      const entry={
         [OM_F.AL_NOTE]:'['+ref+'] ['+omChannel+'] ['+cat+'] ['+omPriVal+'] '+subj
           +(desc?'\n\n'+desc:'')+(rep?'\nReported by: '+rep:'')
           +(detail?'\nSource: '+detail:''),
-        [OM_F.AL_JC]:[jcId],
         [OM_F.AL_TICKET]:[rec.id],
         [OM_F.AL_TYPE]:'Ticket Logged',
-      });
+      };
+      if(jcId) entry[OM_F.AL_JC]=[jcId];
+      await omPost(OM_T.ACT,entry);
     }catch(logErr){
       // The ticket is saved and that is the record that matters. Say what did not happen
       // rather than implying the whole thing failed.
@@ -3492,7 +3596,7 @@ function omGoView(name){
   if(name==='jc')   omApplyJCFilters();
   if(name==='triage') omRenderTriage();
   if(name==='cli')  omRenderCli('clients');
-  if(name==='newjc') omRenderNewJC();
+  if(name==='newjc'){ omNjcForTkt=''; omRenderNewJC(); }
   if(name==='new')   omSetReportedNow();
   if(name==='tickets') omShowTickets();
   omSyncPrintBtn();
@@ -3663,14 +3767,21 @@ async function omSubmitNewJC(){
     const acts=[...document.querySelectorAll('#njc-actions input:checked')].map(x=>x.value);
     if(acts.length) f[JCF.JC_ACTIONS]=acts;
     const rec=await omPost(OM_T.JC,f);
+    let tktNote='';
+    if(omNjcForTkt&&rec&&rec.id){
+      const tid=omNjcForTkt; omNjcForTkt='';
+      const tref=omFstr((omTktData.find(r=>r.id===tid)||{fields:{}}).fields,TK.ref)||'the ticket';
+      try{ await omTktLinkJc(tid,rec.id,ref); tktNote='<div class="om-ok">\u2713 Attached to '+esc(tref)+'</div>'; }
+      catch(e){ tktNote='<div class="om-err">\u26a0 Not attached to '+esc(tref)+': '+esc(e.message)+'. Attach it from the ticket.</div>'; }
+    }
     // Every job card raised here gets its printed form straight away: built, filed in the job
     // card's documents and downloaded. The button stays for a second copy. The job card is
     // said to exist before the form is built: it does, and building takes a few seconds.
-    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${esc(ref)}</strong></div>`
+    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${esc(ref)}</strong></div>`+tktNote
       +'<div class="om-hint">Building its job card form\u2026</div>';
     const form=rec&&rec.id ? await omAutoForm('jc',rec.id) : { html:'', problem:'' };
     const canPrint = rec && rec.id && TX.can('job_cards','export');
-    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${esc(ref)}</strong></div>`+form.html
+    msg.innerHTML=`<div class="om-ok">✓ Job Card created: <strong>${esc(ref)}</strong></div>`+tktNote+form.html
       +(canPrint
         ? `<div style="margin-top:8px"><button class="btn sm" data-act="omJcForm" data-a1="${esc(rec.id)}">\ud83d\udcc4 Download the job card again</button></div>`
         : '');
@@ -3709,6 +3820,8 @@ async function omSubmitNewJC(){
     add('omSetTktFilter', typeof omSetTktFilter === 'function' ? omSetTktFilter : null);
     add('omFilterTkts', typeof omFilterTkts === 'function' ? omFilterTkts : null);
     add('omOpenTicket', typeof omOpenTicket === 'function' ? omOpenTicket : null);
+    add('omTktCliPick', typeof omTktCliPick === 'function' ? omTktCliPick : null);
+    add('omTktNewJc', typeof omTktNewJc === 'function' ? omTktNewJc : null);
     add('omCloseTicket', typeof omCloseTicket === 'function' ? omCloseTicket : null);
     add('omTktStatus', typeof omTktStatus === 'function' ? omTktStatus : null);
     add('omTktSaveMonitoring', typeof omTktSaveMonitoring === 'function' ? omTktSaveMonitoring : null);
