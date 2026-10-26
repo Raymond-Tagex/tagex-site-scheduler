@@ -119,6 +119,19 @@ const CLIENTS = [
   { id:'recCLI2', fields:{ fldKeSstygWbQ07lm:'Delmas Dairy' } },
 ];
 
+// The client register, as /api/client-register lists it for this base. Grootvlei and Delmas
+// Dairy have copies here (the CLIENTS rows); Sean Bisset is in the register only, so choosing
+// him has to make his copy first.
+const REGISTER = [
+  { id:'recREGGROOTVLEI01', name:'Grootvlei', contact:'Oubaas', email:'', sites:'', mobile:'', status:'Active', contracts:[], mirrors:['recCLI1'] },
+  { id:'recREGDELMAS00001', name:'Delmas Dairy', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:[], mirrors:['recCLI2'] },
+  { id:'recREGBISSET00001', name:'Sean Bisset', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-148'], mirrors:[] },
+  // Never chosen in this suite, so the Clients view still has one with no copy here to show.
+  { id:'recREGTHANDI00001', name:'Thandi Mokoena', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-120'], mirrors:[] },
+];
+window.REG_CALLS = [];
+window.REG_FAIL = null;
+
 const TICKETS = [
   { id:'recTKTa', createdTime:'2026-09-20T06:00:00.000Z', fields:{
       [FID.ref]:'TKT-2026-0007', [FID.jc]:['recJC1'], [FID.subject]:'Inverter alarm 0x33',
@@ -291,6 +304,14 @@ function stubTX() {
   window.FORMS = [];
   window.BLOBS = 0;
   TX.request = async (url, body) => {
+    // The client register is not a form: answered here, and kept out of FORMS.
+    if (url === '/api/client-register') {
+      window.REG_CALLS.push(JSON.parse(JSON.stringify(body)));
+      if (window.REG_FAIL) throw new Error(window.REG_FAIL);
+      if (body.op === 'list') return { ok: true, clients: JSON.parse(JSON.stringify(REGISTER)) };
+      if (body.op === 'ensure') return { ok: true, mirrorId: 'recCLI9', created: true };
+      if (body.op === 'create') return { ok: true, clientId: 'recREGNEW00000001', mirrorId: 'recCLI10' };
+    }
     window.FORMS.push({ url, body: JSON.parse(JSON.stringify(body)) });
     if (window.FAIL_FORM) throw new Error(window.FAIL_FORM);
     return { content: btoa('%PDF-1.4\n'), filename: 'form.pdf', contentType: 'application/pdf',
@@ -586,7 +607,11 @@ async function suite(log) {
 
   log('\nA TICKET FOR A CLIENT, WITH NO JOB CARD YET');
   t('the client picker is searchable', !!$('om-clisel').__txPick, true);
-  t('and holds the clients', [...$('om-clisel').options].map((o) => o.value).filter(Boolean), ['recCLI2', 'recCLI1']);
+  t('and holds the register’s clients, by their copy here where there is one',
+    [...$('om-clisel').options].map((o) => o.value).filter(Boolean), ['recCLI2', 'recCLI1', 'reg:recREGBISSET00001', 'reg:recREGTHANDI00001']);
+  t('read from the register, for this base', window.REG_CALLS.some((c) => c.op === 'list' && ['OM', 'RES'].includes(c.base)), true);
+  t('a client’s contract numbers are searchable in the picker',
+    [...$('om-clisel').options].find((o) => o.value === 'reg:recREGBISSET00001').textContent, 'Sean Bisset · SUB-148');
   window.SENT = [];
   window.FORMS = [];
   window.FORM_FILED = { ok: false, reason: 'no_job_card', detail: 'It has no job card to be filed against.' };
@@ -604,6 +629,17 @@ async function suite(log) {
   t('its form is still built', window.FORMS.length, 1);
   t('and the screen does not call the unfiled form a failure', /not saved/.test(msg()), false);
   t('but says it is filed once a job card is attached', /once one is attached/.test(msg()), true);
+
+  log('\nA CLIENT IN THE REGISTER BUT NOT IN THIS BASE');
+  window.SENT = []; window.REG_CALLS = [];
+  window.FORM_FILED = { ok: false, reason: 'no_job_card', detail: 'It has no job card to be filed against.' };
+  fill({ cat:'Inverter Fault', subj:'Register-only client', chan:'Email', cli:'reg:recREGBISSET00001' });
+  await submit();
+  await settle(6);
+  window.FORM_FILED = null;
+  const tk4 = lastCreate('tickets:ticket');
+  t('his copy here is made first', window.REG_CALLS.filter((c) => c.op === 'ensure').map((c) => c.clientId), ['recREGBISSET00001']);
+  t('and the ticket links to that copy, never to the register', tk4 && tk4.fields[FID.client], ['recCLI9']);
 
   log('\nTHE CLIENT AND THE JOB CARD AGREE');
   const change = async (el, v) => { el.value = v; el.dispatchEvent(new Event('change', { bubbles:true })); await tick(); };
@@ -635,6 +671,18 @@ async function suite(log) {
   t('the failure is named', /stubbed failure/.test(msg()), true);
   t('and no activity entry was written for a ticket that does not exist',
     window.SENT.filter((s) => s.table === 'activity_log').length, 0);
+
+  log('\nTHE CLIENTS VIEW IS THE REGISTER');
+  document.getElementById('ombn-cli').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick();
+  const cliText = () => document.getElementById('om-cli').textContent;
+  t('it says it is the register, and how many', /Client register · 4 clients/.test(cliText()), true);
+  t('every register client is listed, sorted', [...document.querySelectorAll('#om-cli .om-clic')]
+    .map((e) => e.firstElementChild.textContent), ['Delmas Dairy', 'Grootvlei', 'Sean Bisset', 'Thandi Mokoena']);
+  t('with its contracts', /SUB-148/.test(cliText()), true);
+  const card = (nm) => [...document.querySelectorAll('#om-cli .om-clic')].find((e) => e.firstElementChild.textContent === nm).textContent;
+  t('and says which have no copy in this base yet', /No copy in .* yet/.test(card('Thandi Mokoena')), true);
+  t('but not one whose copy was made when a ticket was raised for him', /No copy in/.test(card('Sean Bisset')), false);
 
   log('\nTHE TICKETS LIST');
   document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
@@ -2145,7 +2193,19 @@ const MUTANTS = [
    "  if(!jcId) return fail('Select a client (the job card can be added later)');"],
 
   ['a ticket with no job card is not given the client picked',
-   '    const cli=jcCli.length?jcCli:(cliId?[cliId]:[]);', '    const cli=jcCli;'],
+   '    const cli=jcCli.length?jcCli:(cliId?[await omResolveCli(cliId)]:[]);', '    const cli=jcCli;'],
+
+  ['a register-only client is linked by its register id, which this base cannot hold',
+   '    const cli=jcCli.length?jcCli:(cliId?[await omResolveCli(cliId)]:[]);',
+   '    const cli=jcCli.length?jcCli:(cliId?[cliId.replace(/^reg:/,\'\')]:[]);'],
+
+  ['the client lists read this base’s Clients again, not the register',
+   "    const r=await TX.request('/api/client-register',{op:'list',base:SCHED_BASE});",
+   "    const r=null;"],
+
+  ['contract numbers are left out of the picker',
+   "const omCliLabel=(c)=>omCliName(c)+(c.contracts&&c.contracts.length?",
+   "const omCliLabel=(c)=>omCliName(c)+(false&&c.contracts&&c.contracts.length?"],
 
   ['picking a job card leaves the client as it was',
    '    if(cs&&cli&&cs.value!==cli&&', '    if(false&&'],

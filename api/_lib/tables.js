@@ -361,6 +361,16 @@ mirrorOmToRes(SCOPE_FIELDS);
 /** The operations bases -- the ones holding sites, job cards and delivery notes. */
 const OPS_BASES = Object.freeze(['CI', 'OM', 'RES']);
 
+// The one client register, in its own base (CLI). NOT a module and deliberately absent from
+// TABLES: /api/at cannot resolve it, and the role editor offers no switch for it. Read and
+// written only by api/client-register.js, under each role's 'clients' rule. Each base's Clients
+// table is a mirror of it; see CLAUDE.md, "One client register".
+const CLIENT_REGISTER = Object.freeze({
+  base: 'CLI',
+  clients:   'tbl0mJrPEf6wRX4fl',
+  contracts: 'tblZ0cNUogFgZFpmf',
+});
+
 // The bases the scheduler and tickets work in. Not C&I: its scheduler is a separate
 // application, and tickets resolve only in O&M and its duplicate.
 const SCHEDULER_BASES = Object.freeze(['OM', 'RES']);
@@ -633,6 +643,7 @@ function expandFieldRules(rule, module, baseSymbol) {
 module.exports = {
   BASES,
   OPS_BASES,
+  CLIENT_REGISTER,
   OM_ONLY,
   SCHEDULER_BASES,
   schedulerBase,
