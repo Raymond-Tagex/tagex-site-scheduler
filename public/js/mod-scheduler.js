@@ -1620,6 +1620,11 @@ function omCli(f){
 }
 function omResp(f){return f[OM_F.JC_RESP]?.name||'—';}
 function omOver(r){return(r.fields[OM_F.JC_OVER]||'').toUpperCase()==='OVERDUE';}
+// A job card is live until it is Completed, Closed or Cancelled. The Job Cards tab's badge and
+// its "All live" list both count by this one rule, so the tab opens onto the number it shows.
+// The finished ones stay one chip away (Raymond, 27 Oct 2026: hidden by default, not removed).
+const JC_FINISHED=['Completed','Closed','Cancelled'];
+function omLive(r){return !JC_FINISHED.includes(omFstr(r.fields,OM_F.JC_STAT));}
 function omStCls(s){return{New:'s-new','Under Review':'s-new','In Progress':'s-prog',Monitoring:'s-mon',Completed:'s-done',Closed:'s-closed',Cancelled:'s-closed'}[s]||'s-other';}
 // ── job card sheet: extra field renderers ───────────────────────────────────
 //
@@ -1710,9 +1715,12 @@ function omApplyJCFilters(){
   // OVERDUE and DONE are not statuses. Overdue is a flag that cuts across them, and the
   // Completed figure on the dashboard counts Completed and Closed together -- so the list has
   // to filter the way the figure was counted, or clicking 87 opens onto a different 87.
+  // ALL is every LIVE job card; EVERY is all of them, finished included, for the dashboard's
+  // Total figure, which counts them all.
   if(omFilter==='OVERDUE')   list=list.filter(r=>omOver(r));
   else if(omFilter==='DONE') list=list.filter(r=>['Completed','Closed'].includes(omFstr(r.fields,OM_F.JC_STAT)));
-  else if(omFilter!=='ALL')  list=list.filter(r=>omFstr(r.fields,OM_F.JC_STAT)===omFilter);
+  else if(omFilter==='ALL')  list=list.filter(omLive);
+  else if(omFilter!=='EVERY') list=list.filter(r=>omFstr(r.fields,OM_F.JC_STAT)===omFilter);
   if(omOwnerFilter!=='ALL') list=list.filter(r=>omFstr(r.fields,OM_F.JC_OWNER)===omOwnerFilter);
   if(omSearchQ){ const q=omSearchQ.toLowerCase(); list=list.filter(r=>
     omFstr(r.fields,OM_F.JC_REF).toLowerCase().includes(q)||
@@ -3705,7 +3713,7 @@ function omSetDot(state){
   d.style.background=state==='live'?'var(--ok)':state==='err'?'var(--bad)':'var(--warn)';
 }
 function omUpdateBadge(){
-  const open=omJcData.filter(r=>!['Completed','Closed','Cancelled'].includes(omFstr(r.fields,OM_F.JC_STAT))).length;
+  const open=omJcData.filter(omLive).length;
   const b=document.getElementById('om-badge');
   if(!b)return;
   if(open>0){b.style.display='inline';b.textContent=open>99?'99+':open;}else b.style.display='none';

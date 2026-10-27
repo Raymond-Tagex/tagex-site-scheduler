@@ -1442,8 +1442,35 @@ async function suite(log) {
     litChips(), ['Closed', 'Completed']);
 
   await drill('om-s-total');
-  t('total opens every one', jcCards().length, 9);
-  t('under All', litChips(), ['All']);
+  t('total opens every one, finished ones included', jcCards().length, 9);
+  // "All live" would be a lie here -- three of the nine are finished -- and no status chip
+  // covers all nine, so none is lit.
+  t('with no status chip lit', litChips(), []);
+
+  log('\nTHE JOB CARDS TAB SHOWS THE LIVE ONES');
+  // Raymond, 27 Oct 2026: Completed, Closed and Cancelled job cards off the list by default,
+  // still one chip away. The tab's badge already counted only live ones; the list now agrees.
+  const jcChip = async (status) => {
+    document.querySelector('#om-view-jc .om-chip[data-a2="' + status + '"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+  };
+  await jcChip('ALL');
+  t('All live leaves out the completed, closed and cancelled cards', jcCards().sort(), [
+    'OM-2026-0135/INST/TE', 'OM-2026-0137/INST/TE', 'OM-2026-0139/INST/TE',
+    'OM-2026-0150/MAINT/TE', 'OM-2026-0155/MAINT/TE', 'OM-2026-0157/INST/TE']);
+  t('and opens onto the number on the tab', String(jcCards().length),
+    document.getElementById('om-badge').textContent.trim());
+  t('the chip says what it shows', litChips(), ['All live']);
+  await jcChip('Completed');
+  t('a completed card is one chip away', jcCards(), ['OM-2026-0148/INST/TE']);
+  await jcChip('Closed');
+  t('so is a closed one', jcCards(), ['OM-2026-0141/INST/TE']);
+  await jcChip('Cancelled');
+  t('and a cancelled one', jcCards(), ['OM-2026-0133/INST/TE']);
+  // Back to every card, as the section below was written against: its search is for Bethal,
+  // which is Closed and so is not under All live.
+  await drill('om-s-total');
 
   log('\nA FILTER LEFT ON DOES NOT MAKE A FIGURE LOOK WRONG');
   // 113 opening onto forty reads as a wrong number, not as a search nobody remembered.
@@ -2343,6 +2370,18 @@ const MUTANTS = [
   ['an owner left selected still cuts down what a figure opens',
    '  omOwnerFilter=\'ALL\'; const own=document.getElementById(\'om-owner\'); if(own) own.value=\'ALL\';',
    '  const own=document.getElementById(\'om-owner\');'],
+
+  ['finished job cards show under All live',
+   '  else if(omFilter===\'ALL\')  list=list.filter(omLive);',
+   '  else if(omFilter===\'ALL\')  list=list;'],
+
+  ['the total figure opens only the live job cards',
+   '  else if(omFilter!==\'EVERY\') list=list.filter(r=>omFstr(r.fields,OM_F.JC_STAT)===omFilter);',
+   '  else list=list.filter(r=>omFstr(r.fields,OM_F.JC_STAT)===omFilter);'],
+
+  ['the tab badge counts finished job cards too',
+   '  const open=omJcData.filter(omLive).length;',
+   '  const open=omJcData.length;'],
 
   ['the completed figure lights only one of the two chips it covers',
    '  const want = omFilter===\'DONE\' ? [\'Completed\',\'Closed\'] : [omFilter];',

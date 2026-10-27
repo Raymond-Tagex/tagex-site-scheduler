@@ -275,7 +275,7 @@
         <div id="om-dash-status"></div>
         <div class="om-slbl">Live Stats</div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">
-          <button type="button" class="om-stat" data-act="omStatDrill" data-a1="ALL" title="Show every job card"><div class="om-sv" id="om-s-total" style="color:#a16207">—</div><div class="om-sl">Total JCs</div></button>
+          <button type="button" class="om-stat" data-act="omStatDrill" data-a1="EVERY" title="Show every job card, finished ones included"><div class="om-sv" id="om-s-total" style="color:#a16207">—</div><div class="om-sl">Total JCs</div></button>
           <button type="button" class="om-stat" data-act="omStatDrill" data-a1="OVERDUE" title="Show the overdue job cards"><div class="om-sv" id="om-s-over" style="color:#b91c1c">—</div><div class="om-sl">Overdue</div></button>
           <button type="button" class="om-stat" data-act="omStatDrill" data-a1="In Progress" title="Show the job cards in progress"><div class="om-sv" id="om-s-prog" style="color:#1d4ed8">—</div><div class="om-sl">In Progress</div></button>
           <button type="button" class="om-stat" data-act="omStatDrill" data-a1="DONE" title="Show the completed and closed job cards"><div class="om-sv" id="om-s-done" style="color:#15803d">—</div><div class="om-sl">Completed</div></button>
@@ -290,7 +290,7 @@
             style="width:100%;background:var(--card);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:13px;padding:9px 12px;outline:none;">
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;padding-bottom:2px;">
-          <button class="om-chip on" data-act="omSetFilter" data-a1="@el" data-a2="ALL">All</button>
+          <button class="om-chip on" data-act="omSetFilter" data-a1="@el" data-a2="ALL" title="Every job card that is not Completed, Closed or Cancelled">All live</button>
           <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="OVERDUE">Overdue</button>
           <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="New">New</button>
           <button class="om-chip" data-act="omSetFilter" data-a1="@el" data-a2="In Progress">In Progress</button>
