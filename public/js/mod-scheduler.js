@@ -1466,7 +1466,15 @@ const OM_F = {
   // bases -- the one place in this file where the base picks the id.
   JC_REGION: SCHED_BASE==='RES' ? 'fldPcMZat4vCEG9kF' : 'fldGDedjC3ShTdunz',
 };
-const JC_REGIONS=['Gauteng','Eastern Cape'];
+// Replaced by the Region field's own choices from Airtable once omLoadRegions has read them, so a
+// region added there is offered here without a code change. These two only cover the first second.
+let JC_REGIONS=['Gauteng','Eastern Cape'];
+async function omLoadRegions(){
+  try{
+    const r=await TX.request('/api/jobcard-form',{ choices:'Region', base:SCHED_BASE });
+    if(r&&Array.isArray(r.choices)&&r.choices.length) JC_REGIONS=r.choices;
+  }catch(e){ /* keep the two above */ }
+}
 const OM_JC_FIELDS=[OM_F.JC_REF,OM_F.JC_TITLE,OM_F.JC_STAT,OM_F.JC_PRI,OM_F.JC_PROG,OM_F.JC_DUE,
   OM_F.JC_ISS,OM_F.JC_RESP,OM_F.JC_OVER,OM_F.JC_DAYS,OM_F.JC_CLI,OM_F.JC_CLINAME,OM_F.JC_SITE,OM_F.JC_TYPE,OM_F.JC_OWNER,OM_F.JC_ACTLOG,
   OM_F.JC_HOLD,OM_F.JC_COMPL,OM_F.JC_HEALTH,OM_F.JC_SLA,OM_F.JC_START,OM_F.JC_DONE,
@@ -1593,6 +1601,7 @@ async function omLoadAll(silent){
       omFetchAll(OM_T.JC,OM_JC_FIELDS,true),
       omLoadClients(),
       omFetchAll(OM_T.PPL,[]),
+      omLoadRegions(),
     ]);
     omJcData=jcR; omCliData=clR; omPplData=ppR;
     omSetDot('live');
@@ -3277,8 +3286,9 @@ function jcDetailSections(){
 function jcControl(id, label, fid, kind, options, value){
   const act = `data-on="change" data-act="omJcSet" data-a1="${id}" data-a2="${fid}" data-a3="@val"`;
   if(kind==='select'){
+    const opts=(value&&!(options||[]).includes(value))?(options||[]).concat([value]):(options||[]);
     return `<select ${act}><option value="">\u2014</option>`
-      + (options||[]).map(o=>`<option ${o===value?'selected':''}>${esc(o)}</option>`).join('')
+      + opts.map(o=>`<option ${o===value?'selected':''}>${esc(o)}</option>`).join('')
       + '</select>';
   }
   if(kind==='long'){

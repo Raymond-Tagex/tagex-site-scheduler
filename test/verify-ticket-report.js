@@ -419,6 +419,20 @@ console.log('\n\x1b[1mTHE TICKET LIST, SORTED\x1b[0m\n');
   t('a technician’s own tickets read newest first either way', [refs('tech', 'asc').slice(1, 3), refs('tech', 'desc').slice(1, 3)], [['0051', '0050'], ['0051', '0050']]);
   t('the rows given are not reordered in place', rows.map((x) => x.ref.slice(-4)), ['0099', '0100', '0012', '0050', '0051']);
   t('the sheet says how it is sorted', R.sortLabel('tech', 'asc'), 'Sorted by: Technician, A–Z');
+  {
+    const rr = (...regions) => regions.map((region, i) => ({ ref: 'R' + i, region }));
+    const names = (rows, sort, dir, choices) => R.regionSections(rows, sort, dir, choices).map((x) => x.name);
+    const CH = ['Gauteng', 'Eastern Cape', 'Western Cape', 'Kwa-Zulu Natal', 'Namibia', 'Other'];
+    t('a section per region that has tickets, in Airtable\'s order',
+      names(rr('Namibia', 'Gauteng', 'Western Cape'), 'ref', 'desc', CH), ['Gauteng', 'Western Cape', 'Namibia']);
+    t('a region that is no longer a choice still gets its section, after the choices',
+      names(rr('Mars', 'Gauteng'), 'ref', 'desc', CH), ['Gauteng', 'Mars']);
+    t('Region not set comes last', names(rr('', 'Other', ''), 'ref', 'desc', CH), ['Other', R.NO_REGION]);
+    t('sorted by region, the sections go A–Z', names(rr('Western Cape', 'Gauteng', 'Eastern Cape', ''), 'region', 'asc', CH),
+      ['Eastern Cape', 'Gauteng', 'Western Cape', R.NO_REGION]);
+    t('or Z–A, Region not set still last', names(rr('Western Cape', 'Gauteng', ''), 'region', 'desc', CH),
+      ['Western Cape', 'Gauteng', R.NO_REGION]);
+  }
   t('region sorts A–Z with the blank one last', R.sortRows([{ ref: 'A', region: 'Gauteng' }, { ref: 'B', region: '' }, { ref: 'C', region: 'Eastern Cape' }], 'region', 'asc').map((x) => x.ref), ['C', 'A', 'B']);
   {
     const html = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
@@ -488,6 +502,11 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
       return JSON.parse(JSON.stringify((baseId === T.BASES.RES ? RES_ROWS : ROWS)[tableId] || []));
     },
     async fieldMaps() { return { idToName: {}, nameToId: {} }; },
+    // The Region field as Airtable lists it: the printout's sections and the forms follow this.
+    async tableSchema(baseId, tableId) {
+      return tableId === JOBCARDS ? { fields: { Region: { type: 'singleSelect',
+        options: { choices: [{ name: 'Gauteng' }, { name: 'Eastern Cape' }, { name: 'Western Cape' }] } } } } : null;
+    },
   });
   let WHO = null;
   stub('_lib/session.js', {
@@ -614,6 +633,29 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
     t('and its printout has no costs on it', [r.code, /\nCost\n/.test(text), /R \d/.test(text), text.includes('Total cost')], [200, false, false, false]);
     t('but is still split by region', text.includes('GAUTENG') && text.includes('EASTERN CAPE'), true);
     for (const k of Object.keys(ROWS)) ROWS[k] = JSON.parse(keep)[k];
+  }
+
+  // ── the Region choices, for the job card forms ──
+  {
+    const jcForm = require(api('jobcard-form.js'));
+    const ask = async (as, body) => {
+      WHO = as;
+      const res = { code: 0, body: null, headers: {},
+        setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; },
+        send(b) { this.body = JSON.parse(b); return this; } };
+      await jcForm({ method: 'POST', body, headers: {}, url: '/api/jobcard-form' }, res);
+      return res;
+    };
+    let q = await ask(ops, { choices: 'Region' });
+    t('the forms get the Region choices from Airtable, in Airtable\'s order', [q.code, q.body.choices], [200, ['Gauteng', 'Eastern Cape', 'Western Cape']]);
+    q = await ask(who({ job_cards: { view: true, create: false, edit: false, delete: false, export: false } }), { choices: 'Region' });
+    t('viewing job cards is enough, no export right needed', q.code, 200);
+    q = await ask(who({ tickets: ALL }), { choices: 'Region' });
+    t('a role that may not view job cards is refused', q.code, 403);
+    q = await ask(ops, { choices: 'Status' });
+    t('and only Region can be asked for', q.code, 400);
+    q = await ask(ops, { choices: 'Region', base: 'CI' });
+    t('in the scheduler\'s bases only', q.code, 400);
   }
 
   // ── which base ──
