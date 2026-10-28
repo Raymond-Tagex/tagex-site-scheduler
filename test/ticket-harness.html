@@ -1993,7 +1993,7 @@ async function suite(log) {
   const sortSel = () => $('tktPrintSort'), dirSel = () => $('tktPrintDir');
   t('the sort pickers sit with the Print button', sortSel().closest('header.topbar') === printBtn().closest('header.topbar') && !!dirSel(), true);
   t('and are offered with it', [sortSel().hidden, dirSel().hidden], [false, false]);
-  t('offering ticket no., date reported and technician', [...sortSel().options].map((o) => o.value), ['ref', 'date', 'tech']);
+  t('offering ticket no., date reported, technician and region', [...sortSel().options].map((o) => o.value), ['ref', 'date', 'tech', 'region']);
   t('either way round', [...dirSel().options].map((o) => o.value), ['desc', 'asc']);
   const choose = (el, v) => { el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
   // Cleared first: every run here shares one localStorage, so an earlier run's choice would
@@ -2047,6 +2047,25 @@ async function suite(log) {
   tap(document.querySelector('[data-tab="omtickets"]')); await settle(10);
   t('and returning to the tickets tab brings it back', shown(), true);
   TX.request = realRequest;
+
+  log('\nWHAT A TICKET COST');
+  await backToTkt('TKT-2026-0006');
+  const costBox = () => document.getElementById('om-tktcost');
+  const saveCost = () => d().querySelector('[data-act="omTktSaveCost"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  t('the ticket has a box for what it cost', !!costBox() && costBox().type, 'number');
+  window.SENT = [];
+  costBox().value = '-5'; saveCost(); await settle(8);
+  t('a cost below zero is refused', [/Enter the cost in rand/.test(d().textContent), window.SENT.length], [true, 0]);
+  costBox().value = '1250.5'; saveCost(); await settle(8);
+  const costWrite = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+  t('a cost is saved on the ticket, in O&M\'s Ticket Cost field', costWrite && costWrite.fields, { fldYB7VustZxH0qMR: 1250.5 });
+  t('and says what was saved', /Saved: R 1.250\.50/.test(d().textContent), true);
+  const realCanField = TX.canField;
+  TX.canField = (m, f) => !(m === 'tickets' && f === 'Ticket Cost');
+  await backToTkt('TKT-2026-0006');
+  t('a role that may not read Ticket Cost is not shown it at all', [!!costBox(), d().querySelector('[data-act="omTktSaveCost"]'),
+    [...d().querySelectorAll('.om-fttl')].some((e) => e.textContent.trim() === 'Cost')], [false, null, false]);
+  TX.canField = realCanField;
 
   log('\nMONITORING A TICKET AFTER THE FIX');
   // Dates are whole days in South Africa, as the app counts them.
@@ -2176,6 +2195,12 @@ if (IS_RUNNER) {
 
 // ── mutants: each one a bug this file is supposed to catch ──────────────────
 const MUTANTS = [
+  ['the cost of a ticket is shown to a role that may not read it',
+   "${TX.canField('tickets','Ticket Cost','read')?`",
+   "${true?`"],
+  ['a negative cost is saved',
+   "if(v!==null&&(!isFinite(v)||v<0)){",
+   "if(v!==null&&!isFinite(v)){"],
   ['a ticket from the New Ticket form is raised without its form',
    "</div>';\n    const form=await omAutoForm('tkt',rec.id);\n    msg.innerHTML",
    "</div>';\n    const form={ html:'', problem:'' };\n    msg.innerHTML"],

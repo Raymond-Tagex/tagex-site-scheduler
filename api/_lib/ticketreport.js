@@ -448,6 +448,8 @@ const LIST_SORTS = Object.freeze({
   ref: { label: 'Ticket no.', asc: 'oldest first', desc: 'newest first' },
   date: { label: 'Date reported', asc: 'oldest first', desc: 'newest first' },
   tech: { label: 'Technician', asc: 'A–Z', desc: 'Z–A' },
+  // The sheet is already split by region; sorting on it orders the sections themselves.
+  region: { label: 'Region', asc: 'A–Z', desc: 'Z–A' },
 });
 const LIST_DIRS = Object.freeze(['asc', 'desc']);
 
@@ -463,6 +465,7 @@ function sortRows(rows, sort, dir) {
     ref: (r) => refKey(r.ref),
     date: (r) => { const t = Date.parse(r.reportedAt || ''); return isNaN(t) ? '' : String(t).padStart(15, '0'); },
     tech: (r) => str(r.tech).toLowerCase(),
+    region: (r) => str(r.region).toLowerCase(),
   }[by];
   return rows.slice().sort((a, b) => {
     const ka = key(a); const kb = key(b);
@@ -492,9 +495,14 @@ function daysOpen(reportedAt, closedAt, now) {
  * (up to MAX_PT) and shrinks only as far as the number of tickets forces it to. The print date is
  * large at the top right, so a sheet on a wall says at a glance how old it is.
  *
- * @param {object} d { filter, search, sort?, dir?, rows[], generatedBy, generatedAt }
- *   rows: { ref, reportedAt, closedAt, client, jc, tech, subject, category, priority, status },
- *   already in the order to print (sortRows); sort and dir only label it.
+ * The tickets print in one section per region -- Gauteng, then Eastern Cape, then any whose job card
+ * has no region yet -- each headed with its count and, when costs are shown, what they cost.
+ *
+ * @param {object} d { filter, search, sort?, dir?, rows[], showCost?, generatedBy, generatedAt }
+ *   rows: { ref, reportedAt, closedAt, client, jc, tech, subject, category, priority, status,
+ *   region, cost }, already in the order to print (sortRows); sort and dir only label it.
+ *   showCost: draw the Cost column and the totals. Off for a role that may not read Ticket Cost,
+ *   so the column is not there at all rather than there and empty.
  * @returns {Promise<Buffer>}
  */
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -506,6 +514,37 @@ function bigDate(iso) {
   const d = new Date(t + SAST_MS);
   return `${DAYS[d.getUTCDay()]} ${p2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
+
+/** Where a region-less ticket prints, and the order the sections print in. */
+const NO_REGION = 'Region not set';
+const REGIONS = Object.freeze(['Gauteng', 'Eastern Cape']);
+
+/**
+ * The row indices of each section, in print order. Gauteng and Eastern Cape always print, Gauteng
+ * first -- unless the list is sorted by region, when the sections go A–Z or Z–A. "Region not set"
+ * is last either way, as a blank is in every other sort.
+ */
+function regionSections(rows, sort, dir) {
+  const names = sort === 'region'
+    ? REGIONS.slice().sort((a, b) => (dir === 'asc' ? 1 : -1) * a.localeCompare(b))
+    : REGIONS.slice();
+  const out = names.map((name) => ({ name, idx: [] }));
+  const none = { name: NO_REGION, idx: [] };
+  rows.forEach((r, i) => {
+    const s = out.find((x) => x.name === str(r.region));
+    (s || none).idx.push(i);
+  });
+  return none.idx.length ? out.concat([none]) : out;
+}
+
+/** "R 12 345.60" -- spaces between thousands. Blank when unknown. */
+function fmtRand(n) {
+  if (n == null || n === '' || !isFinite(Number(n))) return '';
+  const [whole, cents] = Math.abs(Number(n)).toFixed(2).split('.');
+  return (Number(n) < 0 ? '-R ' : 'R ') + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + '.' + cents;
+}
+const costOf = (r) => (r.cost == null || r.cost === '' || !isFinite(Number(r.cost)) ? 0 : Number(r.cost));
+const sumCost = (rows) => Math.round(rows.reduce((a, r) => a + costOf(r), 0) * 100) / 100;
 
 async function ticketListPdf(d) {
   const doc = await PDFDocument.create();
@@ -521,9 +560,10 @@ async function ticketListPdf(d) {
   const put = (t, x, y, size, font = fonts.reg, color = INK) => page.drawText(safe(t), { x, y, size, font, color });
   const right = (t, y, size, font = fonts.reg, color = INK) => put(t, LM + cw - font.widthOfTextAtSize(safe(t), size), y, size, font, color);
 
+  const totalCost = d.showCost ? '    Total cost: ' + fmtRand(sumCost(rows)) : '';
   const showing = 'Showing: ' + (d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
     : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + label) + (d.search ? `    Search: "${d.search}"` : '')
-    + '    ' + sortLabel(d.sort, d.dir);
+    + '    ' + sortLabel(d.sort, d.dir) + totalCost;
   const present = TICKET_STATUSES.filter((st) => rows.some((r) => (str(r.status) || 'New') === st));
   const counts = present.map((st) => [st, String(rows.filter((r) => (str(r.status) || 'New') === st).length)]);
 
@@ -531,15 +571,23 @@ async function ticketListPdf(d) {
   // and share what is left (p = share).
   const COLS = [
     { head: 'Ticket', key: 'ref', fixed: true, bold: true }, { head: 'Reported', key: 'rep', fixed: true }, { head: 'Days', key: 'days', fixed: true },
-    { head: 'Client', key: 'client', p: 16 }, { head: 'Job card', key: 'jc', fixed: true }, { head: 'Technician', key: 'tech', p: 13 },
+    { head: 'Client', key: 'client', p: 16 }, { head: 'Job card', key: 'jc', fixed: true },
+    { head: 'Region', key: 'region', fixed: true }, { head: 'Technician', key: 'tech', p: 13 },
     { head: 'Subject', key: 'subject', p: 33 },
     { head: 'Category', key: 'category', p: 14 }, { head: 'Priority', key: 'priority', fixed: true }, { head: 'Status', key: 'status', p: 13 },
-  ];
+  ].concat(d.showCost ? [{ head: 'Cost', key: 'cost', fixed: true, right: true }] : []);
   const data = rows.map((r) => ({
     ref: r.ref, rep: fmtDate(r.reportedAt), days: daysOpen(r.reportedAt, r.closedAt, d.generatedAt),
     client: r.client, jc: r.jc, tech: str(r.tech) || '—', subject: r.subject, category: r.category,
     priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
+    region: str(r.region) || '—', cost: fmtRand(r.cost) || '—',
   }));
+  const sections = regionSections(rows, d.sort, d.dir);
+  // "GAUTENG  14 tickets  ·  R 12 300.00" over each section
+  const sectionHead = (s) => {
+    const n = `${s.idx.length} ticket${s.idx.length === 1 ? '' : 's'}`;
+    return { name: s.name.toUpperCase(), rest: n + (d.showCost ? '  ·  ' + fmtRand(sumCost(s.idx.map((i) => rows[i]))) : '') };
+  };
 
   // status counts as chips, wrapped onto as many lines as they need at size sp
   const chipLines = (sp) => {
@@ -569,6 +617,12 @@ async function ticketListPdf(d) {
     const fit = widthsAt(pt);
     if (!fit.ok) return { need: Infinity };      // numbers would crowd out the subject: go smaller
     widths = fit.w;
+    // A name or status that has to be broken mid-word ("Mthemb / u") reads worse than smaller
+    // text, so a size that would do that is passed over -- down to 6 pt, below which wrapping wins.
+    if (!oneLine && pt > 6 && data.some((row) => COLS.some((c, i) => !c.fixed
+      && safe(str(row[c.key])).split(/\s+/).some((w) => (c.bold ? fonts.bold : fonts.reg).widthOfTextAtSize(w, pt) > widths[i] - 5)))) {
+      return { need: Infinity };
+    }
     const cells = data.map((row) => COLS.map((c, i) => {
       const lines = wrap(safe(str(row[c.key])), c.bold ? fonts.bold : fonts.reg, pt, widths[i] - 5);
       if (!oneLine || lines.length <= 1) return lines;
@@ -579,8 +633,12 @@ async function ticketListPdf(d) {
     }));
     const rowH = cells.map((cs) => Math.max(1, ...cs.map((l) => l.length)) * lh + pt * 0.45);
     const sumPt = Math.min(pt, 11);
-    const head = sumPt * 1.5 + chipLines(sumPt).length * sumPt * 1.5 + sumPt * 0.4 + pt * 1.7;
-    const need = head + (data.length ? rowH.reduce((a, b) => a + b, 0) : pt * 2) + 12;
+    const head = sumPt * 1.5 + chipLines(sumPt).length * sumPt * 1.5 + sumPt * 0.4;
+    const perSection = pt * 2.1 + pt * 1.7;       // the region heading, then that section's column headings
+    const body = data.length
+      ? sections.reduce((a, s) => a + perSection + (s.idx.length ? s.idx.reduce((b, i) => b + rowH[i], 0) : pt * 1.6), 0)
+      : pt * 1.7 + pt * 2;
+    const need = head + body + 12;
     return { pt, lh, cells, rowH, sumPt, need, oneLine };
   };
   const search = () => {
@@ -636,28 +694,54 @@ async function ticketListPdf(d) {
   }
   y -= sp * 0.4;
 
-  // ── the table ──
+  // ── the table: one section per region, each with its own headings ──
   const pt = L.pt;
-  y -= pt * 1.3;
-  let x = LM;
-  COLS.forEach((c, i) => { put(c.head, x, y, pt, fonts.bold, MUTED); x += widths[i]; });
-  y -= pt * 0.4;
-  page.drawLine({ start: { x: LM, y }, end: { x: LM + cw, y }, thickness: 0.6, color: RULE });
-  if (!data.length) { put('No tickets match.', LM, y - pt * 1.4, pt, fonts.reg, MUTED); }
-  L.cells.forEach((cs, r) => {
+  const colHeads = () => {
+    y -= pt * 1.3;
+    let x = LM;
+    COLS.forEach((c, i) => {
+      if (c.right) put(c.head, x + widths[i] - 3 - fonts.bold.widthOfTextAtSize(c.head, pt), y, pt, fonts.bold, MUTED);
+      else put(c.head, x, y, pt, fonts.bold, MUTED);
+      x += widths[i];
+    });
+    y -= pt * 0.4;
+    page.drawLine({ start: { x: LM, y }, end: { x: LM + cw, y }, thickness: 0.6, color: RULE });
+  };
+  const drawRow = (r) => {
     const top = y;
-    x = LM;
-    cs.forEach((lines, i) => {
-      lines.forEach((line, j) => put(line, x, top - pt * 1.05 - j * L.lh, pt, COLS[i].bold ? fonts.bold : fonts.reg));
+    let x = LM;
+    L.cells[r].forEach((lines, i) => {
+      const font = COLS[i].bold ? fonts.bold : fonts.reg;
+      lines.forEach((line, j) => {
+        const ly = top - pt * 1.05 - j * L.lh;
+        if (COLS[i].right) put(line, x + widths[i] - 3 - font.widthOfTextAtSize(safe(line), pt), ly, pt, font);
+        else put(line, x, ly, pt, font);
+      });
       x += widths[i];
     });
     y = top - L.rowH[r];
     page.drawLine({ start: { x: LM, y: y + 1 }, end: { x: LM + cw, y: y + 1 }, thickness: 0.3, color: RULE });
-  });
+  };
+  if (!data.length) {
+    colHeads();
+    put('No tickets match.', LM, y - pt * 1.4, pt, fonts.reg, MUTED);
+  } else {
+    for (const s of sections) {
+      const h = sectionHead(s);
+      y -= pt * 2.1;
+      const hs = pt * 1.15;
+      put(h.name, LM, y + pt * 0.3, hs, fonts.bold, ACCENT);
+      put(h.rest, LM + fonts.bold.widthOfTextAtSize(safe(h.name), hs) + hs, y + pt * 0.3, hs, fonts.bold, INK);
+      colHeads();
+      if (!s.idx.length) { y -= pt * 1.6; put('No tickets.', LM, y + pt * 0.45, pt, fonts.reg, MUTED); }
+      s.idx.forEach(drawRow);
+    }
+  }
 
   // ── footer ──
   page.drawLine({ start: { x: LM, y: LM + 14 }, end: { x: LM + cw, y: LM + 14 }, thickness: 0.5, color: RULE });
-  put('Days: from reported to closed, or to today while the ticket is still open.', LM, LM + 18, 7, fonts.reg, MUTED);
+  put('Days: from reported to closed, or to today while the ticket is still open.'
+    + '  Region: from the ticket\'s job card; "' + NO_REGION + '" until one is chosen there.', LM, LM + 18, 7, fonts.reg, MUTED);
   put(`VAT: ${CO.vat}` + (CO.reg ? `  ·  Reg: ${CO.reg}` : ''), LM, LM + 4, 7, fonts.reg, MUTED);
   const mid = `${CO.name} — CONFIDENTIAL`;
   put(mid, LM + (cw - fonts.reg.widthOfTextAtSize(mid, 7)) / 2, LM + 4, 7, fonts.reg, MUTED);
@@ -676,5 +760,5 @@ const reportFilename = (d) => {
 module.exports = {
   ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str, safe,
   ticketListPdf, listFilename, inFilter, daysOpen, filterLabel, TICKET_STATUSES, OPEN_STATUSES,
-  LIST_SORTS, LIST_DIRS, sortRows, sortLabel,
+  LIST_SORTS, LIST_DIRS, sortRows, sortLabel, regionSections, fmtRand, NO_REGION,
 };

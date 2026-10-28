@@ -1461,11 +1461,16 @@ const OM_F = {
   JC_HOLD:'fldRNEUnCkXE1ilIe',   JC_COMPL:'flduo4vkvUSLkBiqv', JC_HEALTH:'fldvHA23p2K2U8e3m',
   JC_SLA:'fldTiIBJqA2YcfZzR',    JC_START:'fldg6e3e8cBU0KHMq',  JC_DONE:'fld5C8sACx5iWoEJl',
   JC_DOCS:'fldyAexoO4YZVBWPl',   JC_COST:'fldO7Uk0MU2gIkNnB',   JC_SIGN:'fldUHKaatAu0fQld5',
+  // Gauteng / Eastern Cape: which half of the ticket list a job card's tickets print in.
+  // Created on 28 Oct 2026, after RES was copied from O&M, so its id is NOT the same in both
+  // bases -- the one place in this file where the base picks the id.
+  JC_REGION: SCHED_BASE==='RES' ? 'fldPcMZat4vCEG9kF' : 'fldGDedjC3ShTdunz',
 };
+const JC_REGIONS=['Gauteng','Eastern Cape'];
 const OM_JC_FIELDS=[OM_F.JC_REF,OM_F.JC_TITLE,OM_F.JC_STAT,OM_F.JC_PRI,OM_F.JC_PROG,OM_F.JC_DUE,
   OM_F.JC_ISS,OM_F.JC_RESP,OM_F.JC_OVER,OM_F.JC_DAYS,OM_F.JC_CLI,OM_F.JC_CLINAME,OM_F.JC_SITE,OM_F.JC_TYPE,OM_F.JC_OWNER,OM_F.JC_ACTLOG,
   OM_F.JC_HOLD,OM_F.JC_COMPL,OM_F.JC_HEALTH,OM_F.JC_SLA,OM_F.JC_START,OM_F.JC_DONE,
-  OM_F.JC_DOCS,OM_F.JC_COST,OM_F.JC_SIGN];
+  OM_F.JC_DOCS,OM_F.JC_COST,OM_F.JC_SIGN,OM_F.JC_REGION];
 
 // ── TICKETS ────────────────────────────────────────────────────────────────
 //
@@ -1490,6 +1495,9 @@ const TK = {
   // Technicians may neither read nor write this, and Warehouse may not read it. The proxy
   // strips it either way; nothing below should render it without checking.
   costRecoverable:'fldto6cIG5jPuSzXI',
+  // What the ticket has cost, typed in by hand. Denied to every role denied Cost Recoverable
+  // (permissions.js COUPLED_DENIES). Like JC_REGION, created after RES was copied, so per base.
+  cost: SCHED_BASE==='RES' ? 'fldLfRHuCEeUM9EnA' : 'fldYB7VustZxH0qMR',
 };
 const TKS = {
   lineId:'flddRW5MNZaDXATLw', ticket:'fldTNufFJIZd10lna', visit:'fldkd9aIylu0lRM6S',
@@ -2312,6 +2320,16 @@ function omBuildTicket(rec,acts,spares){
         `:`<div class="om-tltx">${esc(omFstr(f,TK.resolution))||'<span class="om-hint">Nothing recorded yet.</span>'}</div>`}
         ${f[TK.closedAt]?`<div class="om-jcmeta" style="margin-top:8px">Closed ${esc(fmtDateTime(f[TK.closedAt]))}</div>`:''}
       </div>
+      ${TX.canField('tickets','Ticket Cost','read')?`
+      <div class="om-fcard"><div class="om-fttl">Cost</div>
+        ${canEdit&&TX.canField('tickets','Ticket Cost','write')?`
+        <input type="number" id="om-tktcost" min="0" step="0.01" inputmode="decimal" placeholder="0.00"
+               value="${f[TK.cost]==null?'':esc(String(f[TK.cost]))}" style="max-width:180px">
+        <div class="om-hint">What this ticket has cost, in rand. Printed in the last column of the ticket list. Leave empty if not known yet.</div>
+        <div id="om-tktcostmsg"></div>
+        <button class="btn ghost sm" data-act="omTktSaveCost" data-a1="${esc(rec.id)}" style="margin-top:8px">Save cost</button>
+        `:`<div class="om-tltx">${f[TK.cost]==null?'<span class="om-hint">Not recorded.</span>':esc(omRand(f[TK.cost]))}</div>`}
+      </div>`:''}
       ${canEdit?`
       <div class="om-fcard"><div class="om-fttl">Add a note</div>
         <textarea id="om-tktnote" rows="4" placeholder="What happened on site, what was found, what is still outstanding."></textarea>
@@ -2978,6 +2996,40 @@ async function omTktSaveResolution(id){
   }
 }
 
+/** R 1 234.50 -- the way the printed list shows it. */
+function omRand(n){
+  // Not toLocaleString: en-ZA gives a decimal comma, and the printout (ticketreport.js fmtRand) a point.
+  const [whole,cents]=Math.abs(Number(n)).toFixed(2).split('.');
+  return (Number(n)<0?'-R ':'R ')+whole.replace(/\B(?=(\d{3})+(?!\d))/g,' ')+'.'+cents;
+}
+
+/** Save what a ticket has cost. Empty clears it; anything else must be a rand amount, 0 or more. */
+async function omTktSaveCost(id){
+  const rec=omTktData.find(r=>r.id===id); if(!rec)return;
+  const el=document.getElementById('om-tktcost');
+  const msg=document.getElementById('om-tktcostmsg');
+  const raw=String((el&&el.value)||'').trim().replace(/\s/g,'').replace(',','.');
+  const v=raw===''?null:Number(raw);
+  if(v!==null&&(!isFinite(v)||v<0)){
+    if(msg) msg.innerHTML='<div class="om-err">⚠ Enter the cost in rand, for example 1250.00 — or leave it empty.</div>';
+    if(el) el.focus();
+    return;
+  }
+  const amount=v===null?null:Math.round(v*100)/100;
+  if(amount===(rec.fields[TK.cost]==null?null:rec.fields[TK.cost])){
+    if(msg) msg.innerHTML='<div class="om-hint">Nothing has changed.</div>';
+    return;
+  }
+  if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving…</div>';
+  try{
+    const up=await tktUpdate(id,{[TK.cost]:amount});
+    if(up){ Object.assign(rec.fields,up.fields); if(!(TK.cost in up.fields)) delete rec.fields[TK.cost]; }
+    if(msg) msg.innerHTML='<div class="om-ok">✓ Saved'+(amount===null?' — cost cleared.':': '+esc(omRand(amount))+'.')+'</div>';
+  }catch(e){
+    if(msg) msg.innerHTML='<div class="om-err">✕ '+esc(e.message)+'</div>';
+  }
+}
+
 function omCloseTicket(){omGoView(omPrevView==='tktdetail'?'tickets':omPrevView);}
 
 /**
@@ -3179,6 +3231,7 @@ function jcDetailSections(){
       ['Date', JCF.JC_DDECDT, 'date'],
     ]],
     ['Job Card Details', [
+      ['Region', OM_F.JC_REGION, 'select', JC_REGIONS],
       ['Entity name', JCF.JC_ENTITY, 'select', JC_ENTITIES],
       ['Ticket raised by', JCF.JC_RAISEDBY, 'text'],
       ['Operational classification', JCF.JC_OPCLASS, 'select', JC_OPCLASSES],
@@ -3764,6 +3817,7 @@ function omRenderNewJC(){
   omFillSelect('njc-type',NJC_TYPES,'');
   omFillSelect('njc-pri',NJC_PRIS,'Medium');
   omFillSelect('njc-stat',NJC_STATS,'New');
+  omFillSelect('njc-region',JC_REGIONS,'');
   omFillSelect('njc-entity',JC_ENTITIES,'');
   omFillSelect('njc-opclass',JC_OPCLASSES,'Standard Operational Activity');
   const actBox=document.getElementById('njc-actions');
@@ -3844,6 +3898,7 @@ async function omSubmitNewJC(){
     // the job runs, on the detail screen.
     const put=(elId,fid)=>{ const e=document.getElementById(elId);
       const v=e?String(e.value||'').trim():''; if(v) f[fid]=v; };
+    put('njc-region',   OM_F.JC_REGION);
     put('njc-entity',   JCF.JC_ENTITY);
     put('njc-raisedby', JCF.JC_RAISEDBY);
     put('njc-opclass',  JCF.JC_OPCLASS);
@@ -3929,6 +3984,7 @@ async function omSubmitNewJC(){
     add('omTktAttachJc', typeof omTktAttachJc === 'function' ? omTktAttachJc : null);
     add('omTktAddNote', typeof omTktAddNote === 'function' ? omTktAddNote : null);
     add('omTktSaveResolution', typeof omTktSaveResolution === 'function' ? omTktSaveResolution : null);
+    add('omTktSaveCost', typeof omTktSaveCost === 'function' ? omTktSaveCost : null);
     add('omFilterJCs', typeof omFilterJCs === 'function' ? omFilterJCs : null);
     add('omCliTab', typeof omCliTab === 'function' ? omCliTab : null);
     add('omCliPick', typeof omCliPick === 'function' ? omCliPick : null);

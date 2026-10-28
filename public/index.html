@@ -215,6 +215,7 @@
         <option value="ref">Sort: Ticket no.</option>
         <option value="date">Sort: Date reported</option>
         <option value="tech">Sort: Technician</option>
+        <option value="region">Sort: Region</option>
       </select>
       <select class="f" id="tktPrintDir" data-requires="tickets:export" title="Order of the printed list" aria-label="Order of the printed list" hidden>
         <option value="desc">Descending</option>
@@ -410,6 +411,7 @@
         <div class="om-fcard">
           <div class="om-fttl">Job Card Details</div>
           <div class="om-fld"><label>Title *</label><input type="text" id="njc-title" placeholder="Short description of the job"></div>
+          <div class="om-fld"><label>Region</label><select id="njc-region"></select></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <div class="om-fld"><label>Entity name</label><select id="njc-entity"></select></div>
             <div class="om-fld"><label>Ticket raised by</label><input type="text" id="njc-raisedby" placeholder="Who reported it"></div>
