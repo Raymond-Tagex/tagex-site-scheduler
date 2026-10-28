@@ -413,3 +413,29 @@
 .mod-scheduler .om-mongrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
 .mod-scheduler .om-mongrid label{display:flex;flex-direction:column;gap:4px;font-family:monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
 .mod-scheduler .om-mongrid input{font-family:inherit;font-size:13px;text-transform:none;letter-spacing:normal;}
+
+/* ── The contract behind a ticket or job card (contract-panel.js) ───────────────────────── */
+.mod-scheduler .om-con{background:var(--card);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;margin:0 0 12px;}
+.mod-scheduler .om-con-choose,.mod-scheduler .om-con-stale,.mod-scheduler .om-con-none,.mod-scheduler .om-con-unknown{border-color:var(--warn);}
+.mod-scheduler .om-con-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+.mod-scheduler .om-con-head b{font-family:monospace;font-size:14px;}
+.mod-scheduler .om-con-tag{font-family:monospace;font-size:12px;font-weight:700;padding:3px 9px;border-radius:6px;}
+.mod-scheduler .om-con-tag.fund{background:var(--accent);color:#101215;}
+.mod-scheduler .om-con-tag.warn{background:var(--warn);color:#101215;}
+.mod-scheduler .om-con-kind{font-family:monospace;font-size:10px;color:var(--muted);}
+.mod-scheduler .om-con-msg{font-size:12px;line-height:1.5;margin-bottom:6px;}
+.mod-scheduler .om-con-facts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;}
+.mod-scheduler .om-con-facts span,.mod-scheduler .om-con-w span{display:block;font-family:monospace;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.mod-scheduler .om-con-facts b{font-size:13px;}
+.mod-scheduler .om-con-ws{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px;margin-bottom:8px;}
+.mod-scheduler .om-con-w{border-radius:7px;padding:6px 8px;border:1px solid var(--line2);}
+.mod-scheduler .om-con-w i{font-style:normal;text-transform:none;}
+.mod-scheduler .om-con-w b{font-size:12px;}
+.mod-scheduler .om-con-w.in b{color:var(--ok);}
+.mod-scheduler .om-con-w.out b{color:var(--bad);}
+.mod-scheduler .om-con-rule{font-size:12px;line-height:1.5;color:var(--muted);}
+.mod-scheduler .om-con-rule b{color:var(--text);}
+.mod-scheduler .om-con-pick{margin-top:8px;width:100%;}
+.mod-scheduler .om-con-chip{font-family:monospace;font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;background:var(--accent);color:#101215;}
+.mod-scheduler .om-con-chip.warn{background:var(--warn);}
+@media (max-width:560px){ .mod-scheduler .om-con-facts{grid-template-columns:1fr;} }

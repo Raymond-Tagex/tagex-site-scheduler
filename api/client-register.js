@@ -120,9 +120,22 @@ module.exports = async function handler(req, res) {
     async function list() {
       const contracts = await listAll(con.baseId, con.tableId);
       const numbers = new Map();
+      // What a ticket or job card shows about its contract: who funds it, when warranty started
+      // (the 1st invoice date) and what was installed. Portfolio is the funder (PPA, Alpine,
+      // PrefCap, TxE). The register holds no money, so nothing here is a figure the job card
+      // money rule would strip.
+      const details = new Map();
       for (const c of contracts) {
         if (str(c.fields.Status) === 'Inactive') continue;
-        for (const id of [].concat(c.fields.Client || [])) numbers.set(id, (numbers.get(id) || []).concat(str(c.fields['Contract Number'])));
+        const d = {
+          number: str(c.fields['Contract Number']), funder: str(c.fields.Portfolio),
+          firstInvoice: str(c.fields['First Invoice Date']), system: str(c.fields['System Description']),
+          kind: str(c.fields['Contract Kind']),
+        };
+        for (const id of [].concat(c.fields.Client || [])) {
+          numbers.set(id, (numbers.get(id) || []).concat(d.number));
+          details.set(id, (details.get(id) || []).concat(d));
+        }
       }
       const out = [];
       for (const m of register) {
@@ -134,6 +147,8 @@ module.exports = async function handler(req, res) {
           id: m.id, name: str(f['Client Name']), status: str(f.Status) || 'Active',
           contact: str(f['Contact Person']), mobile: str(f['Mobile Number']), email: str(f.Email), sites: str(f.Sites),
           contracts: (numbers.get(m.id) || []).filter(Boolean).sort(), mirrors,
+          contractDetails: (details.get(m.id) || []).filter((d) => d.number)
+            .sort((a, b) => a.number.localeCompare(b.number)),
         });
       }
       // A row added straight into this base and not adopted yet is still a client. Listed, so it

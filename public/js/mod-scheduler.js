@@ -1465,6 +1465,9 @@ const OM_F = {
   // Created on 28 Oct 2026, after RES was copied from O&M, so its id is NOT the same in both
   // bases -- the one place in this file where the base picks the id.
   JC_REGION: SCHED_BASE==='RES' ? 'fldPcMZat4vCEG9kF' : 'fldGDedjC3ShTdunz',
+  // The client's contract this job card is for (SUB-148), from the TAGEX Clients register --
+  // text, because links cannot cross bases. Created 28 Oct 2026, so per base like JC_REGION.
+  JC_CONTRACT: SCHED_BASE==='RES' ? 'fldurJcHRH6UH4OUW' : 'fldL3oHNNsMKzbtNt',
 };
 // Replaced by the Region field's own choices from Airtable once omLoadRegions has read them, so a
 // region added there is offered here without a code change. These two only cover the first second.
@@ -1478,7 +1481,7 @@ async function omLoadRegions(){
 const OM_JC_FIELDS=[OM_F.JC_REF,OM_F.JC_TITLE,OM_F.JC_STAT,OM_F.JC_PRI,OM_F.JC_PROG,OM_F.JC_DUE,
   OM_F.JC_ISS,OM_F.JC_RESP,OM_F.JC_OVER,OM_F.JC_DAYS,OM_F.JC_CLI,OM_F.JC_CLINAME,OM_F.JC_SITE,OM_F.JC_TYPE,OM_F.JC_OWNER,OM_F.JC_ACTLOG,
   OM_F.JC_HOLD,OM_F.JC_COMPL,OM_F.JC_HEALTH,OM_F.JC_SLA,OM_F.JC_START,OM_F.JC_DONE,
-  OM_F.JC_DOCS,OM_F.JC_COST,OM_F.JC_SIGN,OM_F.JC_REGION];
+  OM_F.JC_DOCS,OM_F.JC_COST,OM_F.JC_SIGN,OM_F.JC_REGION,OM_F.JC_CONTRACT];
 
 // ── TICKETS ────────────────────────────────────────────────────────────────
 //
@@ -1506,6 +1509,8 @@ const TK = {
   // What the ticket has cost, typed in by hand. Denied to every role denied Cost Recoverable
   // (permissions.js COUPLED_DENIES). Like JC_REGION, created after RES was copied, so per base.
   cost: SCHED_BASE==='RES' ? 'fldLfRHuCEeUM9EnA' : 'fldYB7VustZxH0qMR',
+  // The ticket's contract (SUB-148). Blank means "the job card's". Per base, like cost.
+  contract: SCHED_BASE==='RES' ? 'flde4zb3fATF9Yhkr' : 'fldVh5h1cf35T2fkg',
 };
 const TKS = {
   lineId:'flddRW5MNZaDXATLw', ticket:'fldTNufFJIZd10lna', visit:'fldkd9aIylu0lRM6S',
@@ -1562,7 +1567,7 @@ async function omLoadClients(){
     const r=await TX.request('/api/client-register',{op:'list',base:SCHED_BASE});
     if(r&&Array.isArray(r.clients)) return r.clients.map(c=>({
       id:(c.mirrors||[])[0]||'', regId:c.id||'', mirrors:c.mirrors||[], status:c.status||'Active',
-      contracts:c.contracts||[], unregistered:!!c.unregistered,
+      contracts:c.contracts||[], contractDetails:c.contractDetails||[], unregistered:!!c.unregistered,
       fields:{[OM_F.CL_NAME]:c.name||'',[OM_F.CL_CONT]:c.contact||'',[OM_F.CL_EMAIL]:c.email||'',[OM_F.CL_SITE]:c.sites||''},
     }));
   }catch(e){ console.warn('Client register unavailable; reading this base\u2019s Clients instead.',e); }
@@ -1694,6 +1699,7 @@ function omJcCard(rec){
       <span class="om-pb ${omPrCls(pri)}">${pri}</span>
       ${owner?`<span class="om-own">${owner}</span>`:''}
       ${over?`<span class="om-ov">⚠ ${days!=null?Math.round(days)+'d overdue':'OVERDUE'}</span>`:''}
+      ${TX.contract.chipHtml(omJcContract(rec),esc)}
     </div>
     <div class="om-jcfoot">
       <div style="display:flex;align-items:center;gap:4px;font-family:monospace;font-size:9px;color:var(--muted)">
@@ -1878,6 +1884,66 @@ function omTktCli(rec){
   return c?omFstr(c.fields,OM_F.CL_NAME):'';
 }
 
+// ── The contract behind a ticket or job card (public/js/contract-panel.js) ──
+// Funder, warranty start and what was installed decide how the team acts on a repair and its
+// cost (Raymond, 28 Oct 2026), so every ticket and job card shows them.
+function omJcClient(jc){ return jc?omCliByLink(omLinkIds(jc.fields[OM_F.JC_CLI])[0]):null; }
+function omTktClient(rec){ return omJcClient(omTktJc(rec))||omCliByLink(omLinkIds(rec.fields[TK.client])[0]); }
+/** null when the register could not be read: the panel then says unknown, never "no contract". */
+function omConDetails(cli){ return cli&&!cli.fallback ? (cli.contractDetails||[]) : null; }
+/** A ticket's own contract, else its job card's. */
+function omTktContract(rec){
+  const jc=omTktJc(rec);
+  const num=omFstr(rec.fields,TK.contract)||(jc?omFstr(jc.fields,OM_F.JC_CONTRACT):'');
+  return TX.contract.resolve(omConDetails(omTktClient(rec)),num);
+}
+function omJcContract(jc){ return TX.contract.resolve(omConDetails(omJcClient(jc)),omFstr(jc.fields,OM_F.JC_CONTRACT)); }
+function omConPanel(kind,rec){
+  const tkt=kind==='tkt';
+  const cli=tkt?omTktClient(rec):omJcClient(rec);
+  return TX.contract.panelHtml({
+    res: tkt?omTktContract(rec):omJcContract(rec), details: omConDetails(cli), esc,
+    today: new Date().toISOString().slice(0,10),
+    canEdit: tkt ? TX.can('tickets','edit')&&TX.canField('tickets','Contract Number','write')
+                 : TX.can('job_cards','edit')&&TX.canField('job_cards','Contract Number','write'),
+    act: tkt?'omTktSetContract':'omJcSetContract', recId: rec.id,
+  });
+}
+/** Set a record's contract, and say so in the activity log of the job card (and ticket). */
+async function omSetContract(kind,id,num){
+  num=String(num||'').trim(); if(!num) return;
+  const tkt=kind==='tkt';
+  try{
+    if(tkt){
+      const rec=await tktUpdate(id,{[TK.contract]:num});
+      const i=omTktData.findIndex(r=>r.id===id); if(i>=0&&rec) omTktData[i]=rec;
+    }else{
+      await omPatch(OM_T.JC,id,{[OM_F.JC_CONTRACT]:num});
+      const r=omJcData.find(x=>x.id===id); if(r) r.fields[OM_F.JC_CONTRACT]=num;
+    }
+    const rec=tkt?omTktData.find(r=>r.id===id):omJcData.find(r=>r.id===id);
+    const jcId=tkt?([].concat((rec&&rec.fields[TK.jc])||[])[0]||''):id;
+    const entry={[OM_F.AL_NOTE]:'Contract set to '+num,[OM_F.AL_TYPE]:'Comment'};
+    if(jcId) entry[OM_F.AL_JC]=[jcId];
+    if(tkt) entry[OM_F.AL_TICKET]=[id];
+    try{ await omPost(OM_T.ACT,entry); }catch(e){ /* the contract is saved; the note is extra */ }
+    toast('\u2713 Contract '+num,'ok');
+    if(tkt) omOpenTicket(id); else omOpenDetail(id);
+  }catch(e){ toast('\u2715 '+e.message,'bad'); }
+}
+const omTktSetContract=(id,num)=>omSetContract('tkt',id,num);
+const omJcSetContract=(id,num)=>omSetContract('jc',id,num);
+
+/** The New Ticket / New Job Card contract picker: the client's contracts, one preselected. */
+function omFillContractSel(selId,cli,want){
+  const sel=document.getElementById(selId); if(!sel) return;
+  const list=omConDetails(cli)||[];
+  const keep=want||sel.value;
+  sel.innerHTML='<option value="">'+(cli?(list.length?'\u2014 Choose the contract \u2014':'No contract in the register'):'\u2014 Choose a client first \u2014')+'</option>'
+    +list.map(d=>'<option value="'+esc(d.number)+'">'+esc(d.number)+(d.funder?' \u00b7 '+esc(d.funder):'')+(d.system?' \u00b7 '+esc(d.system):'')+'</option>').join('');
+  sel.value=list.some(d=>d.number===keep)?keep:(list.length===1?list[0].number:'');
+}
+
 function omTktCard(rec){
   const f=rec.fields;
   const jc=omTktJc(rec);
@@ -1892,6 +1958,7 @@ function omTktCard(rec){
       <span class="om-pb ${omPrCls(pri)}">${esc(pri)}</span>
       ${chan?`<span class="om-own">${esc(chan)}</span>`:''}
       ${omTktMonFlag(rec)}
+      ${TX.contract.chipHtml(omTktContract(rec),esc)}
     </div>
     <div class="om-jcfoot">
       <div style="font-family:monospace;font-size:9px;color:var(--muted)">
@@ -2290,6 +2357,7 @@ function omBuildTicket(rec,acts,spares){
       ${omTktMonFlag(rec)}
     </div>
     <div class="om-dbody">
+      ${omConPanel('tkt',rec)}
       <div class="om-acts">
         ${closed?'':`<button class="btn sm" data-act="omBookVisit" data-a1="${esc(rec.id)}">\ud83d\udcc5 ${visits.length?'Schedule another visit':'Schedule site visit'}</button>`}
         ${TX.can('tickets','export')?`<button class="btn ghost sm" data-act="omTktForm" data-a1="${esc(rec.id)}">\ud83d\udcc4 Print ticket form</button>`:''}
@@ -3379,6 +3447,7 @@ function omBuildDetail(rec,actLog){
       ${over?`<span class="om-ov">⚠ ${days!=null?Math.round(days)+'d overdue':'OVERDUE'}</span>`:''}
       ${omFstr(f,OM_F.JC_OWNER)?`<span class="om-own">${omFstr(f,OM_F.JC_OWNER)}</span>`:''}
     </div>
+    ${omConPanel('jc',rec)}
     <div class="om-acts">
       <button class="om-act go"  data-act="omUpdStat" data-a1="${id}" data-a2="In Progress">▶ In Progress</button>
       <button class="om-act mon" data-act="omUpdStat" data-a1="${id}" data-a2="Monitoring">👁 Monitoring</button>
@@ -3499,6 +3568,7 @@ function omTktCliPick(sel){
   omPopJCDropdown();
 }
 function omPopJCDropdown(){
+  omPopTktContract();
   const sel=document.getElementById('om-jcsel');
   if(!sel)return;
   const cliSel=document.getElementById('om-clisel');
@@ -3517,6 +3587,13 @@ function omPopJCDropdown(){
   sel.value=omSelJCId||'';
   if(TX.pick) TX.pick.refresh(sel);
 }
+/** The ticket form's contract: the chosen job card's, else the client's only one. */
+function omPopTktContract(){
+  const cs=document.getElementById('om-clisel');
+  const jc=omSelJCId?omJcData.find(r=>r.id===omSelJCId):null;
+  const cli=jc?omJcClient(jc):omCliByVal(cs?cs.value:'');
+  omFillContractSel('om-consel',cli,jc?omFstr(jc.fields,OM_F.JC_CONTRACT):'');
+}
 function omJCPick(sel){
   const opt=sel.options[sel.selectedIndex],prev=document.getElementById('om-jcprev');
   if(opt?.value){
@@ -3526,6 +3603,8 @@ function omJCPick(sel){
     if(cs&&cli&&cs.value!==cli&&[...cs.options].some(o=>o.value===cli)){ cs.value=cli; if(TX.pick) TX.pick.refresh(cs); }
     prev.style.display='block';prev.innerHTML=`<strong style="color:var(--accent)">${opt.dataset.ref||opt.value}</strong><br>${opt.dataset.ttl||''}<br>🏢 ${opt.dataset.cli||'—'}${opt.dataset.own?' · Owner: <span style="color:#a16207">'+opt.dataset.own+'</span>':''}<br>Status: <span style="color:var(--accent)">${opt.dataset.stat||'—'}</span>`;}
   else{omSelJCId='';prev.style.display='none';}
+  // A job card brings its contract with it.
+  omPopTktContract();
 }
 // Scoped to its own row. The visit modal has a chip row of its own, and a document-wide
 // query cleared the selection on whichever one the user was not looking at.
@@ -3598,6 +3677,8 @@ async function omSubmit(){
     if(asset)  f[TK.asset]=asset;
     if(err)    f[TK.errCode]=err;
     if(detail) f[TK.channelDetail]=detail;
+    const con=(document.getElementById('om-consel')||{}).value||'';
+    if(con) f[TK.contract]=con;
 
     const rec=await tktCreate(f);
     // Ticket Ref is a formula, so it exists the moment the record does. No second write, and
@@ -3852,7 +3933,9 @@ function omRenderNewJC(){
   document.getElementById('njc-msg').innerHTML='';
 }
 function omCliPick(){
-  document.getElementById('njc-newcli').style.display=document.getElementById('njc-cli').value==='__new__'?'block':'none';
+  const v=document.getElementById('njc-cli').value;
+  document.getElementById('njc-newcli').style.display=v==='__new__'?'block':'none';
+  omFillContractSel('njc-contract',v&&v!=='__new__'?omCliByVal(v):null,'');
 }
 async function omSubmitNewJC(){
   const msg=document.getElementById('njc-msg'), btn=document.getElementById('njc-subtxt');
@@ -3909,6 +3992,7 @@ async function omSubmitNewJC(){
     const put=(elId,fid)=>{ const e=document.getElementById(elId);
       const v=e?String(e.value||'').trim():''; if(v) f[fid]=v; };
     put('njc-region',   OM_F.JC_REGION);
+    put('njc-contract', OM_F.JC_CONTRACT);
     put('njc-entity',   JCF.JC_ENTITY);
     put('njc-raisedby', JCF.JC_RAISEDBY);
     put('njc-opclass',  JCF.JC_OPCLASS);
@@ -3967,6 +4051,8 @@ async function omSubmitNewJC(){
     add('omGoView', typeof omGoView === 'function' ? omGoView : null);
     add('omSetFilter', typeof omSetFilter === 'function' ? omSetFilter : null);
     add('omStatDrill', typeof omStatDrill === 'function' ? omStatDrill : null);
+    add('omTktSetContract', omTktSetContract);
+    add('omJcSetContract', omJcSetContract);
     add('omSelPri', typeof omSelPri === 'function' ? omSelPri : null);
     add('omSelChan', typeof omSelChan === 'function' ? omSelChan : null);
     add('omSetTktFilter', typeof omSetTktFilter === 'function' ? omSetTktFilter : null);

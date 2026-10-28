@@ -36,8 +36,10 @@ function reset() {
         { id: 'recREGDELMAS00001', fields: { 'Client Name': 'Delmas Dairy', Status: 'Active', 'CI Client Record': 'recCIDELMAS000001', 'Use In': ['CI'] } },
       ],
       [CON]: [
-        { id: 'recCON0000000001', fields: { 'Contract Number': 'SUB-148', Client: ['recREGBISSET00001'], Status: 'Active' } },
-        { id: 'recCON0000000002', fields: { 'Contract Number': 'SUB-148-1', Client: ['recREGBISSET00001'], Status: 'Active' } },
+        { id: 'recCON0000000001', fields: { 'Contract Number': 'SUB-148', Client: ['recREGBISSET00001'], Status: 'Active',
+          Portfolio: 'PPA', 'First Invoice Date': '2025-09-25', 'System Description': '2x 7.5kw G4 Single phase', 'Contract Kind': 'Subscription' } },
+        { id: 'recCON0000000002', fields: { 'Contract Number': 'SUB-148-1', Client: ['recREGBISSET00001'], Status: 'Active',
+          Portfolio: 'Alpine', 'First Invoice Date': '2025-11-25', 'System Description': 'Additional Slave Battery x2' } },
         { id: 'recCON0000000003', fields: { 'Contract Number': 'SUB-099', Client: ['recREGBISSET00001'], Status: 'Inactive' } },
       ],
     },
@@ -137,6 +139,11 @@ const byName = (r, nm) => (r.body.clients || []).find((c) => c.name === nm);
   t('a client with no copy here has none', byName(r, 'Sean Bisset').mirrors, []);
   t('a copy in another base is not one here', byName(r, 'Delmas Dairy').mirrors, []);
   t('its live contracts come with it, not the inactive one', byName(r, 'Sean Bisset').contracts, ['SUB-148', 'SUB-148-1']);
+  // What the ticket and job card panel shows: funder (Portfolio), warranty start, system.
+  t('each with its funder, 1st invoice date and system', byName(r, 'Sean Bisset').contractDetails, [
+    { number: 'SUB-148', funder: 'PPA', firstInvoice: '2025-09-25', system: '2x 7.5kw G4 Single phase', kind: 'Subscription' },
+    { number: 'SUB-148-1', funder: 'Alpine', firstInvoice: '2025-11-25', system: 'Additional Slave Battery x2', kind: '' },
+  ]);
   t('the unadopted row is marked and kept', [byName(r, 'Walk-in Client').unregistered, byName(r, 'Walk-in Client').mirrors], [true, ['recOMWALKIN000001']]);
   t('the details are the register’s', [byName(r, 'Grootvlei').contact, byName(r, 'Grootvlei').email], ['Oubaas', 'oubaas@grootvlei.co.za']);
   t('the view is audited as allowed', AUDIT.some((a) => a.action === 'View' && a.result === 'Allowed' && a.module === 'clients'), true);

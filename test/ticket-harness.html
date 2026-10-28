@@ -29,6 +29,7 @@
 
 <script src="/js/core.js"></script>
 <script src="/js/pick.js"></script>
+<script src="/js/contract-panel.js"></script>
 <script>
 // ── field ids, written out so a typo in the app is a failure here ───────────
 const FID = {
@@ -123,7 +124,11 @@ const CLIENTS = [
 // Dairy have copies here (the CLIENTS rows); Sean Bisset is in the register only, so choosing
 // him has to make his copy first.
 const REGISTER = [
-  { id:'recREGGROOTVLEI01', name:'Grootvlei', contact:'Oubaas', email:'', sites:'', mobile:'', status:'Active', contracts:[], mirrors:['recCLI1'] },
+  // Two contracts, so a Grootvlei ticket or job card has to be told which one it is for.
+  { id:'recREGGROOTVLEI01', name:'Grootvlei', contact:'Oubaas', email:'', sites:'', mobile:'', status:'Active',
+    contracts:['SUB-200','SUB-201'], mirrors:['recCLI1'], contractDetails:[
+      { number:'SUB-200', funder:'Alpine', firstInvoice:'2025-03-25', system:'5KW SYSTEM', kind:'Subscription' },
+      { number:'SUB-201', funder:'PPA', firstInvoice:'2025-09-25', system:'x3 7.5kW Hybrid G4', kind:'Subscription' }] },
   { id:'recREGDELMAS00001', name:'Delmas Dairy', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:[], mirrors:['recCLI2'] },
   { id:'recREGBISSET00001', name:'Sean Bisset', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-148'], mirrors:[] },
   // Never chosen in this suite, so the Clients view still has one with no copy here to show.
@@ -1394,6 +1399,45 @@ async function suite(log) {
   await settle(40);
   t('no second ticket is created',
     window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:ticket').length, 0);
+  omCloseAnyModal();
+
+  log('\nEVERY TICKET AND JOB CARD SAYS WHICH CONTRACT IT IS UNDER');
+  // Raymond, 28 Oct 2026: funder, warranty start, contract and system on every ticket and job
+  // card, because they decide how the team acts on a repair and its cost.
+  {
+    const panelIn = (host) => host.querySelector('.om-con');
+    await omOpenTicket('recTKTa'); await settle(12);
+    const tp = () => panelIn(document.getElementById('om-view-tktdetail'));
+    t('the ticket opens with its contract panel', !!tp(), true);
+    t('above the actions, where it is seen first',
+      !!tp() && !!(tp().compareDocumentPosition(document.querySelector('#om-view-tktdetail .om-acts')) & Node.DOCUMENT_POSITION_FOLLOWING), true);
+    t('Grootvlei has two contracts and none is chosen: it asks rather than guesses',
+      !!tp() && tp().classList.contains('om-con-choose'), true);
+    window.SENT = [];
+    const pick = tp().querySelector('.om-con-pick');
+    pick.value = 'SUB-201';
+    pick.dispatchEvent(new Event('change', { bubbles:true }));
+    await settle(20);
+    const saved = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+    t('choosing one saves it on the ticket', saved && saved.fields && saved.fields['fldVh5h1cf35T2fkg'], 'SUB-201');
+    t('and says so in the activity log', window.SENT.some((x) => x.op === 'create' && x.table === 'activity_log'
+      && /Contract set to SUB-201/.test((x.fields || {})[FID.alNote] || '')), true);
+    t('the panel then names the funder', tp() && tp().querySelector('.om-con-tag').textContent.trim(), 'PPA');
+    t('and the system installed', !!tp() && tp().textContent.includes('x3 7.5kW Hybrid G4'), true);
+    t('and the workmanship warranty', !!tp() && /Workmanship[\s\S]*until 2027-09-25/.test(tp().textContent), true);
+
+    omOpenDetail('recJC1'); await settle(12);
+    const jp = () => panelIn(document.getElementById('om-view-detail'));
+    t('the job card opens with its contract panel too', !!jp(), true);
+    window.SENT = [];
+    const jpick = jp().querySelector('.om-con-pick');
+    jpick.value = 'SUB-200';
+    jpick.dispatchEvent(new Event('change', { bubbles:true }));
+    await settle(20);
+    const jsaved = window.SENT.find((x) => x.op === 'update' && x.table === 'job_cards');
+    t('choosing one saves it on the job card', jsaved && jsaved.fields && jsaved.fields['fldL3oHNNsMKzbtNt'], 'SUB-200');
+    t('which then names its own funder', jp() && jp().querySelector('.om-con-tag').textContent.trim(), 'Alpine');
+  }
   omCloseAnyModal();
 
   log('\nA DASHBOARD FIGURE OPENS THE JOB CARDS IT COUNTED');
