@@ -1443,25 +1443,26 @@ async function suite(log) {
 
   await drill('om-s-total');
   t('total opens every one, finished ones included', jcCards().length, 9);
-  // "All live" would be a lie here -- three of the nine are finished -- and no status chip
-  // covers all nine, so none is lit.
-  t('with no status chip lit', litChips(), []);
+  t('under All Job Cards, which is what it shows', litChips(), ['All Job Cards']);
 
-  log('\nTHE JOB CARDS TAB SHOWS THE LIVE ONES');
-  // Raymond, 27 Oct 2026: Completed, Closed and Cancelled job cards off the list by default,
-  // still one chip away. The tab's badge already counted only live ones; the list now agrees.
+  log('\nTHE JOB CARDS TAB: LIVE, AND ALL JOB CARDS');
+  // Raymond, 27 Oct 2026: "Live" is the open job cards only -- not Completed, Closed or
+  // Cancelled -- and "All Job Cards" is a separate button for every one of them.
   const jcChip = async (status) => {
     document.querySelector('#om-view-jc .om-chip[data-a2="' + status + '"]')
       .dispatchEvent(new MouseEvent('click', { bubbles:true }));
     await settle(8);
   };
   await jcChip('ALL');
-  t('All live leaves out the completed, closed and cancelled cards', jcCards().sort(), [
+  t('Live leaves out the completed, closed and cancelled cards', jcCards().sort(), [
     'OM-2026-0135/INST/TE', 'OM-2026-0137/INST/TE', 'OM-2026-0139/INST/TE',
     'OM-2026-0150/MAINT/TE', 'OM-2026-0155/MAINT/TE', 'OM-2026-0157/INST/TE']);
   t('and opens onto the number on the tab', String(jcCards().length),
     document.getElementById('om-badge').textContent.trim());
-  t('the chip says what it shows', litChips(), ['All live']);
+  t('it is the button lit', litChips(), ['Live']);
+  await jcChip('EVERY');
+  t('All Job Cards shows every one, finished ones included', jcCards().length, 9);
+  t('under its own button', litChips(), ['All Job Cards']);
   await jcChip('Completed');
   t('a completed card is one chip away', jcCards(), ['OM-2026-0148/INST/TE']);
   await jcChip('Closed');
@@ -1469,7 +1470,7 @@ async function suite(log) {
   await jcChip('Cancelled');
   t('and a cancelled one', jcCards(), ['OM-2026-0133/INST/TE']);
   // Back to every card, as the section below was written against: its search is for Bethal,
-  // which is Closed and so is not under All live.
+  // which is Closed and so is not under Live.
   await drill('om-s-total');
 
   log('\nA FILTER LEFT ON DOES NOT MAKE A FIGURE LOOK WRONG');
@@ -2396,7 +2397,7 @@ const MUTANTS = [
    '  omOwnerFilter=\'ALL\'; const own=document.getElementById(\'om-owner\'); if(own) own.value=\'ALL\';',
    '  const own=document.getElementById(\'om-owner\');'],
 
-  ['finished job cards show under All live',
+  ['finished job cards show under Live',
    '  else if(omFilter===\'ALL\')  list=list.filter(omLive);',
    '  else if(omFilter===\'ALL\')  list=list;'],
 
