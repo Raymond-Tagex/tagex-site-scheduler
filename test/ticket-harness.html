@@ -357,6 +357,7 @@ function stubTX() {
       }
       if (q.table === 'people') return { records: PEOPLE };
       if (q.table === 'site_visits') return { records: VISITS };
+      if (q.table === 'site_equipment') return { records: EQUIP.map((r) => ({ id:r.id, fields:{ ...r.fields } })) };
       return { records: [] };
     }
     const key = q.table + (q.sub ? ':' + q.sub : '');
@@ -399,7 +400,6 @@ function stubTX() {
     if (q.table === 'site_visits' && q.op === 'create') {
       return { records:[{ id:'recNEWVISIT', fields:q.fields }] };
     }
-    if (q.table === 'site_equipment' && q.op === 'list') return { records: EQUIP.map((r) => ({ id:r.id, fields:{ ...r.fields } })) };
     if (q.table === 'site_equipment' && q.op === 'create') {
       const r = { id:'recEQ' + (EQUIP.length + 1), fields:{ ...q.fields } };
       EQUIP.push(r);
@@ -1463,7 +1463,8 @@ async function suite(log) {
     eq().querySelector('#om-eq-model').value = 'X3-Hybrid-7.5';
     eq().querySelector('#om-eq-serial').value = 'H37T1234567';
     eq().querySelector('[data-act="omEqAdd"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
-    await settle(20);
+    // The redraw reads the activity log and spares again before it draws.
+    await settle(60);
     const made = window.SENT.find((x) => x.table === 'site_equipment' && x.op === 'create');
     t('an inverter is saved against the contract, with its serial',
       made && [made.fields['Contract Number'], made.fields['Serial Number'], made.fields['Equipment Type']], ['SUB-201', 'H37T1234567', 'Inverter']);
