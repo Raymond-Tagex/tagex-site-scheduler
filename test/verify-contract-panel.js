@@ -94,6 +94,27 @@ console.log('\n\x1b[1mTHE SHORT FORM ON A LIST CARD\x1b[0m\n');
   t('nothing when the register could not be read', C.chipHtml(C.resolve(null, ''), esc), '');
 }
 
+console.log('\n\x1b[1mEQUIPMENT AND SERIAL NUMBERS\x1b[0m\n');
+{
+  t('inverters, batteries and dongles: Solax equipment, 10 years',
+    ['Inverter', 'Battery', 'Dongle'].map((x) => C.equipExpiry(x, '2025-09-25')), ['2035-09-25', '2035-09-25', '2035-09-25']);
+  t('PV modules: 25 years', C.equipExpiry('PV Module', '2025-09-25'), '2050-09-25');
+  t('everything else is material: 1 year', ['DB', 'Meter', 'Cabling', 'Other'].map((x) => C.equipYears(x)), [1, 1, 1, 1]);
+  t('no 1st invoice date, no expiry', C.equipExpiry('Inverter', ''), '');
+  const rows = [{ 'Equipment Type': 'Inverter', Manufacturer: 'Solax', Model: 'X3', 'Serial Number': 'H37T1', Quantity: 1, 'Warranty Expiry': '2035-09-25' },
+    { 'Equipment Type': 'DB', 'Serial Number': 'DB-9', Quantity: 1, 'Warranty Expiry': '2026-09-25' }];
+  const h = C.equipHtml({ rows, esc, today: '2026-10-28', canAdd: true, types: ['Inverter', 'Dongle'], act: 'omEqAdd', number: 'SUB-148' });
+  t('each item with its serial number', h.includes('H37T1') && h.includes('DB-9'), true);
+  t('and whether its warranty still runs', [/until 2035-09-25/.test(h), /ended 2026-09-25/.test(h)], [true, true]);
+  t('the form offers the types it is given', h.includes('<option>Dongle</option>'), true);
+  t('and adds to this contract', h.includes('data-act="omEqAdd" data-a1="SUB-148"'), true);
+  t('someone who may not add sees the list only',
+    C.equipHtml({ rows, esc, today: '2026-10-28', canAdd: false, number: 'SUB-148' }).includes('om-eq-add'), false);
+  t('a list that could not be read says so', /could not be read/.test(C.equipHtml({ rows: [], readFail: true, esc, number: 'SUB-1' })), true);
+  t('serials from Airtable are escaped',
+    /<img/.test(C.equipHtml({ rows: [{ 'Serial Number': '<img src=x>' }], esc, number: 'S' })), false);
+}
+
 console.log('\n\x1b[1mWIRED INTO THE SCHEDULER\x1b[0m\n');
 {
   const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'mod-scheduler.js'), 'utf8').replace(/\r\n/g, '\n');

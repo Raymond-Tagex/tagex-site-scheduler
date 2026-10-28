@@ -67,20 +67,24 @@ module.exports = async function handler(req, res) {
   // Read from the live schema (cached up to 10 minutes), so a region added in Airtable is offered
   // on the forms without a code change. Schema only, no records: viewing job cards is enough.
   const pre = (req.body && typeof req.body === 'object') ? req.body : {};
+  // { choices: 'Equipment Type' } does the same for Site Equipment's type, so a type added in
+  // Airtable ("Dongle", Raymond 28 Oct 2026 -- the API cannot add a choice) is offered at once.
+  const CHOICES = { Region: 'job_cards', 'Equipment Type': 'site_equipment' };
   if (pre.choices !== undefined) {
-    if (pre.choices !== 'Region') return H.fail(res, 400, 'bad_request', 'Only the Region choices can be asked for.');
-    const may = P.can(auth.perms, 'job_cards', 'view');
-    if (!may.ok) return H.fail(res, may.status, may.reason, 'You may not view job cards.');
+    const mod = Object.prototype.hasOwnProperty.call(CHOICES, pre.choices) ? CHOICES[pre.choices] : '';
+    if (!mod) return H.fail(res, 400, 'bad_request', 'Only the Region or Equipment Type choices can be asked for.');
+    const may = P.can(auth.perms, mod, 'view');
+    if (!may.ok) return H.fail(res, may.status, may.reason, 'You may not view ' + mod.replace('_', ' ') + '.');
     const b = T.schedulerBase(pre.base);
     if (!b) return H.fail(res, 400, 'bad_request', 'Unknown base.');
-    const r = T.resolve(b, 'job_cards');
+    const r = T.resolve(b, mod);
     if (!r.ok) return H.fail(res, r.status, r.reason, r.detail);
     try {
       const schema = await at.tableSchema(r.baseId, r.tableId);
-      const f = schema && schema.fields.Region;
+      const f = schema && schema.fields[pre.choices];
       return H.ok(res, { choices: f && f.type === 'singleSelect' ? (f.options.choices || []).map((c) => c.name) : [] });
     } catch (e) {
-      return H.fail(res, 502, 'airtable_error', 'The Region choices could not be read.');
+      return H.fail(res, 502, 'airtable_error', 'The ' + pre.choices + ' choices could not be read.');
     }
   }
 

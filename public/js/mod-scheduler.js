@@ -1472,6 +1472,25 @@ const OM_F = {
 // Replaced by the Region field's own choices from Airtable once omLoadRegions has read them, so a
 // region added there is offered here without a code change. These two only cover the first second.
 let JC_REGIONS=['Gauteng','Eastern Cape'];
+// Site Equipment, read and written by field NAME: the table predates RES but its Contract
+// Number field does not, so names are the one spelling both bases share. Cached for a minute;
+// null when it could not be read, which the screen says rather than showing an empty list.
+let omEquip=[], omEquipAt=0;
+async function omLoadEquip(force){
+  if(!force&&omEquip&&Date.now()-omEquipAt<60000) return omEquip;
+  try{ omEquip=(await TX.list(SCHED_BASE,'site_equipment',{pageSize:100})).records||[]; omEquipAt=Date.now(); }
+  catch(e){ omEquip=null; }
+  return omEquip;
+}
+// Replaced by the live Equipment Type choices, so "Dongle" is offered as soon as it is added
+// in Airtable (the API cannot add a choice).
+let EQUIP_TYPES=['Inverter','Battery','PV Module','Monitoring','DB','Meter','Mounting','Cabling','Other'];
+async function omLoadEquipTypes(){
+  try{
+    const r=await TX.request('/api/jobcard-form',{ choices:'Equipment Type', base:SCHED_BASE });
+    if(r&&Array.isArray(r.choices)&&r.choices.length) EQUIP_TYPES=r.choices;
+  }catch(e){ /* keep the list above */ }
+}
 async function omLoadRegions(){
   try{
     const r=await TX.request('/api/jobcard-form',{ choices:'Region', base:SCHED_BASE });
@@ -1607,6 +1626,7 @@ async function omLoadAll(silent){
       omLoadClients(),
       omFetchAll(OM_T.PPL,[]),
       omLoadRegions(),
+      omLoadEquipTypes(),
     ]);
     omJcData=jcR; omCliData=clR; omPplData=ppR;
     omSetDot('live');
@@ -1907,7 +1927,48 @@ function omConPanel(kind,rec){
     canEdit: tkt ? TX.can('tickets','edit')&&TX.canField('tickets','Contract Number','write')
                  : TX.can('job_cards','edit')&&TX.canField('job_cards','Contract Number','write'),
     act: tkt?'omTktSetContract':'omJcSetContract', recId: rec.id,
+  })+omEquipSection(tkt?omTktContract(rec):omJcContract(rec));
+}
+function omEquipSection(res){
+  if(!res||!res.contract) return '';
+  const num=String(res.contract.number||'').trim().toUpperCase();
+  return TX.contract.equipHtml({
+    rows: omEquip===null?[]:omEquip.map(r=>r.fields||{})
+      .filter(f=>String(f['Contract Number']||'').trim().toUpperCase()===num),
+    readFail: omEquip===null, esc, today: new Date().toISOString().slice(0,10),
+    canAdd: TX.can('site_equipment','create'), types: EQUIP_TYPES,
+    act: 'omEqAdd', number: res.contract.number,
   });
+}
+/** Add one item to a contract's equipment, with its warranty expiry worked out by type. */
+async function omEqAdd(number){
+  const val=(id)=>{ const e=document.getElementById(id); return e?String(e.value||'').trim():''; };
+  const type=val('om-eq-type'), serial=val('om-eq-serial');
+  if(!serial){ toast('\u26a0 Enter the serial number','bad'); return; }
+  let con=null, cli=null;
+  for(const c of omCliData){ const d=(c.contractDetails||[]).find(x=>x.number===number); if(d){ con=d; cli=c; break; } }
+  const qty=Number(val('om-eq-qty'))||1;
+  const f={
+    'Equipment ID': number+' / '+type+' / '+serial,
+    'Equipment Type': type, 'Serial Number': serial, 'Quantity': qty,
+    'Contract Number': number, 'Status': 'Active',
+    'Created By (App)': (TX.me()&&TX.me().user&&TX.me().user.email)||'',
+    'Created Date': new Date().toISOString(),
+  };
+  if(val('om-eq-make'))  f['Manufacturer']=val('om-eq-make');
+  if(val('om-eq-model')) f['Model']=val('om-eq-model');
+  if(cli) f['Site Name']=omCliName(cli);
+  if(con&&con.firstInvoice){
+    f['Installation Date']=String(con.firstInvoice).slice(0,10);
+    f['Warranty Expiry']=TX.contract.equipExpiry(type,con.firstInvoice);
+  }
+  try{
+    await TX.create(SCHED_BASE,'site_equipment',f);
+    await omLoadEquip(true);
+    toast('\u2713 '+type+' '+serial+' added to '+number,'ok');
+    if(document.getElementById('om-view-tktdetail').classList.contains('active')) omOpenTicket(omTktDetailId);
+    else if(omDetailId) omOpenDetail(omDetailId);
+  }catch(e){ toast('\u2715 '+e.message,'bad'); }
 }
 /** Set a record's contract, and say so in the activity log of the job card (and ticket). */
 async function omSetContract(kind,id,num){
@@ -2276,6 +2337,7 @@ async function omOpenTicket(id){
   try{
     spares=(await spareAll()).filter(r=>[].concat(r.fields[TKS.ticket]||[]).includes(id));
   }catch(e){ spares=null; }
+  await omLoadEquip();
   omBuildTicket(rec,acts,spares);
 }
 
@@ -3258,6 +3320,7 @@ async function omOpenDetail(id){
   document.getElementById('om-view-detail').classList.add('active');
   document.getElementById('om-d-body').innerHTML='<div class="om-loading"><span class="om-sp"></span>Loading activity log…</div>';
   const actLog=await omLoadActLog(id);
+  await omLoadEquip();
   omBuildDetail(rec,actLog);
 }
 
@@ -4055,6 +4118,7 @@ async function omSubmitNewJC(){
     add('omStatDrill', typeof omStatDrill === 'function' ? omStatDrill : null);
     add('omTktSetContract', omTktSetContract);
     add('omJcSetContract', omJcSetContract);
+    add('omEqAdd', omEqAdd);
     add('omSelPri', typeof omSelPri === 'function' ? omSelPri : null);
     add('omSelChan', typeof omSelChan === 'function' ? omSelChan : null);
     add('omSetTktFilter', typeof omSetTktFilter === 'function' ? omSetTktFilter : null);

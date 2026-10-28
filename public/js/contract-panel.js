@@ -145,7 +145,54 @@
     return '';
   }
 
-  const api = { WARRANTY, addYears, warranty, resolve, panelHtml, chipHtml };
+  // ── Equipment and serial numbers, recorded against the contract ────────────────────────
+  //
+  // Raymond, 28 Oct 2026: the user must be able to enter the serial numbers of any equipment --
+  // inverters, batteries, PV panels, dongles. Kept in Site Equipment with the Contract Number, so
+  // every ticket and job card under one contract shares one list (job cards are rarely linked to
+  // a site: 0 of 48 live ones were). Warranty Expiry is filled in from the 1st invoice date by
+  // type: Solax equipment 10 years (inverters, batteries; the Solax dongle and monitoring kit are
+  // counted as Solax equipment), PV modules 25, and everything else is material at 1 year.
+  const TYPE_YEARS = Object.freeze({ Inverter: 10, Battery: 10, Dongle: 10, Monitoring: 10, 'PV Module': 25 });
+  const equipYears = (type) => TYPE_YEARS[type] || 1;
+  const equipExpiry = (type, firstInvoice) => addYears(firstInvoice, equipYears(type));
+
+  /**
+   * The list and, for someone who may add, the form.
+   * @param {object} o { rows, esc, today, canAdd, types, act, number, readFail }
+   *   rows: Site Equipment records' fields (by name) already narrowed to this contract.
+   */
+  function equipHtml(o) {
+    const esc = o.esc;
+    const now = String(o.today || new Date().toISOString()).slice(0, 10);
+    const rows = Array.isArray(o.rows) ? o.rows : [];
+    let body;
+    if (o.readFail) body = '<div class="om-con-msg">The equipment list could not be read.</div>';
+    else if (!rows.length) body = '<div class="om-con-msg">No equipment recorded under ' + esc(o.number) + ' yet.</div>';
+    else {
+      body = '<table class="om-eq-tbl"><tr><th>Type</th><th>Make / model</th><th>Serial number</th><th>Qty</th><th>Warranty</th></tr>'
+        + rows.map((f) => {
+          const exp = String(f['Warranty Expiry'] || '').slice(0, 10);
+          const w = exp ? (now < exp ? '<span class="in">✓ until ' + esc(exp) + '</span>' : '<span class="out">✕ ended ' + esc(exp) + '</span>') : '—';
+          return '<tr><td>' + esc(f['Equipment Type'] || '') + '</td><td>' + esc([f.Manufacturer, f.Model].filter(Boolean).join(' ')) + '</td>'
+            + '<td class="om-eq-sn">' + esc(f['Serial Number'] || '—') + '</td><td>' + esc(f.Quantity == null ? '' : f.Quantity) + '</td><td>' + w + '</td></tr>';
+        }).join('') + '</table>';
+    }
+    const form = o.canAdd && !o.readFail
+      ? '<div class="om-eq-add">'
+        + '<select id="om-eq-type" aria-label="Equipment type">' + (o.types || []).map((t) => '<option>' + esc(t) + '</option>').join('') + '</select>'
+        + '<input id="om-eq-make" placeholder="Make (e.g. Solax)" aria-label="Make">'
+        + '<input id="om-eq-model" placeholder="Model" aria-label="Model">'
+        + '<input id="om-eq-serial" placeholder="Serial number *" aria-label="Serial number">'
+        + '<input id="om-eq-qty" type="number" min="1" value="1" aria-label="Quantity">'
+        + '<button class="btn sm" data-act="' + esc(o.act) + '" data-a1="' + esc(o.number) + '">+ Add item</button>'
+        + '</div><div class="om-hint">Warranty expiry is set from the 1st invoice date: inverters, batteries and dongles 10 years, PV panels 25, everything else 1 year.</div>'
+      : '';
+    return '<div class="om-eq"><div class="om-eq-head">Equipment and serial numbers · ' + esc(o.number)
+      + (rows.length ? ' (' + rows.length + ')' : '') + '</div>' + body + form + '</div>';
+  }
+
+  const api = { WARRANTY, addYears, warranty, resolve, panelHtml, chipHtml, TYPE_YEARS, equipYears, equipExpiry, equipHtml };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.TX.contract = api;
 })(typeof window !== 'undefined' ? window : this);

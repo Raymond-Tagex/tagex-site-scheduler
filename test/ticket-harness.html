@@ -134,6 +134,9 @@ const REGISTER = [
   // Never chosen in this suite, so the Clients view still has one with no copy here to show.
   { id:'recREGTHANDI00001', name:'Thandi Mokoena', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-120'], mirrors:[] },
 ];
+// Site Equipment, as the contract's equipment list reads and writes it (by field name).
+const EQUIP = [];
+window.EQUIP = EQUIP;
 window.REG_CALLS = [];
 window.REG_FAIL = null;
 
@@ -309,6 +312,10 @@ function stubTX() {
   window.FORMS = [];
   window.BLOBS = 0;
   TX.request = async (url, body) => {
+    // Equipment Type choices are not a form either. "Dongle" is here as it will be once added in Airtable.
+    if (url === '/api/jobcard-form' && body && body.choices === 'Equipment Type') {
+      return { ok: true, choices: ['Inverter', 'Battery', 'PV Module', 'Dongle', 'DB', 'Other'] };
+    }
     // The client register is not a form: answered here, and kept out of FORMS.
     if (url === '/api/client-register') {
       window.REG_CALLS.push(JSON.parse(JSON.stringify(body)));
@@ -391,6 +398,12 @@ function stubTX() {
     }
     if (q.table === 'site_visits' && q.op === 'create') {
       return { records:[{ id:'recNEWVISIT', fields:q.fields }] };
+    }
+    if (q.table === 'site_equipment' && q.op === 'list') return { records: EQUIP.map((r) => ({ id:r.id, fields:{ ...r.fields } })) };
+    if (q.table === 'site_equipment' && q.op === 'create') {
+      const r = { id:'recEQ' + (EQUIP.length + 1), fields:{ ...q.fields } };
+      EQUIP.push(r);
+      return { records:[r] };
     }
     return { records:[{ id:'recNEW', fields:q.fields || {} }] };
   };
@@ -1434,6 +1447,30 @@ async function suite(log) {
     t('and the system installed', !!tp() && tp().textContent.includes('x3 7.5kW Hybrid G4'), true);
     t('and the workmanship warranty', !!tp() && /Workmanship[\s\S]*until 2027-09-25/.test(tp().textContent), true);
 
+    // Serial numbers, against the contract (Raymond, 28 Oct 2026).
+    const eq = () => document.querySelector('#om-view-tktdetail .om-eq');
+    t('under it, the contract\'s equipment, empty so far', !!eq() && /No equipment recorded under SUB-201/.test(eq().textContent), true);
+    t('the types come from Airtable, Dongle included',
+      !!eq() && [...eq().querySelectorAll('#om-eq-type option')].map((o) => o.value).includes('Dongle'), true);
+    window.SENT = [];
+    eq().querySelector('#om-eq-serial').value = '';
+    eq().querySelector('[data-act="omEqAdd"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
+    t('an item without a serial number is not saved',
+      window.SENT.filter((x) => x.table === 'site_equipment' && x.op === 'create').length, 0);
+    eq().querySelector('#om-eq-type').value = 'Inverter';
+    eq().querySelector('#om-eq-make').value = 'Solax';
+    eq().querySelector('#om-eq-model').value = 'X3-Hybrid-7.5';
+    eq().querySelector('#om-eq-serial').value = 'H37T1234567';
+    eq().querySelector('[data-act="omEqAdd"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(20);
+    const made = window.SENT.find((x) => x.table === 'site_equipment' && x.op === 'create');
+    t('an inverter is saved against the contract, with its serial',
+      made && [made.fields['Contract Number'], made.fields['Serial Number'], made.fields['Equipment Type']], ['SUB-201', 'H37T1234567', 'Inverter']);
+    t('installed on the 1st invoice date, warranty 10 years on',
+      made && [made.fields['Installation Date'], made.fields['Warranty Expiry']], ['2025-09-25', '2035-09-25']);
+    t('and it is listed on the ticket', !!eq() && eq().textContent.includes('H37T1234567'), true);
+
     document.getElementById('ombn-jc').dispatchEvent(new MouseEvent('click', { bubbles:true }));
     await settle(8);
     document.querySelector('#om-view-jc .om-chip[data-a2="EVERY"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
@@ -1451,6 +1488,10 @@ async function suite(log) {
     const jsaved = window.SENT.find((x) => x.op === 'update' && x.table === 'job_cards');
     t('choosing one saves it on the job card', jsaved && jsaved.fields && jsaved.fields['fldL3oHNNsMKzbtNt'], 'SUB-200');
     t('which then names its own funder', jp() && jp().querySelector('.om-con-tag').textContent.trim(), 'Alpine');
+    // recJC1 is under SUB-200, so SUB-201's inverter is not its equipment.
+    const jeq = document.querySelector('#om-view-detail .om-eq');
+    t('and lists its own contract\'s equipment, not another\'s', !!jeq && !jeq.textContent.includes('H37T1234567')
+      && /No equipment recorded under SUB-200/.test(jeq.textContent), true);
   }
   omCloseAnyModal();
 

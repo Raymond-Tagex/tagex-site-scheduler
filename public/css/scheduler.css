@@ -439,3 +439,13 @@
 .mod-scheduler .om-con-chip{font-family:monospace;font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;background:var(--accent);color:#101215;}
 .mod-scheduler .om-con-chip.warn{background:var(--warn);}
 @media (max-width:560px){ .mod-scheduler .om-con-facts{grid-template-columns:1fr;} }
+.mod-scheduler .om-eq{background:var(--card);border:1px solid var(--line2);border-radius:10px;padding:11px 13px;margin:-4px 0 12px;}
+.mod-scheduler .om-eq-head{font-family:monospace;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;}
+.mod-scheduler .om-eq-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px;}
+.mod-scheduler .om-eq-tbl th{text-align:left;font-family:monospace;font-size:9px;color:var(--muted);font-weight:400;padding:3px 6px 3px 0;border-bottom:1px solid var(--line);}
+.mod-scheduler .om-eq-tbl td{padding:5px 6px 5px 0;border-bottom:1px solid var(--line);vertical-align:top;}
+.mod-scheduler .om-eq-sn{font-family:monospace;font-weight:700;}
+.mod-scheduler .om-eq-tbl .in{color:var(--ok);} .mod-scheduler .om-eq-tbl .out{color:var(--bad);}
+.mod-scheduler .om-eq-add{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.4fr .6fr auto;gap:6px;align-items:center;}
+.mod-scheduler .om-eq-add input,.mod-scheduler .om-eq-add select{min-width:0;}
+@media (max-width:700px){ .mod-scheduler .om-eq-add{grid-template-columns:1fr 1fr;} .mod-scheduler .om-eq-tbl{font-size:11px;} }
