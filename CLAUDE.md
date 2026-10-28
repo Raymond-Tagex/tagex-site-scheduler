@@ -151,6 +151,29 @@ downloaded. Reprints from the Print buttons are never filed.
   `vercel.json` ships it with `jobcard-form.js` and `ticket-report.js` via `includeFiles` — a
   new function that prints a form needs the same entry.
 
+## Every ticket and job card shows its contract, and its equipment
+
+Raymond, 28 Oct 2026: funder, warranty start, contract and system "will determine how the team act
+on repairs, costing etc". `public/js/contract-panel.js` holds the rules; the panel opens both
+detail screens and a short chip sits on both list cards.
+
+- **The contract** is the ticket's or job card's own **Contract Number** (a ticket with none takes
+  its job card's), looked up in the register's Contracts, which `/api/client-register` returns as
+  `contractDetails` (Portfolio = funder, First Invoice Date, System Description). A client with
+  several contracts and none chosen shows **choose**, never a guess; the register unreadable shows
+  **unknown**, never "no contract".
+- **Warranty from the 1st invoice date:** Solax equipment 10 years, PV panels 25, workmanship 2,
+  material (breakers, isolators, DB boxes) 1. Each funder gets a monthly O&M fee; work within
+  TAGEX O&M's pre-approved budget for that funder; **capital expenditure is not covered**.
+- **Equipment and serial numbers** live in **Site Equipment** with the same **Contract Number**,
+  not the site: job cards are rarely linked to a site (0 of 48 live ones on 28 Oct 2026). Read
+  and written by field **name**, since the field is newer than RES's copy. Warranty Expiry is set
+  by type: Inverter, Battery, Dongle, Monitoring 10 years; PV Module 25; anything else 1. The
+  type list is read live (`/api/jobcard-form` `{ choices: 'Equipment Type' }`), so "Dongle"
+  appears once it is added in Airtable.
+- The Contract Number fields were created after RES was copied, so their ids are per base
+  (`OM_F.JC_CONTRACT`, `TK.contract`).
+
 ## A hidden field cannot be searched on
 
 A list or get whose `filterByFormula` or `sort` names a field the role may not read -- its `deny_read`,
