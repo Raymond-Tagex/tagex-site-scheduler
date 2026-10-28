@@ -1915,8 +1915,10 @@ async function omSetContract(kind,id,num){
   const tkt=kind==='tkt';
   try{
     if(tkt){
-      const rec=await tktUpdate(id,{[TK.contract]:num});
-      const i=omTktData.findIndex(r=>r.id===id); if(i>=0&&rec) omTktData[i]=rec;
+      await tktUpdate(id,{[TK.contract]:num});
+      // The cached ticket is updated in place, so the redraw shows the contract whatever the
+      // write returned.
+      const r=omTktData.find(x=>x.id===id); if(r) r.fields[TK.contract]=num;
     }else{
       await omPatch(OM_T.JC,id,{[OM_F.JC_CONTRACT]:num});
       const r=omJcData.find(x=>x.id===id); if(r) r.fields[OM_F.JC_CONTRACT]=num;

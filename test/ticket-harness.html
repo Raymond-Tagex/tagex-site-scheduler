@@ -1406,7 +1406,15 @@ async function suite(log) {
   // card, because they decide how the team acts on a repair and its cost.
   {
     const panelIn = (host) => host.querySelector('.om-con');
-    await omOpenTicket('recTKTa'); await settle(12);
+    // Opened as a person would: Tickets, then the card. The app's functions are not globals here.
+    document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    [...document.querySelectorAll('#om-tktchips .om-chip')].find((e) => e.textContent.trim().startsWith('All'))
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    [...document.querySelectorAll('#om-tktlist .om-jc')].find((e) => e.textContent.includes('TKT-2026-0007'))
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
     const tp = () => panelIn(document.getElementById('om-view-tktdetail'));
     t('the ticket opens with its contract panel', !!tp(), true);
     t('above the actions, where it is seen first',
@@ -1426,7 +1434,13 @@ async function suite(log) {
     t('and the system installed', !!tp() && tp().textContent.includes('x3 7.5kW Hybrid G4'), true);
     t('and the workmanship warranty', !!tp() && /Workmanship[\s\S]*until 2027-09-25/.test(tp().textContent), true);
 
-    omOpenDetail('recJC1'); await settle(12);
+    document.getElementById('ombn-jc').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    document.querySelector('#om-view-jc .om-chip[data-a2="EVERY"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    [...document.querySelectorAll('#om-jclist .om-jc')].find((e) => e.textContent.includes('OM-2026-0157'))
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
     const jp = () => panelIn(document.getElementById('om-view-detail'));
     t('the job card opens with its contract panel too', !!jp(), true);
     window.SENT = [];
