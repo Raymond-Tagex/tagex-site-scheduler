@@ -63,6 +63,27 @@ module.exports = async function handler(req, res) {
     return H.tooManyRequests(res, rl.retryAfter);
   }
 
+  // { choices: 'Region' } asks for the options of the job card's Region select instead of a form.
+  // Read from the live schema (cached up to 10 minutes), so a region added in Airtable is offered
+  // on the forms without a code change. Schema only, no records: viewing job cards is enough.
+  const pre = (req.body && typeof req.body === 'object') ? req.body : {};
+  if (pre.choices !== undefined) {
+    if (pre.choices !== 'Region') return H.fail(res, 400, 'bad_request', 'Only the Region choices can be asked for.');
+    const may = P.can(auth.perms, 'job_cards', 'view');
+    if (!may.ok) return H.fail(res, may.status, may.reason, 'You may not view job cards.');
+    const b = T.schedulerBase(pre.base);
+    if (!b) return H.fail(res, 400, 'bad_request', 'Unknown base.');
+    const r = T.resolve(b, 'job_cards');
+    if (!r.ok) return H.fail(res, r.status, r.reason, r.detail);
+    try {
+      const schema = await at.tableSchema(r.baseId, r.tableId);
+      const f = schema && schema.fields.Region;
+      return H.ok(res, { choices: f && f.type === 'singleSelect' ? (f.options.choices || []).map((c) => c.name) : [] });
+    } catch (e) {
+      return H.fail(res, 502, 'airtable_error', 'The Region choices could not be read.');
+    }
+  }
+
   const allowed = P.can(auth.perms, 'job_cards', 'export');
   if (!allowed.ok) {
     await A.auditNow({ ...ctx, action: 'Export', result: 'Denied', denialReason: allowed.reason });

@@ -498,7 +498,8 @@ function daysOpen(reportedAt, closedAt, now) {
  * The tickets print in one section per region -- Gauteng, then Eastern Cape, then any whose job card
  * has no region yet -- each headed with its count and, when costs are shown, what they cost.
  *
- * @param {object} d { filter, search, sort?, dir?, rows[], showCost?, generatedBy, generatedAt }
+ * @param {object} d { filter, search, sort?, dir?, rows[], showCost?, regions?, generatedBy, generatedAt }
+ *   regions: the Region field's choices from Airtable, which set the order of the sections.
  *   rows: { ref, reportedAt, closedAt, client, jc, tech, subject, category, priority, status,
  *   region, cost }, already in the order to print (sortRows); sort and dir only label it.
  *   showCost: draw the Cost column and the totals. Off for a role that may not read Ticket Cost,
@@ -517,17 +518,22 @@ function bigDate(iso) {
 
 /** Where a region-less ticket prints, and the order the sections print in. */
 const NO_REGION = 'Region not set';
+// Used only when the caller does not pass the Region field's choices from Airtable.
 const REGIONS = Object.freeze(['Gauteng', 'Eastern Cape']);
 
 /**
- * The row indices of each section, in print order. Gauteng and Eastern Cape always print, Gauteng
- * first -- unless the list is sorted by region, when the sections go A–Z or Z–A. "Region not set"
- * is last either way, as a blank is in every other sort.
+ * The row indices of each section, in print order: one per region that has tickets, in the order
+ * the Region field lists its choices in Airtable -- or A–Z / Z–A when the list is sorted by region.
+ * A region on a ticket that is not (or no longer) a choice still gets its section, after the
+ * choices. "Region not set" is last either way, as a blank is in every other sort.
+ *
+ * @param {string[]} [choices] the Region field's options, as Airtable orders them
  */
-function regionSections(rows, sort, dir) {
-  const names = sort === 'region'
-    ? REGIONS.slice().sort((a, b) => (dir === 'asc' ? 1 : -1) * a.localeCompare(b))
-    : REGIONS.slice();
+function regionSections(rows, sort, dir, choices) {
+  const known = (choices && choices.length ? choices : REGIONS).map(str);
+  const seen = [...new Set(rows.map((r) => str(r.region)).filter(Boolean))];
+  let names = known.concat(seen.filter((n) => !known.includes(n))).filter((n) => seen.includes(n));
+  if (sort === 'region') names = names.slice().sort((a, b) => (dir === 'asc' ? 1 : -1) * a.localeCompare(b));
   const out = names.map((name) => ({ name, idx: [] }));
   const none = { name: NO_REGION, idx: [] };
   rows.forEach((r, i) => {
@@ -582,7 +588,7 @@ async function ticketListPdf(d) {
     priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
     region: str(r.region) || '—', cost: fmtRand(r.cost) || '—',
   }));
-  const sections = regionSections(rows, d.sort, d.dir);
+  const sections = regionSections(rows, d.sort, d.dir, d.regions);
   // "GAUTENG  14 tickets  ·  R 12 300.00" over each section
   const sectionHead = (s) => {
     const n = `${s.idx.length} ticket${s.idx.length === 1 ? '' : 's'}`;

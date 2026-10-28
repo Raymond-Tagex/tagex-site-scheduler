@@ -366,8 +366,18 @@ async function listReport(auth, ctx, base, list, res) {
     const tr = auth.perms && auth.perms.tickets;
     const showCost = !!(tr && tr.view) && !((tr.fields && tr.fields.deny_read) || []).includes('Ticket Cost');
 
+    // The sections follow the Region field's own list in Airtable, so a region added there
+    // prints in its place without a code change.
+    let regions = [];
+    try {
+      const jr = T.resolve(base, 'job_cards');
+      const schema = jr.ok ? await at.tableSchema(jr.baseId, jr.tableId) : null;
+      const rf = schema && schema.fields.Region;
+      if (rf && rf.type === 'singleSelect') regions = (rf.options.choices || []).map((c) => c.name);
+    } catch (e) { /* the default order will do */ }
+
     const payload = {
-      filter, search, sort, dir, rows, showCost, generatedBy: auth.email, generatedAt: new Date().toISOString(),
+      filter, search, sort, dir, rows, showCost, regions, generatedBy: auth.email, generatedAt: new Date().toISOString(),
     };
     const pdf = await R.ticketListPdf(payload);
 
