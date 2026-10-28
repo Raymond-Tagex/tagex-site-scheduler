@@ -12,6 +12,13 @@ scripts/
 test/
 *.md
 
+# Working papers, never served: handbooks, scans and the SxE cost log, which holds clients'
+# personal details. vercel --prod uploads the folder as it stands, committed or not.
+docs/
+/*.pdf
+/*.xlsx
+/*.pptx
+
 # Superseded originals: the pre-security single-file app and its archives.
 # NEVER deploy these — index.html sent each user's Airtable token from the browser.
 legacy/
