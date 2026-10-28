@@ -387,6 +387,8 @@
           <div class="om-fld"><label>Job Card</label><select id="om-jcsel" data-search="job cards" data-on="change" data-act="omJCPick" data-a1="@el"><option value="">— Select —</option></select>
             <div class="om-hint">Optional. If a site visit is needed, attach or create one from the ticket later.</div></div>
           <div id="om-jcprev" class="om-jcprev"></div>
+          <div class="om-fld"><label>Contract</label><select id="om-consel"><option value="">— Choose a client first —</option></select>
+            <div class="om-hint">From the client register: decides the funder and the warranty shown on the ticket.</div></div>
           <div class="om-fld" style="margin-top:8px"><label>Reported By</label><input type="text" id="om-rep" placeholder="Technician / client"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <div class="om-fld"><label>Asset / Inverter</label><input type="text" id="om-asset"></div>
@@ -445,6 +447,8 @@
         <div class="om-fcard">
           <div class="om-fttl">Client</div>
           <div class="om-fld"><label>Client *</label><select id="njc-cli" data-search="clients" data-on="change" data-act="omCliPick"></select></div>
+          <div class="om-fld"><label>Contract</label><select id="njc-contract"><option value="">— Choose a client first —</option></select>
+            <div class="om-hint">From the client register: decides the funder and the warranty shown on the job card.</div></div>
           <div id="njc-newcli" style="display:none;border-left:2px solid var(--accent);padding-left:10px;margin-top:6px;">
             <div class="om-fld"><label>New client name *</label><input type="text" id="njc-clinew-name" placeholder="Company / client name"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -567,6 +571,7 @@
 <script src="/js/core.js"></script>
 <script src="/js/pick.js"></script>
 <script src="/js/login.js"></script>
+<script src="/js/contract-panel.js"></script>
 <script src="/js/mod-scheduler.js"></script>
 <script src="/js/mod-siteinfo.js"></script>
 <script src="/js/siteinfo-import.js"></script>

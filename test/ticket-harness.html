@@ -29,6 +29,7 @@
 
 <script src="/js/core.js"></script>
 <script src="/js/pick.js"></script>
+<script src="/js/contract-panel.js"></script>
 <script>
 // ── field ids, written out so a typo in the app is a failure here ───────────
 const FID = {
@@ -123,12 +124,19 @@ const CLIENTS = [
 // Dairy have copies here (the CLIENTS rows); Sean Bisset is in the register only, so choosing
 // him has to make his copy first.
 const REGISTER = [
-  { id:'recREGGROOTVLEI01', name:'Grootvlei', contact:'Oubaas', email:'', sites:'', mobile:'', status:'Active', contracts:[], mirrors:['recCLI1'] },
+  // Two contracts, so a Grootvlei ticket or job card has to be told which one it is for.
+  { id:'recREGGROOTVLEI01', name:'Grootvlei', contact:'Oubaas', email:'', sites:'', mobile:'', status:'Active',
+    contracts:['SUB-200','SUB-201'], mirrors:['recCLI1'], contractDetails:[
+      { number:'SUB-200', funder:'Alpine', firstInvoice:'2025-03-25', system:'5KW SYSTEM', kind:'Subscription' },
+      { number:'SUB-201', funder:'PPA', firstInvoice:'2025-09-25', system:'x3 7.5kW Hybrid G4', kind:'Subscription' }] },
   { id:'recREGDELMAS00001', name:'Delmas Dairy', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:[], mirrors:['recCLI2'] },
   { id:'recREGBISSET00001', name:'Sean Bisset', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-148'], mirrors:[] },
   // Never chosen in this suite, so the Clients view still has one with no copy here to show.
   { id:'recREGTHANDI00001', name:'Thandi Mokoena', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-120'], mirrors:[] },
 ];
+// Site Equipment, as the contract's equipment list reads and writes it (by field name).
+const EQUIP = [];
+window.EQUIP = EQUIP;
 window.REG_CALLS = [];
 window.REG_FAIL = null;
 
@@ -304,6 +312,10 @@ function stubTX() {
   window.FORMS = [];
   window.BLOBS = 0;
   TX.request = async (url, body) => {
+    // Equipment Type choices are not a form either. "Dongle" is here as it will be once added in Airtable.
+    if (url === '/api/jobcard-form' && body && body.choices === 'Equipment Type') {
+      return { ok: true, choices: ['Inverter', 'Battery', 'PV Module', 'Dongle', 'DB', 'Other'] };
+    }
     // The client register is not a form: answered here, and kept out of FORMS.
     if (url === '/api/client-register') {
       window.REG_CALLS.push(JSON.parse(JSON.stringify(body)));
@@ -345,6 +357,7 @@ function stubTX() {
       }
       if (q.table === 'people') return { records: PEOPLE };
       if (q.table === 'site_visits') return { records: VISITS };
+      if (q.table === 'site_equipment') return { records: EQUIP.map((r) => ({ id:r.id, fields:{ ...r.fields } })) };
       return { records: [] };
     }
     const key = q.table + (q.sub ? ':' + q.sub : '');
@@ -386,6 +399,11 @@ function stubTX() {
     }
     if (q.table === 'site_visits' && q.op === 'create') {
       return { records:[{ id:'recNEWVISIT', fields:q.fields }] };
+    }
+    if (q.table === 'site_equipment' && q.op === 'create') {
+      const r = { id:'recEQ' + (EQUIP.length + 1), fields:{ ...q.fields } };
+      EQUIP.push(r);
+      return { records:[r] };
     }
     return { records:[{ id:'recNEW', fields:q.fields || {} }] };
   };
@@ -1394,6 +1412,88 @@ async function suite(log) {
   await settle(40);
   t('no second ticket is created',
     window.SENT.filter((x) => x.op === 'create' && x.table === 'tickets:ticket').length, 0);
+  omCloseAnyModal();
+
+  log('\nEVERY TICKET AND JOB CARD SAYS WHICH CONTRACT IT IS UNDER');
+  // Raymond, 28 Oct 2026: funder, warranty start, contract and system on every ticket and job
+  // card, because they decide how the team acts on a repair and its cost.
+  {
+    const panelIn = (host) => host.querySelector('.om-con');
+    // Opened as a person would: Tickets, then the card. The app's functions are not globals here.
+    document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    [...document.querySelectorAll('#om-tktchips .om-chip')].find((e) => e.textContent.trim().startsWith('All'))
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    [...document.querySelectorAll('#om-tktlist .om-jc')].find((e) => e.textContent.includes('TKT-2026-0007'))
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
+    const tp = () => panelIn(document.getElementById('om-view-tktdetail'));
+    t('the ticket opens with its contract panel', !!tp(), true);
+    t('above the actions, where it is seen first',
+      !!tp() && !!(tp().compareDocumentPosition(document.querySelector('#om-view-tktdetail .om-acts')) & Node.DOCUMENT_POSITION_FOLLOWING), true);
+    t('Grootvlei has two contracts and none is chosen: it asks rather than guesses',
+      !!tp() && tp().classList.contains('om-con-choose'), true);
+    window.SENT = [];
+    const pick = tp().querySelector('.om-con-pick');
+    pick.value = 'SUB-201';
+    pick.dispatchEvent(new Event('change', { bubbles:true }));
+    await settle(20);
+    const saved = window.SENT.find((x) => x.op === 'update' && x.table === 'tickets:ticket');
+    t('choosing one saves it on the ticket', saved && saved.fields && saved.fields['fldVh5h1cf35T2fkg'], 'SUB-201');
+    t('and says so in the activity log', window.SENT.some((x) => x.op === 'create' && x.table === 'activity_log'
+      && /Contract set to SUB-201/.test((x.fields || {})[FID.alNote] || '')), true);
+    t('the panel then names the funder', tp() && tp().querySelector('.om-con-tag').textContent.trim(), 'PPA');
+    t('and the system installed', !!tp() && tp().textContent.includes('x3 7.5kW Hybrid G4'), true);
+    t('and the workmanship warranty', !!tp() && /Workmanship[\s\S]*until 2027-09-25/.test(tp().textContent), true);
+
+    // Serial numbers, against the contract (Raymond, 28 Oct 2026).
+    const eq = () => document.querySelector('#om-view-tktdetail .om-eq');
+    t('under it, the contract\'s equipment, empty so far', !!eq() && /No equipment recorded under SUB-201/.test(eq().textContent), true);
+    t('the types come from Airtable, Dongle included',
+      !!eq() && [...eq().querySelectorAll('#om-eq-type option')].map((o) => o.value).includes('Dongle'), true);
+    window.SENT = [];
+    eq().querySelector('#om-eq-serial').value = '';
+    eq().querySelector('[data-act="omEqAdd"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
+    t('an item without a serial number is not saved',
+      window.SENT.filter((x) => x.table === 'site_equipment' && x.op === 'create').length, 0);
+    eq().querySelector('#om-eq-type').value = 'Inverter';
+    eq().querySelector('#om-eq-make').value = 'Solax';
+    eq().querySelector('#om-eq-model').value = 'X3-Hybrid-7.5';
+    eq().querySelector('#om-eq-serial').value = 'H37T1234567';
+    eq().querySelector('[data-act="omEqAdd"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    // The redraw reads the activity log and spares again before it draws.
+    await settle(60);
+    const made = window.SENT.find((x) => x.table === 'site_equipment' && x.op === 'create');
+    t('an inverter is saved against the contract, with its serial',
+      made && [made.fields['Contract Number'], made.fields['Serial Number'], made.fields['Equipment Type']], ['SUB-201', 'H37T1234567', 'Inverter']);
+    t('installed on the 1st invoice date, warranty 10 years on',
+      made && [made.fields['Installation Date'], made.fields['Warranty Expiry']], ['2025-09-25', '2035-09-25']);
+    t('and it is listed on the ticket', !!eq() && eq().textContent.includes('H37T1234567'), true);
+
+    document.getElementById('ombn-jc').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    document.querySelector('#om-view-jc .om-chip[data-a2="EVERY"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    [...document.querySelectorAll('#om-jclist .om-jc')].find((e) => e.textContent.includes('OM-2026-0157'))
+      .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
+    const jp = () => panelIn(document.getElementById('om-view-detail'));
+    t('the job card opens with its contract panel too', !!jp(), true);
+    window.SENT = [];
+    const jpick = jp().querySelector('.om-con-pick');
+    jpick.value = 'SUB-200';
+    jpick.dispatchEvent(new Event('change', { bubbles:true }));
+    await settle(20);
+    const jsaved = window.SENT.find((x) => x.op === 'update' && x.table === 'job_cards');
+    t('choosing one saves it on the job card', jsaved && jsaved.fields && jsaved.fields['fldL3oHNNsMKzbtNt'], 'SUB-200');
+    t('which then names its own funder', jp() && jp().querySelector('.om-con-tag').textContent.trim(), 'Alpine');
+    // recJC1 is under SUB-200, so SUB-201's inverter is not its equipment.
+    const jeq = document.querySelector('#om-view-detail .om-eq');
+    t('and lists its own contract\'s equipment, not another\'s', !!jeq && !jeq.textContent.includes('H37T1234567')
+      && /No equipment recorded under SUB-200/.test(jeq.textContent), true);
+  }
   omCloseAnyModal();
 
   log('\nA DASHBOARD FIGURE OPENS THE JOB CARDS IT COUNTED');
