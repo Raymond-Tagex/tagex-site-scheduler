@@ -355,11 +355,19 @@ async function listReport(auth, ctx, base, list, res) {
         category: R.str(f['Fault Category']),
         priority: R.str(f.Priority),
         status: R.str(f.Status),
+        region: R.str(jc.Region),
+        cost: typeof f['Ticket Cost'] === 'number' ? f['Ticket Cost'] : null,
       };
     }), sort, dir);
 
+    // The Cost column is drawn only for a role that may read Ticket Cost. readAll has already
+    // stripped the values for one that may not; this keeps the column itself off the page, so a
+    // blank column cannot be read as "nothing has cost anything".
+    const tr = auth.perms && auth.perms.tickets;
+    const showCost = !!(tr && tr.view) && !((tr.fields && tr.fields.deny_read) || []).includes('Ticket Cost');
+
     const payload = {
-      filter, search, sort, dir, rows, generatedBy: auth.email, generatedAt: new Date().toISOString(),
+      filter, search, sort, dir, rows, showCost, generatedBy: auth.email, generatedAt: new Date().toISOString(),
     };
     const pdf = await R.ticketListPdf(payload);
 

@@ -90,6 +90,26 @@ function parseJsonField(raw, fallback) {
   }
 }
 
+// A field that says the same thing as one a role is already denied. The roles in IAM were written
+// before these fields existed, and a role kept away from whether a ticket's cost is recoverable
+// must not be shown what the ticket cost instead -- so the deny carries over without anyone
+// having to edit every role. Only denies are coupled; nothing here can grant.
+const COUPLED_DENIES = Object.freeze({
+  tickets: Object.freeze({ 'Cost Recoverable': Object.freeze(['Ticket Cost']) }),
+});
+
+function coupleDenies(moduleKey, fields) {
+  const pairs = COUPLED_DENIES[moduleKey];
+  if (!pairs) return fields;
+  for (const key of ['deny_read', 'deny_write']) {
+    const list = fields[key];
+    for (const [field, also] of Object.entries(pairs)) {
+      if (list.includes(field)) also.forEach((f) => { if (!list.includes(f)) list.push(f); });
+    }
+  }
+  return fields;
+}
+
 function mergeFieldRules(base = {}, override = {}) {
   const out = {
     deny_read:  [...new Set([...(base.deny_read || []), ...(override.deny_read || [])])],
@@ -132,7 +152,7 @@ function effectivePermissions(rolePermissionsRaw, userOverridesRaw) {
       merged[op] = ov[op] === true;
     }
 
-    merged.fields = mergeFieldRules(roleRule.fields, ov && ov.fields);
+    merged.fields = coupleDenies(moduleKey, mergeFieldRules(roleRule.fields, ov && ov.fields));
 
     // sensitivity_max / export_sensitivity_max: the more restrictive of the two wins.
     for (const key of ['sensitivity_max', 'export_sensitivity_max']) {
@@ -536,6 +556,7 @@ module.exports = {
   fieldContains,
   parseJsonField,
   effectivePermissions,
+  COUPLED_DENIES,
   can,
   canViewRestricted,
   canonicalField,
