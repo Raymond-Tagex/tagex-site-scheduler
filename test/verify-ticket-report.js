@@ -590,16 +590,25 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
   r = await call(who({ tickets: ALL, job_cards: ALL, site_visits: ALL }), { list: { status: 'OPEN' } });
   t('nor one that may not view people', /Zola|Bongani|Anna/.test(printed(r)), false);
 
-  // ── region sections and the cost column ──
+  // ── region sections and the km column (it replaced Cost, 29 Oct 2026) ──
   {
     const keep = JSON.stringify(ROWS);
     ROWS[JOBCARDS].push({ id: 'recJC000000000002', fields: { 'JC Reference': 'OM-2026-0200/MAINT/TE', 'Client Name': ['Cradock Farm'], Region: 'Eastern Cape' } });
     ROWS[JOBCARDS][0].fields.Region = 'Gauteng';
+    // Costs are still on the tickets; the list no longer prints them.
     ROWS[TICKETS][0].fields['Ticket Cost'] = 1250.5;
     ROWS[TICKETS][1].fields['Job Card'] = ['recJC000000000002'];
     ROWS[TICKETS][1].fields['Ticket Cost'] = 12000;
     ROWS[TICKETS][3].fields['Job Card'] = [];
-    r = await call(ops, { list: { status: 'OPEN' } });
+    // 0001: a completed visit of 84.5 km and a cancelled one of 999, which was never driven.
+    ROWS[VISITS][0].fields.Kilometres = 84.5;
+    ROWS[VISITS][1].fields.Kilometres = 999;
+    ROWS[VISITS][2].fields.Kilometres = 1200;
+    // And an earlier, second trip for 0001 of 40 km: every trip counts, not only the latest.
+    ROWS[VISITS].push({ id: 'recVIS00000000004', fields: { 'Start DateTime': '2026-09-15T06:00:00Z', Status: 'Completed', Kilometres: 40 } });
+    ROWS[TICKETS][0].fields['Site Visits'] = ROWS[TICKETS][0].fields['Site Visits'].concat('recVIS00000000004');
+    const withVisits = who({ tickets: ALL, job_cards: ALL, site_visits: ALL });
+    r = await call(withVisits, { list: { status: 'OPEN' } });
     text = printed(r);
     const at = (s) => text.indexOf(s);
     t('the list is split Gauteng, then Eastern Cape, then Region not set',
@@ -609,12 +618,23 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
       && at('EASTERN CAPE') < at('TKT-2026-0002') && at('TKT-2026-0002') < at('REGION NOT SET')
       && at('REGION NOT SET') < at('TKT-2026-0004'), true);
     t('with a Region column', /\nRegion\n/.test(text) && text.includes('Eastern Cape'), true);
-    t('a Cost column, last', /\nStatus\nCost\n/.test(text), true);
-    t('with each ticket\'s cost', text.includes('R 1 250.50') && text.includes('R 12 000.00'), true);
-    t('each section headed with its count and cost', /1 ticket\s+·\s+R 1 250.50/.test(text) && /1 ticket\s+·\s+R 12 000.00/.test(text), true);
-    t('and the total under the title', text.includes('Total cost: R 13 250.50'), true);
+    t('a Km column, last, where Cost was', [/\nStatus\nKm\n/.test(text), /\nCost\n/.test(text)], [true, false]);
+    t('each ticket\'s km is the sum of its visits, every trip', text.includes('124.5') && text.includes('1 200'), true);
+    t('a cancelled visit is not counted', /999|1 123.5/.test(text), false);
+    t('each section headed with its count and km', /1 ticket\s+·\s+124.5 km/.test(text) && /1 ticket\s+·\s+1 200 km/.test(text), true);
+    t('and the total km under the title', text.includes('Total km: 1 324.5'), true);
+    t('no costs are printed any more', [/R \d/.test(text), text.includes('Total cost')], [false, false]);
 
-    r = await call(ops, { list: { status: 'OPEN', sort: 'region', dir: 'asc' } });
+    // Where the km come from: the visit form.
+    const js = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'js', 'mod-scheduler.js'), 'utf8').replace(/\r\n/g, '\n');
+    t('the visit form asks for kilometres', /<input type="number" id="mKm" min="0"/.test(js), true);
+    t('and reads them', /km:\(wrap\.querySelector\("#mKm"\)\|\|\{value:""\}\)\.value\.trim\(\)/.test(js), true);
+    t('and saves them on the visit', /if\(m\.km!==''&&isFinite\(kmN\)&&kmN>=0\) fields\[F\.km\]=/.test(js), true);
+    t('to the Kilometres field of the base in use',
+      js.includes('km: SCHED_BASE===\'RES\' ? "fldRYldxyfcuK7wCu" : "fld6hkVkjUjbT0k9A"'), true);
+    t('and visits are read with it', /F\.visitId,F\.ticket,F\.km\]\)/.test(js), true);
+
+    r = await call(withVisits, { list: { status: 'OPEN', sort: 'region', dir: 'asc' } });
     text = printed(r);
     t('sorted by region A–Z, Eastern Cape prints first', [r.code, text.indexOf('EASTERN CAPE') < text.indexOf('GAUTENG')], [200, true]);
     t('and the sheet says so', text.includes('Sorted by: Region, A–Z'), true);
@@ -623,14 +643,16 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
     t('Z–A, Gauteng first, Region not set still last',
       text.indexOf('GAUTENG') < text.indexOf('EASTERN CAPE') && text.indexOf('EASTERN CAPE') < text.indexOf('REGION NOT SET'), true);
 
-    // A role kept from Cost Recoverable is kept from Ticket Cost too (permissions.js COUPLED_DENIES),
-    // and gets no Cost column at all -- not an empty one.
+    // A role kept from Cost Recoverable is kept from Ticket Cost too (permissions.js COUPLED_DENIES).
     const tech = who({ tickets: { ...ALL, fields: { deny_read: ['Cost Recoverable'], deny_write: ['Cost Recoverable'] } }, job_cards: ALL });
     t('a role denied Cost Recoverable is denied Ticket Cost', tech.perms.tickets.fields.deny_read.includes('Ticket Cost')
       && tech.perms.tickets.fields.deny_write.includes('Ticket Cost'), true);
+    // A role that may not read site visits gets no Km column at all -- not an empty one.
     r = await call(tech, { list: { status: 'OPEN' } });
     text = printed(r);
-    t('and its printout has no costs on it', [r.code, /\nCost\n/.test(text), /R \d/.test(text), text.includes('Total cost')], [200, false, false, false]);
+    t('a role that may not read site visits gets no Km column',
+      [r.code, /\nKm\n/.test(text), text.includes('Total km'), text.includes('84.5')], [200, false, false, false]);
+    t('nor any costs', [/\nCost\n/.test(text), /R \d/.test(text), text.includes('Total cost')], [false, false, false]);
     t('but is still split by region', text.includes('GAUTENG') && text.includes('EASTERN CAPE'), true);
     for (const k of Object.keys(ROWS)) ROWS[k] = JSON.parse(keep)[k];
   }

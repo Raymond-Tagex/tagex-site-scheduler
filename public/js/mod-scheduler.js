@@ -176,7 +176,10 @@ const F = {
   notes:"flddCyyVn6w0h5y0H", createdBy:"fldNj9om7JzeyY1Uy", visitId:"fldkpn9x6pM0wXXdz",
   // A visit raised from a ticket carries it. Every visit that predates tickets has none, so
   // nothing below may assume it is there.
-  ticket:"fldXKl0jI6lbIvj4u"
+  ticket:"fldXKl0jI6lbIvj4u",
+  // Round-trip kilometres for the visit; the ticket list totals them per ticket. Created on
+  // 29 Oct 2026, after RES was copied, so the id is per base.
+  km: SCHED_BASE==='RES' ? "fldRYldxyfcuK7wCu" : "fld6hkVkjUjbT0k9A"
 };
 // Field IDs — Job Cards
 // clientName is a LOOKUP: it holds names, not record ids, and cannot be written to a link
@@ -271,7 +274,7 @@ const joinArr=v=>Array.isArray(v)?v.join(", "):String(v||"");
 async function loadAll(silent){
   if(!silent) setConn("Loading…",true);
   const [visits,jobcards,people]=await Promise.all([
-    atGet(T.visits,[F.subject,F.jobcard,F.start,F.end,F.duration,F.tech,F.attendees,F.vtype,F.status,F.priority,F.notes,F.createdBy,F.visitId,F.ticket]),
+    atGet(T.visits,[F.subject,F.jobcard,F.start,F.end,F.duration,F.tech,F.attendees,F.vtype,F.status,F.priority,F.notes,F.createdBy,F.visitId,F.ticket,F.km]),
     atGet(T.jobcards,[JC.ref,JC.title,JC.clientName,JC.client,JC.site,JC.status,JC.owner]),
     atGet(T.people,[P.name,P.role,P.email])
   ]);
@@ -320,7 +323,8 @@ function normVisit(rec){
     attIds:f[F.attendees]||[],
     type:selName(f[F.vtype]), status:selName(f[F.status]), priority:selName(f[F.priority]),
     notes:f[F.notes]||"", visitId:f[F.visitId]||"",
-    ticketIds:f[F.ticket]||[]
+    ticketIds:f[F.ticket]||[],
+    km: typeof f[F.km]==="number" ? f[F.km] : null
   };
 }
 function jcLabel(jcId){ const f=jobcardById[jcId]; if(!f) return "(no JC)"; return (f[JC.ref]||"")+" — "+(f[JC.title]||""); }
@@ -708,6 +712,7 @@ function openVisitModal(visitId, preset){
         <div class="om-hint" id="mSpareMsg"></div>
       </div>`:""}
       <div class="fld"><label>Notes</label><textarea id="mNotes" placeholder="Scope, access notes, equipment…">${v?esc(v.notes):""}</textarea></div>
+      <div class="fld"><label>Kilometres (round trip)</label><input type="number" id="mKm" min="0" step="0.1" inputmode="decimal" placeholder="e.g. 84" value="${v&&v.km!=null?esc(String(v.km)):""}"></div>
       ${raisesTicket?`
       <div class="mtkt" id="mTktBox" data-mode="${tktMode}" data-tkt="${linkedTicketId||''}">
         <div class="mtkt-ttl">Ticket Details
@@ -913,6 +918,7 @@ function collectModal(wrap){
     prio:wrap.querySelector("#mPrio").value,
     status:wrap.querySelector("#mStatus").value,
     atts, notes:wrap.querySelector("#mNotes").value.trim(),
+    km:(wrap.querySelector("#mKm")||{value:""}).value.trim(),
     // Absent when editing a visit, or when it was booked from a ticket: both cases leave the
     // ticket alone, so there is nothing to collect.
     tkt: wrap.querySelector("#mTktBox") ? Object.assign(omReadTicketBox(wrap),{
@@ -960,6 +966,10 @@ async function saveVisit(wrap){
     [F.notes]:m.notes
   };
   if(modalTicketId && !editingId) fields[F.ticket]=[modalTicketId];
+  // Blank leaves a new visit without km; on an edit it clears what was there, as any field does.
+  const kmN=Number(m.km);
+  if(m.km!==''&&isFinite(kmN)&&kmN>=0) fields[F.km]=Math.round(kmN*10)/10;
+  else if(m.km===''&&editingId) fields[F.km]=null;
   if(m.techId) fields[F.tech]=[m.techId]; else fields[F.tech]=[];
   fields[F.attendees]=m.atts;
   // Identity now comes from the signed-in session, not a prompt() the user typed once.

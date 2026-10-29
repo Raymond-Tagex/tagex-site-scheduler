@@ -496,14 +496,15 @@ function daysOpen(reportedAt, closedAt, now) {
  * large at the top right, so a sheet on a wall says at a glance how old it is.
  *
  * The tickets print in one section per region -- Gauteng, then Eastern Cape, then any whose job card
- * has no region yet -- each headed with its count and, when costs are shown, what they cost.
+ * has no region yet -- each headed with its count and, when km are shown, how far was driven.
  *
- * @param {object} d { filter, search, sort?, dir?, rows[], showCost?, regions?, generatedBy, generatedAt }
+ * @param {object} d { filter, search, sort?, dir?, rows[], showKm?, regions?, generatedBy, generatedAt }
  *   regions: the Region field's choices from Airtable, which set the order of the sections.
  *   rows: { ref, reportedAt, closedAt, client, jc, tech, subject, category, priority, status,
- *   region, cost }, already in the order to print (sortRows); sort and dir only label it.
- *   showCost: draw the Cost column and the totals. Off for a role that may not read Ticket Cost,
- *   so the column is not there at all rather than there and empty.
+ *   region, km }, already in the order to print (sortRows); sort and dir only label it.
+ *   km: the ticket's kilometres, the sum of its visits' (cancelled ones not counted); null if none.
+ *   showKm: draw the Km column and the totals. It replaced Cost (Raymond, 29 Oct 2026). Off for a
+ *   role that may not read site visits, so the column is not there at all rather than there and empty.
  * @returns {Promise<Buffer>}
  */
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -549,8 +550,15 @@ function fmtRand(n) {
   const [whole, cents] = Math.abs(Number(n)).toFixed(2).split('.');
   return (Number(n) < 0 ? '-R ' : 'R ') + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + '.' + cents;
 }
-const costOf = (r) => (r.cost == null || r.cost === '' || !isFinite(Number(r.cost)) ? 0 : Number(r.cost));
-const sumCost = (rows) => Math.round(rows.reduce((a, r) => a + costOf(r), 0) * 100) / 100;
+/** "1 234.5" -- one decimal at most, spaces between thousands. Blank when unknown. */
+function fmtKm(n) {
+  if (n == null || n === '' || !isFinite(Number(n))) return '';
+  const v = Math.round(Number(n) * 10) / 10;
+  const [whole, dec] = Math.abs(v).toFixed(1).split('.');
+  return (v < 0 ? '-' : '') + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + (dec === '0' ? '' : '.' + dec);
+}
+const kmOf = (r) => (r.km == null || r.km === '' || !isFinite(Number(r.km)) ? 0 : Number(r.km));
+const sumKm = (rows) => Math.round(rows.reduce((a, r) => a + kmOf(r), 0) * 10) / 10;
 
 async function ticketListPdf(d) {
   const doc = await PDFDocument.create();
@@ -566,10 +574,10 @@ async function ticketListPdf(d) {
   const put = (t, x, y, size, font = fonts.reg, color = INK) => page.drawText(safe(t), { x, y, size, font, color });
   const right = (t, y, size, font = fonts.reg, color = INK) => put(t, LM + cw - font.widthOfTextAtSize(safe(t), size), y, size, font, color);
 
-  const totalCost = d.showCost ? '    Total cost: ' + fmtRand(sumCost(rows)) : '';
+  const totalKm = d.showKm ? '    Total km: ' + fmtKm(sumKm(rows)) : '';
   const showing = 'Showing: ' + (d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
     : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + label) + (d.search ? `    Search: "${d.search}"` : '')
-    + '    ' + sortLabel(d.sort, d.dir) + totalCost;
+    + '    ' + sortLabel(d.sort, d.dir) + totalKm;
   const present = TICKET_STATUSES.filter((st) => rows.some((r) => (str(r.status) || 'New') === st));
   const counts = present.map((st) => [st, String(rows.filter((r) => (str(r.status) || 'New') === st).length)]);
 
@@ -581,18 +589,18 @@ async function ticketListPdf(d) {
     { head: 'Region', key: 'region', fixed: true }, { head: 'Technician', key: 'tech', p: 13 },
     { head: 'Subject', key: 'subject', p: 33 },
     { head: 'Category', key: 'category', p: 14 }, { head: 'Priority', key: 'priority', fixed: true }, { head: 'Status', key: 'status', p: 13 },
-  ].concat(d.showCost ? [{ head: 'Cost', key: 'cost', fixed: true, right: true }] : []);
+  ].concat(d.showKm ? [{ head: 'Km', key: 'km', fixed: true, right: true }] : []);
   const data = rows.map((r) => ({
     ref: r.ref, rep: fmtDate(r.reportedAt), days: daysOpen(r.reportedAt, r.closedAt, d.generatedAt),
     client: r.client, jc: r.jc, tech: str(r.tech) || '—', subject: r.subject, category: r.category,
     priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
-    region: str(r.region) || '—', cost: fmtRand(r.cost) || '—',
+    region: str(r.region) || '—', km: fmtKm(r.km) || '—',
   }));
   const sections = regionSections(rows, d.sort, d.dir, d.regions);
-  // "GAUTENG  14 tickets  ·  R 12 300.00" over each section
+  // "GAUTENG  14 tickets  ·  412.5 km" over each section
   const sectionHead = (s) => {
     const n = `${s.idx.length} ticket${s.idx.length === 1 ? '' : 's'}`;
-    return { name: s.name.toUpperCase(), rest: n + (d.showCost ? '  ·  ' + fmtRand(sumCost(s.idx.map((i) => rows[i]))) : '') };
+    return { name: s.name.toUpperCase(), rest: n + (d.showKm ? '  ·  ' + fmtKm(sumKm(s.idx.map((i) => rows[i]))) + ' km' : '') };
   };
 
   // status counts as chips, wrapped onto as many lines as they need at size sp
@@ -766,5 +774,5 @@ const reportFilename = (d) => {
 module.exports = {
   ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str, safe,
   ticketListPdf, listFilename, inFilter, daysOpen, filterLabel, TICKET_STATUSES, OPEN_STATUSES,
-  LIST_SORTS, LIST_DIRS, sortRows, sortLabel, regionSections, fmtRand, NO_REGION,
+  LIST_SORTS, LIST_DIRS, sortRows, sortLabel, regionSections, fmtRand, fmtKm, NO_REGION,
 };
