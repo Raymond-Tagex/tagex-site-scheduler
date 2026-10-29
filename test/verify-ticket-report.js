@@ -661,52 +661,120 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
   {
     const JSZip = require('jszip');
     const keep = JSON.stringify(ROWS);
+    const ACTS = 'tblWSJlbiGWlZ6yGL';
     ROWS[VISITS][0].fields.Kilometres = 84.5;
+    ROWS[VISITS][0].fields.Notes = 'Replaced the DC isolator';
+    ROWS[VISITS][0].fields['Visit ID'] = 'SV-AAA111';
     ROWS[VISITS][2].fields.Kilometres = 1200;
-    const withVisits = who({ tickets: ALL, job_cards: ALL, site_visits: ALL, people: ALL });
-    const sheet = async (res, n) => {
+    // Who raised 0001, when and how -- the detail the export now carries.
+    ROWS[TICKETS][0].createdTime = '2026-09-25T07:30:00.000Z';
+    Object.assign(ROWS[TICKETS][0].fields, {
+      'Created By': 'raymond@tagexenergy.co.za', 'Source Channel': 'WhatsApp', 'Source Detail': 'Oubaas 082 555 1234',
+      'Reported By': 'Oubaas', Description: 'Inverter beeping since Tuesday', 'Asset / Inverter': 'X3-Hybrid',
+      'Error Code': 'IE 33', 'Contract Number': 'SUB-148', 'Ticket Cost': 999,
+    });
+    ROWS[ACTS] = [
+      { id: 'recACT00000000002', createdTime: '2026-09-26T09:00:00.000Z', fields: { Ticket: ['recTKOPEN00000001'],
+        'Action Type': 'Ticket Status Change', Update: '[TKT-2026-0001] Status New -> In Progress', Timestamp: '2026-09-26T09:00:00.000Z',
+        'Created By': { id: 'usr1', email: 'stephen@tagexenergy.co.za', name: 'Stephen' } } },
+      { id: 'recACT00000000001', createdTime: '2026-09-25T07:30:05.000Z', fields: { Ticket: ['recTKOPEN00000001'],
+        'Action Type': 'Ticket Logged', Update: '[TKT-2026-0001] [WhatsApp] logged', Timestamp: '2026-09-25T07:30:05.000Z' } },
+      { id: 'recACT00000000003', createdTime: '2026-09-27T09:00:00.000Z', fields: { Ticket: ['recTKCLOSED000003'],
+        'Action Type': 'Comment', Update: 'Not exported: its ticket is closed', Timestamp: '2026-09-27T09:00:00.000Z' } },
+    ];
+    const everything = who({ tickets: ALL, job_cards: ALL, site_visits: ALL, people: ALL, activity_log: ALL });
+
+    // The workbook, read by sheet NAME and by column HEADING, so a column added later does not
+    // quietly shift what these assertions look at.
+    const book = async (res) => {
       const zip = await JSZip.loadAsync(Buffer.from(res.body.content, 'base64'));
-      return zip.file(`xl/worksheets/sheet${n}.xml`).async('string');
+      const names = [...(await zip.file('xl/workbook.xml').async('string')).matchAll(/<sheet name="([^"]+)"/g)].map((m) => m[1]);
+      const xmls = await Promise.all(names.map((n, i) => zip.file(`xl/worksheets/sheet${i + 1}.xml`).async('string')));
+      return { names, sheet: (name) => xmls[names.indexOf(name)] || '' };
     };
-    // Column A only: each fixture subject repeats its ticket number.
+    const heads = (xml) => [...(/<row r="1">([\s\S]*?)<\/row>/.exec(xml) || ['', ''])[1].matchAll(/<t[^>]*>([^<]*)<\/t>/g)].map((m) => m[1]);
+    const col = (xml, head) => { const i = heads(xml).indexOf(head); return i < 0 ? null : X.colName(i); };
+    const cellAt = (xml, head, row) => { const c = col(xml, head); const m = c && new RegExp(`<c r="${c}${row}"[^>]*>(?:<v>([^<]*)</v>|<is><t[^>]*>([^<]*)</t></is>)`).exec(xml); return m ? (m[1] != null ? m[1] : m[2]) : null; };
     const refsIn = (xml) => [...xml.matchAll(/<c r="A\d+"[^>]*><is><t[^>]*>TKT-2026-(\d{4})</g)].map((m) => m[1]);
+    const X = require(api('_lib/xlsxwrite.js'));
 
     AUDIT.length = 0;
-    r = await call(withVisits, { list: { status: 'OPEN', sort: 'date', dir: 'asc', format: 'xlsx' } });
+    r = await call(everything, { list: { status: 'OPEN', sort: 'date', dir: 'asc', format: 'xlsx' } });
     t('an Excel file comes back', [r.code, r.body.contentType], [200, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     t('named as the PDF is, as .xlsx', /^Tickets_Open_.*\.xlsx$/.test(r.body.filename), true);
-    let xml = await sheet(r, 1);
+    let b = await book(r);
+    t('sheets: Tickets, Activity, Visits, About', b.names, ['Tickets', 'Activity', 'Visits', 'About']);
+    let xml = b.sheet('Tickets');
     t('the same tickets, in the order chosen, as the PDF', refsIn(xml), ['0002', '0001', '0004']);
-    const pdf = await call(withVisits, { list: { status: 'OPEN', sort: 'date', dir: 'asc' } });
+    const pdf = await call(everything, { list: { status: 'OPEN', sort: 'date', dir: 'asc' } });
     t('which is the PDF\'s order exactly', refsIn(xml), [...new Set([...printed(pdf).matchAll(/TKT-2026-\d{4}/g)].map((m) => m[0].slice(-4)))]);
-    t('with a header row, Km last', /<c r="A1"[^>]*><is><t[^>]*>Ticket<\/t>/.test(xml) && /<c r="M1"[^>]*><is><t[^>]*>Km<\/t>/.test(xml), true);
-    t('the header frozen and filterable', [xml.includes('state="frozen"'), /<autoFilter ref="A1:M4"\/>/.test(xml)], [true, true]);
-    t('kilometres as numbers', /<c r="M2" s="4"><v>1200<\/v><\/c>/.test(xml) && /<c r="M3" s="4"><v>84.5<\/v><\/c>/.test(xml), true);
+    t('the list columns, then who raised it, when and how', heads(xml), ['Ticket', 'Reported', 'Days open', 'Client', 'Job card',
+      'Region', 'Technician', 'Subject', 'Category', 'Priority', 'Status', 'Closed', 'Km', 'Created', 'Created by', 'Reported via',
+      'Source detail', 'Reported by', 'Asset / inverter', 'Error code', 'Description', 'Resolution', 'Monitored by',
+      'Monitoring ends', 'Contract', 'Visits', 'Activity entries', 'Last activity']);
+    t('the header frozen and filterable over every column', [xml.includes('state="frozen"'), xml.includes(`<autoFilter ref="A1:${X.colName(heads(xml).length - 1)}4"/>`)], [true, true]);
+    t('kilometres as numbers', [cellAt(xml, 'Km', 2), cellAt(xml, 'Km', 3)], ['1200', '84.5']);
     t('reported dates as real dates (SAST)', /<c r="B2" s="2"><v>46275\.4166/.test(xml), true);
-    t('days open as a number', /<c r="C2"><v>\d+<\/v><\/c>/.test(xml), true);
+    t('days open as a number', /^\d+$/.test(cellAt(xml, 'Days open', 2) || ''), true);
     t('the technician named', xml.includes('Bongani'), true);
-    const about = await sheet(r, 2);
-    t('a second sheet says what was selected', about.includes('Open tickets (') && about.includes('Date reported, oldest first'), true);
+    // 0001 is row 3 (oldest first: 0002, 0001, 0004).
+    t('who created it', cellAt(xml, 'Created by', 3), 'raymond@tagexenergy.co.za');
+    t('when (SAST, 09:30)', cellAt(xml, 'Created', 3), String(X.serial('2026-09-25T07:30:00.000Z')));
+    t('how it was reported, and by whom', [cellAt(xml, 'Reported via', 3), cellAt(xml, 'Source detail', 3), cellAt(xml, 'Reported by', 3)],
+      ['WhatsApp', 'Oubaas 082 555 1234', 'Oubaas']);
+    t('its description, asset, error code and contract', [cellAt(xml, 'Description', 3), cellAt(xml, 'Asset / inverter', 3),
+      cellAt(xml, 'Error code', 3), cellAt(xml, 'Contract', 3)], ['Inverter beeping since Tuesday', 'X3-Hybrid', 'IE 33', 'SUB-148']);
+    t('its visits and activity counted', [cellAt(xml, 'Visits', 3), cellAt(xml, 'Activity entries', 3)], ['2', '2']);
+    t('and when it last had activity', cellAt(xml, 'Last activity', 3), String(X.serial('2026-09-26T09:00:00.000Z')));
+    t('costs stay out', /Ticket Cost|>999</.test(xml), false);
+
+    const acts = b.sheet('Activity');
+    t('the Activity sheet: every entry of the tickets exported, oldest first', refsIn(acts), ['0001', '0001']);
+    t('with when, type, who and what', [cellAt(acts, 'Type', 2), cellAt(acts, 'By', 3), cellAt(acts, 'Entry', 3)],
+      ['Ticket Logged', 'Stephen', '[TKT-2026-0001] Status New -&gt; In Progress']);
+    t('and nothing of a ticket that was not exported', acts.includes('Not exported'), false);
+
+    const vis = b.sheet('Visits');
+    t('the Visits sheet: every visit, the cancelled one too', refsIn(vis), ['0002', '0001', '0001']);
+    t('with its notes and km', vis.includes('Replaced the DC isolator') && vis.includes('SV-AAA111') && vis.includes('<v>84.5</v>'), true);
+
+    const about = b.sheet('About');
+    t('the About sheet says what was selected', about.includes('Open tickets (') && about.includes('Date reported, oldest first'), true);
     t('and the total km', /Total km[\s\S]*?<v>1284\.5<\/v>/.test(about), true);
     t('the export is audited as Excel', AUDIT.some((a) => a.action === 'Export' && /Service ticket list \(Excel\): Open, 3 ticket/.test(a.newValue || '')), true);
 
-    r = await call(withVisits, { list: { status: 'OPEN', search: 'grootvlei', ids: ['recTKOPEN00000001'], format: 'xlsx' } });
-    xml = await sheet(r, 1);
-    t('a search exports only what is on screen', refsIn(xml), ['0001']);
-    t('and the search is recorded', (await sheet(r, 2)).includes('grootvlei'), true);
-    r = await call(withVisits, { list: { status: 'Closed', format: 'xlsx' } });
-    t('a status exports only that status', refsIn(await sheet(r, 1)), ['0003']);
+    r = await call(everything, { list: { status: 'OPEN', search: 'grootvlei', ids: ['recTKOPEN00000001'], format: 'xlsx' } });
+    b = await book(r);
+    t('a search exports only what is on screen', refsIn(b.sheet('Tickets')), ['0001']);
+    t('and the search is recorded', b.sheet('About').includes('grootvlei'), true);
+    r = await call(everything, { list: { status: 'Closed', format: 'xlsx' } });
+    b = await book(r);
+    t('a status exports only that status', refsIn(b.sheet('Tickets')), ['0003']);
+    t('with only its own activity', refsIn(b.sheet('Activity')), ['0003']);
 
+    // A role without the activity log: no Activity sheet and no activity columns.
+    r = await call(who({ tickets: ALL, job_cards: ALL, site_visits: ALL, people: ALL }), { list: { status: 'OPEN', format: 'xlsx' } });
+    b = await book(r);
+    t('a role that may not read the activity log gets no Activity sheet', b.names, ['Tickets', 'Visits', 'About']);
+    t('nor the activity columns', heads(b.sheet('Tickets')).some((h) => /Activity/i.test(h)), false);
+
+    // A role without site visits: no Km, no Visits sheet, no technician names.
     r = await call(ops, { list: { status: 'OPEN', format: 'xlsx' } });
-    xml = await sheet(r, 1);
-    t('a role that may not read site visits gets no Km column', [/<c r="M1"/.test(xml), /<autoFilter ref="A1:L4"\/>/.test(xml)], [false, true]);
+    b = await book(r);
+    xml = b.sheet('Tickets');
+    t('a role that may not read site visits gets no Km column', heads(xml).includes('Km'), false);
+    t('nor a Visits sheet', b.names.includes('Visits'), false);
     t('nor technician names', /Zola|Bongani|Anna/.test(xml), false);
-    t('and no costs in either sheet', /Ticket Cost|R \d/.test(xml + (await sheet(r, 2))), false);
+    t('and no costs anywhere', /Ticket Cost|R \d|>999</.test(b.names.map(b.sheet).join('')), false);
 
     for (const bad of ['csv', 'XLSX', { x: 1 }, '']) {
-      r = await call(withVisits, { list: { status: 'OPEN', format: bad } });
+      r = await call(everything, { list: { status: 'OPEN', format: bad } });
       t(`a format of ${JSON.stringify(bad)} is refused`, r.code, 400);
     }
+    // The PDF is unchanged by all this.
+    r = await call(everything, { list: { status: 'OPEN' } });
+    t('the printed list carries none of the extra detail', /Created by|Oubaas 082|Inverter beeping/.test(printed(r)), false);
+
     // The button: beside Print, for the same roles, sending the same selection.
     const page = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
     const js = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'js', 'mod-scheduler.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -719,6 +787,7 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
     r = await call(noExport, { list: { status: 'OPEN', format: 'xlsx' } });
     t('a role without the export right gets no Excel file either', r.code, 403);
     for (const k of Object.keys(ROWS)) ROWS[k] = JSON.parse(keep)[k];
+    delete ROWS[ACTS];
   }
 
   // ── the Region choices, for the job card forms ──
