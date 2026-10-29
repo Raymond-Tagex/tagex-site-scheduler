@@ -23,6 +23,7 @@
 <link rel="stylesheet" href="/css/app.css">
 <link rel="stylesheet" href="/css/scheduler.css">
 <link rel="stylesheet" href="/css/siteinfo.css">
+<link rel="stylesheet" href="/css/expenses.css">
 </head>
 <body>
 
@@ -568,6 +569,37 @@
   </div>
 </section>
 
+<!-- EXPENSES: rendered by /js/mod-expenses.js. Access is checked again by /api/expenses. -->
+<section class="module mod-expenses" id="modExpenses" hidden>
+  <div id="exList">
+    <header class="ex-topbar">
+      <h2>Expense Claims</h2>
+      <div class="grow"></div>
+      <input type="search" id="exSearch" placeholder="Claim, employee, job card, project…" autocomplete="off" spellcheck="false">
+      <select id="exStatus" aria-label="Filter by status"></select>
+      <select id="exSort" aria-label="Sort claims">
+        <option value="new">Newest first</option>
+        <option value="old">Oldest first</option>
+        <option value="high">Amount, high to low</option>
+        <option value="low">Amount, low to high</option>
+        <option value="status">Status</option>
+        <option value="employee">Employee</option>
+      </select>
+      <label class="ex-check" id="exMineWrap" hidden><input type="checkbox" id="exMine"> Mine only</label>
+      <button class="ex-btn" data-act="exReload" type="button" title="Reload">&#8635;</button>
+      <button class="ex-btn primary" data-act="exNew" type="button" id="exNewBtn" hidden>+ New claim</button>
+    </header>
+    <div class="ex-jcbar">
+      <span class="ex-lbl">Job card</span>
+      <div class="ex-jcpick" data-jcpick="filter"></div>
+    </div>
+    <div id="exJcTotal"></div>
+    <div id="exListMsg"></div>
+    <div id="exRows" class="ex-rows"></div>
+  </div>
+  <div id="exDetail" hidden></div>
+</section>
+
 <script src="/js/core.js"></script>
 <script src="/js/pick.js"></script>
 <script src="/js/login.js"></script>
@@ -580,6 +612,7 @@
 <script src="/js/pdfwrite.js"></script>
 <script src="/js/siteinfo-split.js"></script>
 <script src="/js/mod-admin.js"></script>
+<script src="/js/mod-expenses.js"></script>
 <script src="/js/shell.js"></script>
 <script src="/js/boot.js"></script>
 </body>

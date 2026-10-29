@@ -1,0 +1,129 @@
+/* TAGEX — Expense claims.
+ *
+ * Scoped to .mod-expenses so it cannot restyle the scheduler or Site Information. Colours, type
+ * and radii come from the platform tokens in app.css.
+ *
+ * On a phone the lines table becomes one card per expense: technicians claim from site.
+ */
+
+.mod-expenses { padding: 16px; max-width: 1180px; margin: 0 auto; }
+.mod-expenses .ex-topbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.mod-expenses .ex-topbar h2 { margin: 0; font-size: 16px; letter-spacing: .02em; }
+.mod-expenses .grow { flex: 1; }
+.mod-expenses input, .mod-expenses select, .mod-expenses textarea {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--rs);
+  color: var(--text); font: inherit; padding: 8px 10px; min-height: 40px; width: 100%;
+}
+.mod-expenses .ex-topbar input[type="search"] { flex: 1 1 240px; width: auto; min-width: 200px; }
+.mod-expenses .ex-topbar select { width: auto; }
+.mod-expenses input:focus, .mod-expenses select:focus, .mod-expenses textarea:focus { outline: none; border-color: var(--amber); }
+.mod-expenses input:disabled, .mod-expenses select:disabled, .mod-expenses textarea:disabled { background: transparent; border-color: transparent; color: var(--text); }
+.mod-expenses input:disabled::placeholder, .mod-expenses textarea:disabled::placeholder { color: transparent; }
+.mod-expenses .ex-linebar select { width: auto; }
+
+.mod-expenses .ex-btn {
+  background: var(--surface); border: 1px solid var(--border-hi); color: var(--text);
+  border-radius: var(--rs); padding: 8px 14px; font-size: 13px; cursor: pointer; min-height: 40px;
+}
+.mod-expenses .ex-btn:hover { border-color: var(--amber); }
+.mod-expenses .ex-btn.primary { background: var(--amber); border-color: var(--amber); color: #101215; font-weight: 600; }
+.mod-expenses .ex-btn.danger { color: var(--red); border-color: var(--red-border); }
+.mod-expenses .ex-btn.sm { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+.mod-expenses .ex-btn:disabled { opacity: .55; cursor: default; }
+
+.mod-expenses .ex-lbl { font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: .08em; text-transform: uppercase; }
+.mod-expenses .ex-dim { color: var(--text-3); font-size: 12px; }
+.mod-expenses .ex-pad { padding: 10px; }
+.mod-expenses .ex-err { color: var(--red); }
+.mod-expenses .ex-check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.mod-expenses .ex-check input { width: auto; min-height: 0; }
+
+/* job card picker */
+.mod-expenses .ex-jcbar { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+.mod-expenses .ex-jcbar .ex-lbl { padding-top: 12px; }
+.mod-expenses .ex-jcpick { flex: 1; position: relative; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mod-expenses .ex-jc-chosen { font-size: 13px; }
+.mod-expenses .ex-jc-results { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; background: var(--card);
+  border: 1px solid var(--border-hi); border-radius: var(--rs); max-height: 320px; overflow-y: auto; }
+.mod-expenses .ex-jc-results:empty { display: none; }
+.mod-expenses .ex-jc-hit { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border);
+  padding: 10px 12px; cursor: pointer; font: inherit; color: var(--text); }
+.mod-expenses .ex-jc-hit:hover { background: var(--amber-dim); }
+.mod-expenses .ex-jc-hit .ex-dim { display: block; }
+
+/* list */
+.mod-expenses .ex-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.mod-expenses .ex-sum-cell { background: var(--surface); border: 1px solid var(--border); border-radius: var(--rs); padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.mod-expenses .ex-rows { display: flex; flex-direction: column; gap: 8px; }
+.mod-expenses .ex-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; text-align: left; width: 100%;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; cursor: pointer; font: inherit; color: var(--text); }
+.mod-expenses .ex-row:hover { border-color: var(--amber); }
+.mod-expenses .ex-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mod-expenses .ex-row-ref { font-family: var(--mono); font-weight: 600; }
+.mod-expenses .ex-row-sub { color: var(--text-2); font-size: 12.5px; }
+.mod-expenses .ex-row-desc { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }
+.mod-expenses .ex-row-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.mod-expenses .ex-row-amt { font-family: var(--mono); font-weight: 600; }
+.mod-expenses .ex-empty { text-align: center; padding: 30px 0; color: var(--text-3); font-family: var(--mono); font-size: 12px; }
+
+.mod-expenses .ex-chip { font-family: var(--mono); font-size: 10.5px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); white-space: nowrap; }
+.mod-expenses .ex-chip.grey { color: var(--text-2); }
+.mod-expenses .ex-chip.amber { color: var(--amber-ink); background: var(--amber-dim); border-color: rgba(240,165,0,.3); }
+.mod-expenses .ex-chip.green { color: var(--green); background: var(--green-dim); border-color: var(--green-border); }
+.mod-expenses .ex-chip.red { color: var(--red); background: var(--red-dim); border-color: var(--red-border); }
+.mod-expenses .ex-chip.blue { color: var(--blue); background: var(--blue-dim); border-color: rgba(29,78,216,.25); }
+
+/* detail */
+.mod-expenses .ex-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.mod-expenses .ex-title { font-family: var(--mono); font-size: 17px; font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mod-expenses .ex-total { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.mod-expenses .ex-total b { font-family: var(--mono); font-size: 20px; }
+.mod-expenses .ex-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.mod-expenses .ex-f { display: flex; flex-direction: column; gap: 5px; }
+.mod-expenses .ex-f label { font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: .08em; text-transform: uppercase; }
+.mod-expenses .ex-wide { grid-column: 1 / -1; }
+.mod-expenses .ex-h3 { font-size: 14px; margin: 16px 0 8px; }
+.mod-expenses .ex-linebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+
+.mod-expenses .ex-tablewrap { overflow-x: auto; }
+.mod-expenses .ex-lines { width: 100%; border-collapse: collapse; }
+.mod-expenses .ex-lines th { text-align: left; border-bottom: 1px solid var(--border-hi); padding: 4px; }
+.mod-expenses .ex-sorth { background: none; border: none; font-family: var(--mono); font-size: 10.5px; color: var(--text-2);
+  letter-spacing: .06em; text-transform: uppercase; cursor: pointer; padding: 6px 2px; }
+.mod-expenses .ex-lines td { border-bottom: 1px solid var(--border); padding: 4px; vertical-align: top; }
+.mod-expenses .ex-lines td.ex-sel { width: 32px; text-align: center; padding-top: 14px; }
+.mod-expenses .ex-lines td.ex-sel input { width: 18px; height: 18px; min-height: 0; }
+.mod-expenses .ex-lines td.ex-num input { text-align: right; font-family: var(--mono); }
+.mod-expenses .ex-lines tr.ex-removed td { opacity: .55; }
+.mod-expenses .ex-lines tr.ex-removed input { text-decoration: line-through; }
+.mod-expenses .ex-lines tr.ex-dupe { background: var(--red-dim); }
+.mod-expenses .ex-warn { color: var(--red); font-size: 11.5px; margin-top: 3px; }
+
+.mod-expenses .ex-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 16px 0 8px; }
+.mod-expenses .ex-declare { flex-basis: 100%; display: flex; flex-direction: column; gap: 8px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--rs); padding: 12px; }
+.mod-expenses .ex-declare label { display: flex; gap: 8px; font-size: 13px; line-height: 1.5; }
+.mod-expenses .ex-declare input { width: 18px; height: 18px; min-height: 0; flex-shrink: 0; margin-top: 2px; }
+.mod-expenses .ex-declare .ex-btn { align-self: flex-start; }
+.mod-expenses .ex-review { flex-basis: 100%; border-top: 1px solid var(--border); padding-top: 8px; }
+.mod-expenses .ex-hist { list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.mod-expenses .ex-hist li { border-left: 2px solid var(--border-hi); padding-left: 10px; }
+
+@media (max-width: 720px) {
+  .mod-expenses { padding: 12px; }
+  .mod-expenses .ex-topbar input[type="search"] { flex-basis: 100%; }
+  .mod-expenses .ex-btn { min-height: 44px; }
+  .mod-expenses .ex-row { flex-direction: column; align-items: stretch; }
+  .mod-expenses .ex-row-side { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .mod-expenses .ex-row-desc { white-space: normal; }
+  /* one card per expense */
+  .mod-expenses .ex-lines thead { display: none; }
+  .mod-expenses .ex-lines, .mod-expenses .ex-lines tbody { display: block; }
+  .mod-expenses .ex-lines tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border: 1px solid var(--border);
+    border-radius: var(--r); padding: 10px; margin-bottom: 8px; }
+  .mod-expenses .ex-lines td { border: none; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+  .mod-expenses .ex-lines td[data-l]::before { content: attr(data-l); font-family: var(--mono); font-size: 9.5px;
+    color: var(--text-3); letter-spacing: .08em; text-transform: uppercase; }
+  .mod-expenses .ex-lines td.ex-sel { grid-column: 1 / -1; align-items: flex-start; padding: 0; width: auto; }
+  .mod-expenses .ex-lines td[data-l="Description"] { grid-column: 1 / -1; }
+}

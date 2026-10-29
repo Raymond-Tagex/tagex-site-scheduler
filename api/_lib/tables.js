@@ -204,7 +204,9 @@ const NOT_PROVISIONED = new Set([
 
 // UI-only surfaces. Never resolve to a table; permission checks on them govern
 // whether the nav item renders and whether an export is allowed to run.
-const VIRTUAL_MODULES = new Set(['dashboard', 'reports']);
+// expenses and expense_approval are the same kind of key: their tables (EXPENSES, below) are
+// reached only through api/expenses.js, so /api/at must refuse them as it refuses these.
+const VIRTUAL_MODULES = new Set(['dashboard', 'reports', 'expenses', 'expense_approval']);
 
 // ─────────────────────────────────────────────────────────────
 // GLOBAL NEVER-RETURN FIELDS
@@ -370,6 +372,24 @@ const CLIENT_REGISTER = Object.freeze({
   clients:   'tbl0mJrPEf6wRX4fl',
   contracts: 'tblZ0cNUogFgZFpmf',
 });
+
+// Expense claims (Raymond, 29 Oct 2026). O&M only, and NOT a module: /api/at cannot resolve
+// these tables, so a claim's status, approved amount and payment can only change through
+// api/expenses.js, which applies the workflow in _lib/expenses.js. The route addresses fields
+// by id, so a renamed column in Airtable cannot silently break a status rule.
+const EXPENSES = Object.freeze({
+  base: 'OM',
+  claims:     'tblz6IE6BOL0S71Kv',
+  items:      'tbl7nxlGbIeiiXoKD',
+  history:    'tblQYamWME9XBK11D',
+  payments:   'tblkNuGbYI7Jq3Ua7',
+  categories: 'tblDa3chhbJvIHej2',
+});
+
+// Fields that exist in O&M and deliberately not in RES. Airtable adds the far end of every link,
+// so linking claims to job cards put "Expense Claims" on O&M Job Cards; RES has no claims table
+// for it to point at. test/verify-res-mirror.js skips exactly these.
+const OM_ONLY_FIELDS = Object.freeze({ job_cards: Object.freeze(['Expense Claims']) });
 
 // The bases the scheduler and tickets work in. Not C&I: its scheduler is a separate
 // application, and tickets resolve only in O&M and its duplicate.
@@ -644,6 +664,8 @@ module.exports = {
   BASES,
   OPS_BASES,
   CLIENT_REGISTER,
+  EXPENSES,
+  OM_ONLY_FIELDS,
   OM_ONLY,
   SCHEDULER_BASES,
   schedulerBase,

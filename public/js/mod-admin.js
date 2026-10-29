@@ -19,6 +19,9 @@
     'picking_slips', 'picking_slip_items',
     'delivery_notes', 'delivery_lines', 'signatures',
     'site_information', 'site_equipment',
+    // Expense claims: expenses = your own claims; expense_approval view = every claim, edit =
+    // approve, reject, ask for information. The tables are not reachable through /api/at.
+    'expenses', 'expense_approval',
     'stock_items', 'site_visits', 'activity_log',
     'costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports',
     'systems', 'contracts', 'slas', 'warranty_register', 'tickets',

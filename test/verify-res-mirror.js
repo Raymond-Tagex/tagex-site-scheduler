@@ -135,13 +135,18 @@ async function endpoints() {
         const v = T.TABLES[m].OM;
         for (const id of typeof v === 'string' ? [v] : Object.values(v)) ids.add(id);
       }
+      const moduleOf = (id) => omModules.find((m) => {
+        const v = T.TABLES[m].OM;
+        return (typeof v === 'string' ? [v] : Object.values(v)).includes(id);
+      });
       for (const id of ids) {
         const a = om[id]; const b = res[id];
+        const omOnly = new Set(T.OM_ONLY_FIELDS[moduleOf(id)] || []);
         if (!a) { t(`O&M has table ${id}`, false, 'mapped in tables.js but missing from O&M itself'); continue; }
         t(`RES has "${a.name}" under the same id`, !!b && b.name === a.name, b ? `RES calls it "${b.name}"` : 'missing');
         if (!b) continue;
         const have = new Set(b.fields.map((f) => `${f.name}|${f.type}`));
-        const missing = a.fields.filter((f) => !have.has(`${f.name}|${f.type}`)).map((f) => f.name);
+        const missing = a.fields.filter((f) => !omOnly.has(f.name) && !have.has(`${f.name}|${f.type}`)).map((f) => f.name);
         t(`  and every O&M field, with the same type`, !missing.length, `missing or retyped in RES: ${missing.join(', ')}`);
       }
       const src = Object.values(res).find((x) => x.id === T.TABLES.site_information.RES);

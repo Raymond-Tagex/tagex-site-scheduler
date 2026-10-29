@@ -26,6 +26,10 @@
     "api/at.js": {
       "maxDuration": 30
     },
+    "api/expenses.js": {
+      "maxDuration": 30,
+      "includeFiles": "api/_lib/assets/**"
+    },
     "api/auth.js": {
       "maxDuration": 20
     },

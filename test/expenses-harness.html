@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Expense claims — browser harness</title>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/expenses.css">
+</head>
+<body>
+<!--
+  Drives the REAL mod-expenses.js in a REAL browser against a stubbed /api/expenses.
+
+      node scripts/ui-harness.js   then   http://localhost:4321/test/expenses-harness.html
+
+  Uses the real markup: the page fetches /index.html and lifts #modExpenses out of it, so a
+  renamed element in index.html breaks this page too.
+
+  What it proves: a new claim is saved with one request id however often Save is tapped, blank
+  rows are not sent, a removal asks for a reason and goes to remove_line, and Submit insists on
+  the declaration. The page title ends in PASS or FAIL; window.__result says the same.
+-->
+<pre id="out" style="padding:12px;font:12px/1.7 ui-monospace,monospace;white-space:pre-wrap;background:#f4f6f9;margin:0;"></pre>
+<div id="stage"></div>
+<script src="/js/core.js"></script>
+<script src="/js/mod-expenses.js"></script>
+<script src="/test/expenses-harness.js"></script>
+</body>
+</html>

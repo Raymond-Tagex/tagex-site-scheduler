@@ -18,13 +18,20 @@
       requires: ['site_visits', 'view'], start: () => TX.scheduler && TX.scheduler.start() },
     { key: 'siteinfo', label: 'Site Information', panel: 'modSiteInfo',
       requires: ['site_information', 'view'], start: () => TX.siteinfo && TX.siteinfo.start() },
+    // An approver may hold expense_approval without claiming expenses themselves.
+    { key: 'expenses', label: 'Expenses', panel: 'modExpenses',
+      requires: ['expenses', 'view'], orRequires: ['expense_approval', 'view'],
+      start: () => TX.expenses && TX.expenses.start() },
   ];
 
   const started = Object.create(null);
   let current = null;
 
+  const allowed = (t) => TX.can(t.requires[0], t.requires[1])
+    || (!!t.orRequires && TX.can(t.orRequires[0], t.orRequires[1]));
+
   function available() {
-    return TABS.filter((t) => TX.can(t.requires[0], t.requires[1]));
+    return TABS.filter(allowed);
   }
 
   function show(key) {
@@ -58,7 +65,7 @@
     // a round of "where is the Site Information tab?" when a stale page was the real answer.
     host.hidden = tabs.length < 2;
     if (tabs.length < 2) {
-      const missing = TABS.filter((t) => !TX.can(t.requires[0], t.requires[1]))
+      const missing = TABS.filter((t) => !allowed(t))
         .map((t) => t.label + ' (needs ' + t.requires.join(':') + ')');
       if (missing.length) {
         console.info('TAGEX shell: hiding the module strip. Not available to this role: '
