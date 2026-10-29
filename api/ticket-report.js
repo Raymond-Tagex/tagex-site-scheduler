@@ -319,24 +319,37 @@ async function listReport(auth, ctx, base, list, res) {
     // people still gets its list, with the column blank. The view rights are checked here, not
     // left to readAll: filterReadFields with no rule for a table returns every field, so without
     // this a role denied site visits would read technician names off the printout.
+    //
+    // Kilometres come from the same visits (Raymond, 29 Oct 2026: the Km column replaced Cost).
+    // A ticket's km is the sum of its visits' Kilometres, cancelled visits not counted -- a trip
+    // that did not happen was not driven. Visits are needed for km; people only for the names.
     const techOf = {};
-    const mayNameTechs = P.can(auth.perms, 'site_visits', 'view').ok && P.can(auth.perms, 'people', 'view').ok;
-    if (mayNameTechs) try {
+    const kmOf = {};
+    const mayReadVisits = P.can(auth.perms, 'site_visits', 'view').ok;
+    const mayNameTechs = mayReadVisits && P.can(auth.perms, 'people', 'view').ok;
+    if (mayReadVisits) try {
       const names = {};
-      for (const p of await readAll(auth, base, 'people')) {
-        names[p.id] = R.str(p.fields.Name || p.fields['Full Name'] || '');
+      if (mayNameTechs) {
+        try {
+          for (const p of await readAll(auth, base, 'people')) {
+            names[p.id] = R.str(p.fields.Name || p.fields['Full Name'] || '');
+          }
+        } catch (e) { /* no people access: the km still print */ }
       }
       const visits = {};
       for (const v of await readAll(auth, base, 'site_visits')) visits[v.id] = v.fields;
       for (const x of tickets) {
-        const latest = ids(x.fields['Site Visits']).map((id) => visits[id])
-          .filter((v) => v && R.str(v.Status) !== 'Cancelled')
+        const live = ids(x.fields['Site Visits']).map((id) => visits[id])
+          .filter((v) => v && R.str(v.Status) !== 'Cancelled');
+        const kms = live.map((v) => v.Kilometres).filter((n) => typeof n === 'number' && isFinite(n));
+        if (kms.length) kmOf[x.id] = Math.round(kms.reduce((a, n) => a + n, 0) * 10) / 10;
+        const latest = live.slice()
           .sort((a, b) => String(b['Start DateTime'] || '').localeCompare(String(a['Start DateTime'] || '')))[0];
-        if (latest) {
+        if (mayNameTechs && latest) {
           techOf[x.id] = ids(latest['Assigned Technician']).map((i) => names[i]).filter(Boolean).join(', ');
         }
       }
-    } catch (e) { /* no visit or people access */ }
+    } catch (e) { /* no visit access */ }
 
     const cn = tickets.some((x) => !ids(x.fields['Job Card']).length && ids(x.fields.Client).length)
       ? await clientNames(auth, base) : {};
@@ -356,15 +369,14 @@ async function listReport(auth, ctx, base, list, res) {
         priority: R.str(f.Priority),
         status: R.str(f.Status),
         region: R.str(jc.Region),
-        cost: typeof f['Ticket Cost'] === 'number' ? f['Ticket Cost'] : null,
+        km: Object.prototype.hasOwnProperty.call(kmOf, x.id) ? kmOf[x.id] : null,
       };
     }), sort, dir);
 
-    // The Cost column is drawn only for a role that may read Ticket Cost. readAll has already
-    // stripped the values for one that may not; this keeps the column itself off the page, so a
-    // blank column cannot be read as "nothing has cost anything".
-    const tr = auth.perms && auth.perms.tickets;
-    const showCost = !!(tr && tr.view) && !((tr.fields && tr.fields.deny_read) || []).includes('Ticket Cost');
+    // The Km column is drawn for anyone who may read site visits (kilometres are not money, so no
+    // narrower rule). For one who may not, the column is left off rather than printed empty, so a
+    // blank cannot be read as "nobody drove anywhere".
+    const showKm = mayReadVisits;
 
     // The sections follow the Region field's own list in Airtable, so a region added there
     // prints in its place without a code change.
@@ -377,7 +389,7 @@ async function listReport(auth, ctx, base, list, res) {
     } catch (e) { /* the default order will do */ }
 
     const payload = {
-      filter, search, sort, dir, rows, showCost, regions, generatedBy: auth.email, generatedAt: new Date().toISOString(),
+      filter, search, sort, dir, rows, showKm, regions, generatedBy: auth.email, generatedAt: new Date().toISOString(),
     };
     const pdf = await R.ticketListPdf(payload);
 
