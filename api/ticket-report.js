@@ -300,6 +300,9 @@ async function listReport(auth, ctx, base, list, res) {
   if (!Object.prototype.hasOwnProperty.call(R.LIST_SORTS, sort) || !R.LIST_DIRS.includes(dir)) {
     return H.fail(res, 400, 'bad_request', 'Choose how to sort the list.');
   }
+  // 'pdf' (the default, as before) or 'xlsx'. Nothing else is a format.
+  const format = list.format == null ? 'pdf' : String(list.format);
+  if (!['pdf', 'xlsx'].includes(format)) return H.fail(res, 400, 'bad_request', 'Choose PDF or Excel.');
 
   try {
     const tickets = (await readAll(auth, base, 'tickets', 'ticket'))
@@ -391,19 +394,21 @@ async function listReport(auth, ctx, base, list, res) {
     const payload = {
       filter, search, sort, dir, rows, showKm, regions, generatedBy: auth.email, generatedAt: new Date().toISOString(),
     };
-    const pdf = await R.ticketListPdf(payload);
+    // The Excel export is the same list, built from the same rows: same selection, same rights.
+    const excel = format === 'xlsx';
+    const file = excel ? await R.ticketListXlsx(payload) : await R.ticketListPdf(payload);
 
     await A.auditNow({
       ...ctx, action: 'Export', result: 'Allowed', field: 'Ticket list',
-      newValue: `Service ticket list: ${R.filterLabel(filter)}, ${rows.length} ticket(s)`
+      newValue: `Service ticket list${excel ? ' (Excel)' : ''}: ${R.filterLabel(filter)}, ${rows.length} ticket(s)`
         + (search ? `, search "${search}"` : '') + `, ${R.sortLabel(sort, dir).toLowerCase()}`,
     });
 
     return H.ok(res, {
-      filename: R.listFilename(payload),
-      contentType: 'application/pdf',
-      content: pdf.toString('base64'),
-      bytes: pdf.length,
+      filename: excel ? R.listXlsxFilename(payload) : R.listFilename(payload),
+      contentType: excel ? require('./_lib/xlsxwrite.js').XLSX_TYPE : 'application/pdf',
+      content: file.toString('base64'),
+      bytes: file.length,
       count: rows.length,
     });
   } catch (e) {

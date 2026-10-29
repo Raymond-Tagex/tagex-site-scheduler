@@ -657,6 +657,70 @@ console.log('\n\x1b[1mTHE TICKET LIST, THROUGH THE ENDPOINT\x1b[0m\n');
     for (const k of Object.keys(ROWS)) ROWS[k] = JSON.parse(keep)[k];
   }
 
+  // ── the same list as an Excel file (Raymond, 29 Oct 2026) ──
+  {
+    const JSZip = require('jszip');
+    const keep = JSON.stringify(ROWS);
+    ROWS[VISITS][0].fields.Kilometres = 84.5;
+    ROWS[VISITS][2].fields.Kilometres = 1200;
+    const withVisits = who({ tickets: ALL, job_cards: ALL, site_visits: ALL, people: ALL });
+    const sheet = async (res, n) => {
+      const zip = await JSZip.loadAsync(Buffer.from(res.body.content, 'base64'));
+      return zip.file(`xl/worksheets/sheet${n}.xml`).async('string');
+    };
+    // Column A only: each fixture subject repeats its ticket number.
+    const refsIn = (xml) => [...xml.matchAll(/<c r="A\d+"[^>]*><is><t[^>]*>TKT-2026-(\d{4})</g)].map((m) => m[1]);
+
+    AUDIT.length = 0;
+    r = await call(withVisits, { list: { status: 'OPEN', sort: 'date', dir: 'asc', format: 'xlsx' } });
+    t('an Excel file comes back', [r.code, r.body.contentType], [200, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+    t('named as the PDF is, as .xlsx', /^Tickets_Open_.*\.xlsx$/.test(r.body.filename), true);
+    let xml = await sheet(r, 1);
+    t('the same tickets, in the order chosen, as the PDF', refsIn(xml), ['0002', '0001', '0004']);
+    const pdf = await call(withVisits, { list: { status: 'OPEN', sort: 'date', dir: 'asc' } });
+    t('which is the PDF\'s order exactly', refsIn(xml), [...new Set([...printed(pdf).matchAll(/TKT-2026-\d{4}/g)].map((m) => m[0].slice(-4)))]);
+    t('with a header row, Km last', /<c r="A1"[^>]*><is><t[^>]*>Ticket<\/t>/.test(xml) && /<c r="M1"[^>]*><is><t[^>]*>Km<\/t>/.test(xml), true);
+    t('the header frozen and filterable', [xml.includes('state="frozen"'), /<autoFilter ref="A1:M4"\/>/.test(xml)], [true, true]);
+    t('kilometres as numbers', /<c r="M2" s="4"><v>1200<\/v><\/c>/.test(xml) && /<c r="M3" s="4"><v>84.5<\/v><\/c>/.test(xml), true);
+    t('reported dates as real dates (SAST)', /<c r="B2" s="2"><v>46275\.4166/.test(xml), true);
+    t('days open as a number', /<c r="C2"><v>\d+<\/v><\/c>/.test(xml), true);
+    t('the technician named', xml.includes('Bongani'), true);
+    const about = await sheet(r, 2);
+    t('a second sheet says what was selected', about.includes('Open tickets (') && about.includes('Date reported, oldest first'), true);
+    t('and the total km', /Total km[\s\S]*?<v>1284\.5<\/v>/.test(about), true);
+    t('the export is audited as Excel', AUDIT.some((a) => a.action === 'Export' && /Service ticket list \(Excel\): Open, 3 ticket/.test(a.newValue || '')), true);
+
+    r = await call(withVisits, { list: { status: 'OPEN', search: 'grootvlei', ids: ['recTKOPEN00000001'], format: 'xlsx' } });
+    xml = await sheet(r, 1);
+    t('a search exports only what is on screen', refsIn(xml), ['0001']);
+    t('and the search is recorded', (await sheet(r, 2)).includes('grootvlei'), true);
+    r = await call(withVisits, { list: { status: 'Closed', format: 'xlsx' } });
+    t('a status exports only that status', refsIn(await sheet(r, 1)), ['0003']);
+
+    r = await call(ops, { list: { status: 'OPEN', format: 'xlsx' } });
+    xml = await sheet(r, 1);
+    t('a role that may not read site visits gets no Km column', [/<c r="M1"/.test(xml), /<autoFilter ref="A1:L4"\/>/.test(xml)], [false, true]);
+    t('nor technician names', /Zola|Bongani|Anna/.test(xml), false);
+    t('and no costs in either sheet', /Ticket Cost|R \d/.test(xml + (await sheet(r, 2))), false);
+
+    for (const bad of ['csv', 'XLSX', { x: 1 }, '']) {
+      r = await call(withVisits, { list: { status: 'OPEN', format: bad } });
+      t(`a format of ${JSON.stringify(bad)} is refused`, r.code, 400);
+    }
+    // The button: beside Print, for the same roles, sending the same selection.
+    const page = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+    const js = require('fs').readFileSync(path.join(__dirname, '..', 'public', 'js', 'mod-scheduler.js'), 'utf8').replace(/\r\n/g, '\n');
+    t('an Excel button beside Print, for roles that may export',
+      /id="tktPrintTop"[^>]*>Print<\/button>\s*<button[^>]*id="tktExcelTop"[^>]*data-act="omTktExcelList"[^>]*data-requires="tickets:export"[^>]*>Excel<\/button>/.test(page), true);
+    t('it sends the Print selection, as Excel', js.includes("const omTktExcelList=()=>omTktPrintList('xlsx');")
+      && js.includes("const list={ status:omTktFilter, ...omTktPrintOrder() };\n    if(xlsx) list.format='xlsx';"), true);
+    t('and shows wherever Print shows', js.includes("const xl=document.getElementById('tktExcelTop'); if(xl) xl.hidden=b.hidden;"), true);
+    const noExport = who({ tickets: { ...ALL, export: false }, job_cards: ALL, site_visits: ALL });
+    r = await call(noExport, { list: { status: 'OPEN', format: 'xlsx' } });
+    t('a role without the export right gets no Excel file either', r.code, 403);
+    for (const k of Object.keys(ROWS)) ROWS[k] = JSON.parse(keep)[k];
+  }
+
   // ── the Region choices, for the job card forms ──
   {
     const jcForm = require(api('jobcard-form.js'));
