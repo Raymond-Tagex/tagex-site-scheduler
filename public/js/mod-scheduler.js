@@ -2850,19 +2850,24 @@ function omDownloadPdf(r,fallbackName){
  * The chip goes as a name; the server applies it to what it reads itself. With a search typed,
  * the ids on screen go too, and the server prints only those of them that are under the chip.
  */
-async function omTktPrintList(){
-  const btn=document.getElementById('tktPrintTop');
+// Print and Excel send the same selection -- status, search (as the ids on screen), sort -- and
+// the server builds both from the same rows, so the sheet and the printout never disagree.
+const omTktExcelList=()=>omTktPrintList('xlsx');
+async function omTktPrintList(format){
+  const xlsx=format==='xlsx';
+  const btn=document.getElementById(xlsx?'tktExcelTop':'tktPrintTop');
   const was=btn?btn.textContent:'';
   if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
   try{
     const q=omTktSearchQ.trim();
     const list={ status:omTktFilter, ...omTktPrintOrder() };
+    if(xlsx) list.format='xlsx';
     if(q){ list.search=q; list.ids=omFilteredTkts().map(r=>r.id); }
     const r=await TX.request('/api/ticket-report',{ list, base:SCHED_BASE });
-    omDownloadPdf(r,'tickets.pdf');
-    toast((r.count===1?'1 ticket':(r.count||0)+' tickets')+' \u2014 PDF downloaded','ok');
+    omDownloadPdf(r,xlsx?'tickets.xlsx':'tickets.pdf');
+    toast((r.count===1?'1 ticket':(r.count||0)+' tickets')+' \u2014 '+(xlsx?'Excel file':'PDF')+' downloaded','ok');
   }catch(e){
-    toast('Print failed: '+TX.errorText(e),'bad');
+    toast((xlsx?'Export':'Print')+' failed: '+TX.errorText(e),'bad');
   }finally{
     if(btn){ btn.disabled=false; btn.textContent=was; }
   }
@@ -3902,6 +3907,8 @@ function omSyncPrintBtn(){
   const b=document.getElementById('tktPrintTop'); if(!b)return;
   const tab=document.getElementById('view-omtickets');
   b.hidden=!(tab&&!tab.classList.contains('hidden')&&omCurrentView==='tickets');
+  // Excel goes wherever Print goes: the same list, as a spreadsheet.
+  const xl=document.getElementById('tktExcelTop'); if(xl) xl.hidden=b.hidden;
   // The sort pickers go wherever the button goes: they mean nothing without it.
   for(const id of ['tktPrintSort','tktPrintDir']){
     const el=document.getElementById(id); if(!el) continue;
@@ -4142,7 +4149,8 @@ async function omSubmitNewJC(){
     add('omBookVisit', typeof omBookVisit === 'function' ? omBookVisit : null);
     add('omTktReport', typeof omTktReport === 'function' ? omTktReport : null);
     add('omTktForm', typeof omTktForm === 'function' ? omTktForm : null);
-    add('omTktPrintList', typeof omTktPrintList === 'function' ? omTktPrintList : null);
+    add('omTktPrintList', typeof omTktPrintList === 'function' ? ()=>omTktPrintList('pdf') : null);
+    add('omTktExcelList', omTktExcelList);
     add('omJcForm', typeof omJcForm === 'function' ? omJcForm : null);
     add('omTktPullHistory', typeof omTktPullHistory === 'function' ? omTktPullHistory : null);
     add('omPullAll', typeof omPullAll === 'function' ? omPullAll : null);

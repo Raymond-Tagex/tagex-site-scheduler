@@ -766,6 +766,52 @@ async function ticketListPdf(d) {
 
 const listFilename = (d) => `Tickets_${filterLabel(d.filter).replace(/[^A-Za-z0-9]+/g, '-')}_${stamp(d.generatedAt)}.pdf`;
 
+/**
+ * The same list as ticketListPdf, as an Excel workbook (Raymond, 29 Oct 2026: "export as excel
+ * based on selection criteria"). The same rows, in the same order, under the same status, search
+ * and sort, so the sheet and the printout never disagree. Dates are real dates and Days / Km real
+ * numbers, so they sort and filter in Excel. A second sheet says what was selected, as the PDF's
+ * header does. The Km column is there only when the PDF's is (showKm).
+ *
+ * @param {object} d the payload ticketListPdf takes
+ * @returns {Promise<Buffer>}
+ */
+async function ticketListXlsx(d) {
+  const X = require('./xlsxwrite.js');
+  const rows = d.rows || [];
+  const columns = [
+    { head: 'Ticket', key: 'ref', width: 16 }, { head: 'Reported', key: 'reportedAt', type: 'datetime', width: 17 },
+    { head: 'Days open', key: 'days', type: 'int', width: 10 }, { head: 'Client', key: 'client', width: 28 },
+    { head: 'Job card', key: 'jc', width: 24 }, { head: 'Region', key: 'region', width: 14 },
+    { head: 'Technician', key: 'tech', width: 20 }, { head: 'Subject', key: 'subject', width: 48 },
+    { head: 'Category', key: 'category', width: 22 }, { head: 'Priority', key: 'priority', width: 10 },
+    { head: 'Status', key: 'status', width: 22 }, { head: 'Closed', key: 'closedAt', type: 'datetime', width: 17 },
+  ].concat(d.showKm ? [{ head: 'Km', key: 'km', type: 'number', width: 9 }] : []);
+  const data = rows.map((r) => {
+    const days = daysOpen(r.reportedAt, r.closedAt, d.generatedAt);
+    return {
+      ref: str(r.ref), reportedAt: r.reportedAt || '', days: days === '' ? '' : Number(days),
+      client: str(r.client), jc: str(r.jc), region: str(r.region), tech: str(r.tech), subject: str(r.subject),
+      category: str(r.category), priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
+      closedAt: r.closedAt || '', km: r.km == null || r.km === '' ? '' : Number(r.km),
+    };
+  });
+  const about = [
+    ['Showing', d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
+      : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + filterLabel(d.filter)],
+    ['Search', d.search ? d.search : '(none)'],
+    ['Sorted by', sortLabel(d.sort, d.dir).replace(/^Sorted by:\s*/, '')],
+    ['Tickets', rows.length],
+  ].concat(d.showKm ? [['Total km', sumKm(rows)]] : [])
+    .concat([['Exported', fmtDateTime(d.generatedAt) + ' SAST'], ['Exported by', str(d.generatedBy)]]);
+  return X.workbook([
+    { name: 'Tickets', columns, rows: data },
+    { name: 'About', columns: [{ head: 'Selection', key: 'k', width: 16 }, { head: 'Value', key: 'v', width: 90 }],
+      rows: about.map(([k, v]) => ({ k, v })), filter: false },
+  ]);
+}
+const listXlsxFilename = (d) => listFilename(d).replace(/\.pdf$/, '.xlsx');
+
 const reportFilename = (d) => {
   const ref = String((d.ticket && d.ticket['Ticket Ref']) || 'ticket').replace(/[^A-Za-z0-9-]/g, '');
   return `${ref}_Report_${stamp(d.generatedAt)}.pdf`;
@@ -773,6 +819,6 @@ const reportFilename = (d) => {
 
 module.exports = {
   ticketReportPdf, reportFilename, CO, wrap, fmtDateTime, fmtDate, str, safe,
-  ticketListPdf, listFilename, inFilter, daysOpen, filterLabel, TICKET_STATUSES, OPEN_STATUSES,
+  ticketListPdf, listFilename, ticketListXlsx, listXlsxFilename, inFilter, daysOpen, filterLabel, TICKET_STATUSES, OPEN_STATUSES,
   LIST_SORTS, LIST_DIRS, sortRows, sortLabel, regionSections, fmtRand, fmtKm, NO_REGION,
 };
