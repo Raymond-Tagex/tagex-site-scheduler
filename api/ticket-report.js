@@ -330,8 +330,10 @@ async function listReport(auth, ctx, base, list, res) {
     const kmOf = {};
     const mayReadVisits = P.can(auth.perms, 'site_visits', 'view').ok;
     const mayNameTechs = mayReadVisits && P.can(auth.perms, 'people', 'view').ok;
+    // Kept for the Excel export's Visits sheet, which lists every visit of every ticket.
+    const names = {};
+    const visits = {};
     if (mayReadVisits) try {
-      const names = {};
       if (mayNameTechs) {
         try {
           for (const p of await readAll(auth, base, 'people')) {
@@ -339,7 +341,6 @@ async function listReport(auth, ctx, base, list, res) {
           }
         } catch (e) { /* no people access: the km still print */ }
       }
-      const visits = {};
       for (const v of await readAll(auth, base, 'site_visits')) visits[v.id] = v.fields;
       for (const x of tickets) {
         const live = ids(x.fields['Site Visits']).map((id) => visits[id])
@@ -357,10 +358,51 @@ async function listReport(auth, ctx, base, list, res) {
     const cn = tickets.some((x) => !ids(x.fields['Job Card']).length && ids(x.fields.Client).length)
       ? await clientNames(auth, base) : {};
 
+    // The Excel export carries each ticket's activity log (Raymond, 29 Oct 2026: "who created
+    // ticket, when, how, any notes or activity logs"). Read only for Excel, and only for a role
+    // that may read the activity log; for any other the sheet and its two columns are left off.
+    const excel = format === 'xlsx';
+    const showActivity = excel && P.can(auth.perms, 'activity_log', 'view').ok;
+    const actsOf = {};
+    if (showActivity) try {
+      const wanted = new Set(tickets.map((x) => x.id));
+      for (const a of await readAll(auth, base, 'activity_log')) {
+        for (const tid of ids(a.fields.Ticket)) {
+          if (!wanted.has(tid)) continue;
+          const by = a.fields['Created By'];
+          (actsOf[tid] = actsOf[tid] || []).push({
+            at: a.fields.Timestamp || a.createdTime || '',
+            type: R.str(a.fields['Action Type']),
+            by: by && typeof by === 'object' ? R.str(by.name || by.email) : R.str(by),
+            note: R.str(a.fields.Update),
+          });
+        }
+      }
+      for (const k of Object.keys(actsOf)) actsOf[k].sort((p, q) => String(p.at).localeCompare(String(q.at)));
+    } catch (e) { /* the activity log could not be read: the sheet says nothing rather than fail */ }
+
     const rows = R.sortRows(tickets.map((x) => {
       const f = x.fields;
       const jc = jcs[ids(f['Job Card'])[0]] || {};
+      const acts = actsOf[x.id] || [];
       return {
+        id: x.id,
+        // Who raised it, when and how -- shown in the Excel export only; the PDF has no room.
+        createdAt: x.createdTime || null,
+        createdBy: R.str(f['Created By']),
+        channel: R.str(f['Source Channel']),
+        channelDetail: R.str(f['Source Detail']),
+        reportedBy: R.str(f['Reported By']),
+        asset: R.str(f['Asset / Inverter']),
+        errorCode: R.str(f['Error Code']),
+        description: R.str(f.Description),
+        resolution: R.str(f['Resolution Summary']),
+        monBy: R.str(f['Monitored By']),
+        monEnds: f['Monitoring Ends'] || null,
+        contract: R.str(f['Contract Number']),
+        visitCount: ids(f['Site Visits']).length,
+        activityCount: showActivity ? acts.length : null,
+        lastActivity: showActivity && acts.length ? acts[acts.length - 1].at : null,
         ref: R.str(f['Ticket Ref']),
         reportedAt: f['Reported At'] || null,
         closedAt: f['Closed At'] || null,
@@ -381,6 +423,21 @@ async function listReport(auth, ctx, base, list, res) {
     // blank cannot be read as "nobody drove anywhere".
     const showKm = mayReadVisits;
 
+    // The Excel export's two extra sheets, in the list's own order: each ticket's activity, oldest
+    // first, and each of its visits, with technician names only for a role that may read people.
+    const activity = showActivity ? rows.flatMap((r) => (actsOf[r.id] || []).map((a) => ({ ref: r.ref, ...a }))) : null;
+    const visitRows = excel && mayReadVisits ? rows.flatMap((r) => {
+      const t = tickets.find((x) => x.id === r.id);
+      return ids(t && t.fields['Site Visits']).map((id) => visits[id] ? { id, v: visits[id] } : null).filter(Boolean)
+        .sort((p, q) => String(p.v['Start DateTime'] || '').localeCompare(String(q.v['Start DateTime'] || '')))
+        .map(({ v }) => ({
+          ref: r.ref, visitId: R.str(v['Visit ID']), start: v['Start DateTime'] || '', end: v['End DateTime'] || '',
+          type: R.str(v['Visit Type']), status: R.str(v.Status),
+          tech: mayNameTechs ? ids(v['Assigned Technician']).map((i) => names[i]).filter(Boolean).join(', ') : '',
+          km: typeof v.Kilometres === 'number' ? v.Kilometres : null, notes: R.str(v.Notes), createdBy: R.str(v['Created By']),
+        }));
+    }) : null;
+
     // The sections follow the Region field's own list in Airtable, so a region added there
     // prints in its place without a code change.
     let regions = [];
@@ -393,9 +450,9 @@ async function listReport(auth, ctx, base, list, res) {
 
     const payload = {
       filter, search, sort, dir, rows, showKm, regions, generatedBy: auth.email, generatedAt: new Date().toISOString(),
+      activity, visits: visitRows,
     };
     // The Excel export is the same list, built from the same rows: same selection, same rights.
-    const excel = format === 'xlsx';
     const file = excel ? await R.ticketListXlsx(payload) : await R.ticketListPdf(payload);
 
     await A.auditNow({

@@ -773,12 +773,20 @@ const listFilename = (d) => `Tickets_${filterLabel(d.filter).replace(/[^A-Za-z0-
  * numbers, so they sort and filter in Excel. A second sheet says what was selected, as the PDF's
  * header does. The Km column is there only when the PDF's is (showKm).
  *
- * @param {object} d the payload ticketListPdf takes
+ * The workbook carries more than the page can (Raymond, 29 Oct 2026: "who created ticket, when,
+ * how, any notes or activity logs"): who raised each ticket and when, how it was reported, the
+ * description, resolution, monitoring and contract; an Activity sheet with every log entry against
+ * the tickets exported, and a Visits sheet with every visit. Each extra sheet is there only when
+ * the caller sends it (d.activity, d.visits): the server leaves it out for a role that may not read
+ * the activity log or site visits. Costs stay out, as on the printout.
+ *
+ * @param {object} d the payload ticketListPdf takes, plus activity[] and visits[] (or null)
  * @returns {Promise<Buffer>}
  */
 async function ticketListXlsx(d) {
   const X = require('./xlsxwrite.js');
   const rows = d.rows || [];
+  const showActivity = Array.isArray(d.activity);
   const columns = [
     { head: 'Ticket', key: 'ref', width: 16 }, { head: 'Reported', key: 'reportedAt', type: 'datetime', width: 17 },
     { head: 'Days open', key: 'days', type: 'int', width: 10 }, { head: 'Client', key: 'client', width: 28 },
@@ -786,7 +794,20 @@ async function ticketListXlsx(d) {
     { head: 'Technician', key: 'tech', width: 20 }, { head: 'Subject', key: 'subject', width: 48 },
     { head: 'Category', key: 'category', width: 22 }, { head: 'Priority', key: 'priority', width: 10 },
     { head: 'Status', key: 'status', width: 22 }, { head: 'Closed', key: 'closedAt', type: 'datetime', width: 17 },
-  ].concat(d.showKm ? [{ head: 'Km', key: 'km', type: 'number', width: 9 }] : []);
+  ].concat(d.showKm ? [{ head: 'Km', key: 'km', type: 'number', width: 9 }] : [])
+    .concat([
+      { head: 'Created', key: 'createdAt', type: 'datetime', width: 17 }, { head: 'Created by', key: 'createdBy', width: 28 },
+      { head: 'Reported via', key: 'channel', width: 16 }, { head: 'Source detail', key: 'channelDetail', width: 24 },
+      { head: 'Reported by', key: 'reportedBy', width: 22 }, { head: 'Asset / inverter', key: 'asset', width: 20 },
+      { head: 'Error code', key: 'errorCode', width: 14 }, { head: 'Description', key: 'description', width: 60 },
+      { head: 'Resolution', key: 'resolution', width: 60 }, { head: 'Monitored by', key: 'monBy', width: 18 },
+      { head: 'Monitoring ends', key: 'monEnds', type: 'date', width: 14 }, { head: 'Contract', key: 'contract', width: 14 },
+      { head: 'Visits', key: 'visitCount', type: 'int', width: 8 },
+    ])
+    .concat(showActivity ? [
+      { head: 'Activity entries', key: 'activityCount', type: 'int', width: 10 },
+      { head: 'Last activity', key: 'lastActivity', type: 'datetime', width: 17 },
+    ] : []);
   const data = rows.map((r) => {
     const days = daysOpen(r.reportedAt, r.closedAt, d.generatedAt);
     return {
@@ -794,8 +815,30 @@ async function ticketListXlsx(d) {
       client: str(r.client), jc: str(r.jc), region: str(r.region), tech: str(r.tech), subject: str(r.subject),
       category: str(r.category), priority: str(r.priority) || 'Normal', status: str(r.status) || 'New',
       closedAt: r.closedAt || '', km: r.km == null || r.km === '' ? '' : Number(r.km),
+      createdAt: r.createdAt || '', createdBy: str(r.createdBy), channel: str(r.channel), channelDetail: str(r.channelDetail),
+      reportedBy: str(r.reportedBy), asset: str(r.asset), errorCode: str(r.errorCode), description: str(r.description),
+      resolution: str(r.resolution), monBy: str(r.monBy), monEnds: r.monEnds || '', contract: str(r.contract),
+      visitCount: typeof r.visitCount === 'number' ? r.visitCount : '',
+      activityCount: typeof r.activityCount === 'number' ? r.activityCount : '', lastActivity: r.lastActivity || '',
     };
   });
+  const extra = [];
+  if (showActivity) {
+    extra.push({ name: 'Activity', columns: [
+      { head: 'Ticket', key: 'ref', width: 16 }, { head: 'When', key: 'at', type: 'datetime', width: 17 },
+      { head: 'Type', key: 'type', width: 24 }, { head: 'By', key: 'by', width: 24 }, { head: 'Entry', key: 'note', width: 100 },
+    ], rows: d.activity.map((a) => ({ ref: str(a.ref), at: a.at || '', type: str(a.type), by: str(a.by), note: str(a.note) })) });
+  }
+  if (Array.isArray(d.visits)) {
+    extra.push({ name: 'Visits', columns: [
+      { head: 'Ticket', key: 'ref', width: 16 }, { head: 'Visit', key: 'visitId', width: 16 },
+      { head: 'Start', key: 'start', type: 'datetime', width: 17 }, { head: 'End', key: 'end', type: 'datetime', width: 17 },
+      { head: 'Type', key: 'type', width: 20 }, { head: 'Status', key: 'status', width: 14 },
+      { head: 'Technician', key: 'tech', width: 22 },
+    ].concat(d.showKm ? [{ head: 'Km', key: 'km', type: 'number', width: 9 }] : [])
+      .concat([{ head: 'Notes', key: 'notes', width: 60 }, { head: 'Booked by', key: 'createdBy', width: 26 }]),
+    rows: d.visits.map((v) => ({ ...v, km: v.km == null ? '' : v.km })) });
+  }
   const about = [
     ['Showing', d.filter === 'OPEN' ? 'Open tickets (' + OPEN_STATUSES.join(', ') + ')'
       : d.filter === 'ALL' ? 'All tickets, every status' : 'Tickets with status ' + filterLabel(d.filter)],
@@ -806,6 +849,7 @@ async function ticketListXlsx(d) {
     .concat([['Exported', fmtDateTime(d.generatedAt) + ' SAST'], ['Exported by', str(d.generatedBy)]]);
   return X.workbook([
     { name: 'Tickets', columns, rows: data },
+    ...extra,
     { name: 'About', columns: [{ head: 'Selection', key: 'k', width: 16 }, { head: 'Value', key: 'v', width: 90 }],
       rows: about.map(([k, v]) => ({ k, v })), filter: false },
   ]);
