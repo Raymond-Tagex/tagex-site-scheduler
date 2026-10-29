@@ -3972,9 +3972,13 @@ function omRefBuild(){
   const seq=String(omNJCMeta.next).padStart(omNJCMeta.width,'0');
   document.getElementById('njc-ref').value=`${NJC_PREFIX}-${omNJCMeta.year}-${seq}/${t}/${e}`;
 }
+// Every option carries its value explicitly. Without a value attribute a browser sends the option's
+// TEXT with surrounding spaces stripped, so a choice Airtable spells with a trailing space --
+// Job Type "Installation " -- went out as "Installation", which is not a choice, and the new job
+// card was refused (Raymond, 29 Oct 2026). The app cannot create choices, so the exact name matters.
 function omFillSelect(id,opts,def){
   const s=document.getElementById(id); if(!s)return;
-  s.innerHTML='<option value="">— Select —</option>'+opts.map(o=>`<option${o===def?' selected':''}>${o.trim()===''?'(blank)':o}</option>`).join('');
+  s.innerHTML='<option value="">— Select —</option>'+opts.map(o=>`<option value="${esc(o)}"${o===def?' selected':''}>${esc(o.trim()===''?'(blank)':o.trim())}</option>`).join('');
   if(def) s.value=def;
 }
 function omRenderNewJC(){

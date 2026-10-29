@@ -1496,6 +1496,34 @@ async function suite(log) {
   }
   omCloseAnyModal();
 
+  log('\nA NEW JOB CARD SAVES ITS TYPE AS AIRTABLE SPELLS IT');
+  // Raymond, 29 Oct 2026: "Installation" would not save. Airtable's choice is "Installation "
+  // (trailing space); an option with no value attribute sends its text trimmed, which is no choice.
+  {
+    omCloseAnyModal();
+    document.getElementById('ombn-newjc').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(8);
+    const ty = document.getElementById('njc-type');
+    const inst = [...ty.options].find((o) => o.textContent.trim() === 'Installation');
+    t('Installation is offered', !!inst, true);
+    t('with the exact name Airtable has, trailing space and all', inst && inst.value, 'Installation ');
+    t('every type is sent exactly as listed', [...ty.options].filter((o) => o.value).every((o) => o.getAttribute('value') === o.value), true);
+    ty.value = 'Installation ';
+    t('choosing it holds that exact value', ty.value, 'Installation ');
+    document.getElementById('njc-ref').value = 'OM-2026-0999/INST/TE';
+    document.getElementById('njc-title').value = 'Harness - Installation';
+    const cli = document.getElementById('njc-cli');
+    cli.value = [...cli.options].map((o) => o.value).find((v) => v && v !== '__new__') || '';
+    cli.dispatchEvent(new Event('change', { bubbles:true }));
+    window.SENT = [];
+    document.querySelector('[data-act="omSubmitNewJC"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(30);
+    const made = window.SENT.find((x) => x.op === 'create' && x.table === 'job_cards');
+    t('the new job card is created', !!made, true);
+    t('with Job Type "Installation " -- a choice Airtable has', made && made.fields && made.fields.fldoXa4TkBVTk13NB, 'Installation ');
+  }
+  omCloseAnyModal();
+
   log('\nA DASHBOARD FIGURE OPENS THE JOB CARDS IT COUNTED');
   omCloseAnyModal();
   const jcCards = () => [...document.querySelectorAll('#om-jclist .om-jc')]
@@ -2508,6 +2536,10 @@ const MUTANTS = [
   ['the tab badge counts finished job cards too',
    '  const open=omJcData.filter(omLive).length;',
    '  const open=omJcData.length;'],
+
+  ['a select option is sent as its trimmed text, not its exact value',
+   "opts.map(o=>`<option value=\"${esc(o)}\"${o===def?' selected':''}>",
+   "opts.map(o=>`<option${o===def?' selected':''}>"],
 
   ['the completed figure lights only one of the two chips it covers',
    '  const want = omFilter===\'DONE\' ? [\'Completed\',\'Closed\'] : [omFilter];',
