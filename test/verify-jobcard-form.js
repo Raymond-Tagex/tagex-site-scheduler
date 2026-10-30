@@ -96,7 +96,7 @@ function placed(bytes) {
 
 const FULL = {
   jobcard: {
-    'JC Reference': 'OM-2026-0169/MAINT/TE',
+    'JC Reference': 'OM-2026-0169/MAINT/TE', 'Contract Number': 'SUB-139',
     'Director Decision': 'Approved', 'Director Decision By': 'A de Jager',
     'Director Decision Date': '2026-09-30',
     'Entity Name': 'Tagex Energy', 'Owner Category': 'SUB-RES', 'Ticket Raised By': 'Maurice Kruger',
@@ -226,6 +226,8 @@ const FULL = {
   t('the client and the site',
     ['SUB 139 - Christopher Maitin', '12 Mill Road, Midrand'].filter((x) => !all.includes(x)), []);
   t('the ticket it came from', all.includes('TKT-2026-0048'), true);
+  // Not on the paper; asked for on 30 Oct 2026 -- it ties the job to its funder and warranty.
+  t('the contract it is under', /Contract Number:\nSUB-139/.test(all), true);
   t('who raised it and who is on it',
     ['Maurice Kruger', 'Adriaan de Jager', 'Geoff Oswin - Jetnix'].filter((x) => !all.includes(x)), []);
   t('the written sections', all.includes('Prepaid meter reading incorrectly since the storm.'), true);
@@ -556,6 +558,12 @@ const FULL = {
     const sections = js.slice(js.indexOf('function jcDetailSections()'),
       js.indexOf('function jcControl('));
     const onDetail = new Set([...sections.matchAll(/JCF\.(JC_[A-Z]+)/g)].map((m) => m[1]));
+    // "Supplier Quotes Attached" sits where the paper puts it, under Stock, Material & Logistics
+    // beside BOM and warehouse costing -- drawn by the same jcControl, so saved the same way.
+    const logistics = js.slice(js.indexOf('function jcLogisticsHtml('),
+      js.indexOf('function omRedrawLogistics('));
+    for (const m of logistics.matchAll(/jcControl\(rec\.id,'[^']*',JCF\.(JC_[A-Z]+)/g)) onDetail.add(m[1]);
+    t('supplier quotes is drawn under logistics, as an editable control', onDetail.has('JC_QUOTES'), true);
 
     // The creation form carries the ones known when a job card is raised.
     const creation = js.slice(js.indexOf("const put=(elId,fid)"), js.indexOf('const acts=['));

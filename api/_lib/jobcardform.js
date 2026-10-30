@@ -749,6 +749,9 @@ async function jobCardFormPdf(d) {
   s.field('Job Card Number:', ref);
   s.field('Ticket Number:', (d.ticketRefs || []).join(', '));
   s.field('Project Reference Number:', list(f['Generated Reference String (from Job Card References)']).join(', '));
+  // Not a line on the paper: Raymond asked for the contract on the job card (30 Oct 2026), and it is
+  // what ties the job to its funder and warranty in the Clients register.
+  s.field('Contract Number:', f['Contract Number']);
   s.field('Client Name:', d.client);
   s.field('Site Address:', d.site);
   // "Issue Reported" is Issued Date -- the date typed in as "Actual date of issue" when the job

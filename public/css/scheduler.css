@@ -302,6 +302,16 @@
   .mod-scheduler .om-jcmulti{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 10px;}
   .mod-scheduler .om-jcmulti label,.mod-scheduler .om-jcchk{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12.5px;padding:3px 0;}
   .mod-scheduler .om-jcmulti input,.mod-scheduler .om-jcchk input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex:none;}
+  /* Stock, Material & Logistics on the job card screen: the trips table and the Summary of Costs grid. */
+  .mod-scheduler .om-jcshow{font-size:12.5px;padding:3px 0;}
+  .mod-scheduler .om-jctrips{margin:4px 0 10px;}
+  .mod-scheduler .om-jcgridw{overflow-x:auto;}
+  .mod-scheduler .om-jctbl{width:100%;border-collapse:collapse;font-size:12px;margin:4px 0 8px;}
+  .mod-scheduler .om-jctbl th{font-family:monospace;font-size:9px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;text-align:left;padding:4px 6px;border-bottom:1px solid var(--line2);}
+  .mod-scheduler .om-jctbl td{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  .mod-scheduler .om-jctbl tr.om-jctot td{font-weight:700;border-top:1px solid var(--line2);}
+  .mod-scheduler .om-jcgrid td input{width:100%;min-width:90px;background:var(--card);border:1px solid var(--line2);border-radius:6px;color:var(--text);font:inherit;padding:5px 7px;}
+  .mod-scheduler .om-fld input:disabled,.mod-scheduler .om-fld select:disabled,.mod-scheduler .om-fld textarea:disabled{opacity:.75;cursor:default;}
   .mod-scheduler .om-chanopt{
     min-height:44px;display:flex;align-items:center;justify-content:center;
     padding:8px 6px;border:1px solid var(--line2);border-radius:8px;text-align:center;
