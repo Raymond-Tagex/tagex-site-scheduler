@@ -260,6 +260,9 @@ module.exports = async function handler(req, res) {
       return { id: r.id };
     }
   } catch (e) {
+    // The audit row keeps only "error"; the reason goes to the function log, where it can be read
+    // (30 Oct 2026: a token without access to the Clients base looked exactly like a slow read).
+    console.error('[client-register]', op, base, e && e.status, String((e && e.message) || e).slice(0, 300));
     await A.auditNow({ ...ctx, action, result: 'Denied', denialReason: 'error', detail: String(e.message || e).slice(0, 200) });
     return H.fail(res, e.status || 502, 'register_unavailable', 'The client register could not be read. Try again.');
   }
