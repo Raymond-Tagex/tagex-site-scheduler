@@ -327,6 +327,27 @@
   .mod-scheduler .om-nr input{flex:1;background:var(--card);border:1px solid var(--line2);border-radius:8px;color:var(--text);font-size:13px;padding:9px 11px;outline:none;}
   .mod-scheduler .om-nr input:focus{border-color:var(--accent-ink);}
   .mod-scheduler .om-nrsend{background:var(--accent);color:#181400;border:none;border-radius:8px;padding:9px 14px;cursor:pointer;font-family:monospace;font-size:11px;font-weight:600;}
+  /* The Clients report (mod-clients.js), 30 Oct 2026 -- the delivery app's cl-* layout in this app's colours. */
+  .mod-scheduler .cl-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:10px 0}
+  .mod-scheduler .cl-set{border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;min-width:0;background:var(--card)}
+  .mod-scheduler .cl-set legend{font-weight:600;padding:0 4px}
+  .mod-scheduler .cl-tick{display:block;padding:3px 0;font-size:14px}
+  .mod-scheduler .cl-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .mod-scheduler .cl-h{font-size:15px;margin:18px 0 6px}
+  .mod-scheduler .cl-scroll{overflow-x:auto;max-width:100%}
+  .mod-scheduler .cl-table{border-collapse:collapse;width:100%;font-size:13px;color:var(--text);background:var(--card)}
+  .mod-scheduler .cl-table th,.mod-scheduler .cl-table td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  .mod-scheduler .cl-table th{font-family:monospace;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--surface)}
+  .mod-scheduler .cl-table td.cl-num{text-align:right;white-space:nowrap}
+  .mod-scheduler .cl-total td{font-weight:700;border-top:2px solid var(--line2)}
+  .mod-scheduler .cl-sort{all:unset;cursor:pointer;font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit}
+  .mod-scheduler .cl-sort:hover,.mod-scheduler .cl-sort:focus-visible{color:var(--accent);text-decoration:underline}
+  .mod-scheduler .cl-filters td{padding:4px 6px;background:var(--card)}
+  .mod-scheduler .cl-filters input,.mod-scheduler .cl-filters select{width:100%;min-width:80px;font:inherit;font-size:12px;padding:4px 6px}
+  .mod-scheduler .cl-drill{margin:14px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:var(--r);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .mod-scheduler .cl-pick{margin:14px 0;padding:10px 12px;border:1px solid var(--line2);border-radius:var(--r);background:var(--surface)}
+  .mod-scheduler .cl-pick input[type="search"]{flex:1 1 260px}
+  .mod-scheduler .cl-hits{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px}
   .mod-scheduler .om-clic{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:11px 14px;margin-bottom:7px;}
   .mod-scheduler .om-bhdr{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:7px 11px;border-radius:8px;font-family:monospace;font-size:10px;font-weight:600;}
   .mod-scheduler .om-bcnt{margin-left:auto;border-radius:20px;padding:0 8px;font-size:9px;color:#fff;min-width:20px;text-align:center;}

@@ -690,17 +690,21 @@ async function suite(log) {
   t('and no activity entry was written for a ticket that does not exist',
     window.SENT.filter((s) => s.table === 'activity_log').length, 0);
 
-  log('\nTHE CLIENTS VIEW IS THE REGISTER');
-  document.getElementById('ombn-cli').dispatchEvent(new MouseEvent('click', { bubbles:true }));
-  await tick();
-  const cliText = () => document.getElementById('om-cli').textContent;
-  t('it says it is the register, and how many', /Client register · 4 clients/.test(cliText()), true);
-  t('every register client is listed, sorted', [...document.querySelectorAll('#om-cli .om-clic')]
-    .map((e) => e.firstElementChild.textContent), ['Delmas Dairy', 'Grootvlei', 'Sean Bisset', 'Thandi Mokoena']);
-  t('with its contracts', /SUB-148/.test(cliText()), true);
-  const card = (nm) => [...document.querySelectorAll('#om-cli .om-clic')].find((e) => e.firstElementChild.textContent === nm).textContent;
-  t('and says which have no copy in this base yet', /No copy in .* yet/.test(card('Thandi Mokoena')), true);
-  t('but not one whose copy was made when a ticket was raised for him', /No copy in/.test(card('Sean Bisset')), false);
+  log('\nCLIENTS IS THE REPORT; PEOPLE / STAFF AND ACTIVITY LOG ARE TABS OF THEIR OWN');
+  // 30 Oct 2026: Clients became the delivery app's subscriber report (mod-clients.js, not loaded in this
+  // frame), and the People and Activity Log tabs that sat inside the old Clients view became views.
+  const view = (n) => document.getElementById('om-view-' + n);
+  const open = async (n) => { document.getElementById('ombn-' + n).dispatchEvent(new MouseEvent('click', { bubbles:true })); await tick(); await tick(); };
+  t('the bar has People / Staff and Activity Log buttons', ['ombn-cli', 'ombn-ppl', 'ombn-log'].map((id) => !!document.getElementById(id)), [true, true, true]);
+  await open('cli');
+  t('Clients opens the report view', [view('cli').classList.contains('active'), !!document.getElementById('om-cli-report')], [true, true]);
+  t('the old register list is gone from it', !!view('cli').querySelector('.om-tab, .om-clic'), false);
+  await open('ppl');
+  t('People / Staff opens its own view', view('ppl').classList.contains('active') && !view('cli').classList.contains('active'), true);
+  t('and lists the people', document.querySelectorAll('#om-ppl .om-clic').length, PEOPLE.length);
+  await open('log');
+  t('Activity Log opens its own view', view('log').classList.contains('active'), true);
+  t('and draws the log there', document.getElementById('om-log').textContent.trim().length > 0, true);
 
   log('\nTHE TICKETS LIST');
   document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));

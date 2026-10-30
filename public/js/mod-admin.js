@@ -15,7 +15,7 @@
   // it. A key missing from this list has no checkbox, which used to mean a Save silently revoked
   // it -- see the carry-forward in the save handler.
   const MODULES = [
-    'dashboard', 'job_cards', 'clients', 'documents', 'restricted_personal',
+    'dashboard', 'job_cards', 'clients', 'subscribers', 'clients_report', 'clients_money', 'documents', 'restricted_personal',
     'picking_slips', 'picking_slip_items',
     'delivery_notes', 'delivery_lines', 'signatures',
     'site_information', 'site_equipment',
@@ -43,9 +43,9 @@
       'suppliers', 'supplier_quotes', 'quote_lines', 'other_requests', 'other_request_lines',
       'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
       'stock_items', 'stock_screen', 'site_visits', 'activity_log',
-      'costing', 'project_costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
+      'costing', 'project_costing', 'clients_report', 'clients_money', 'subscribers', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
     { app: 'O&M scheduler', keys: [
-      'dashboard', 'job_cards', 'clients', 'documents', 'restricted_personal',
+      'dashboard', 'job_cards', 'clients', 'subscribers', 'clients_report', 'clients_money', 'documents', 'restricted_personal',
       'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
       'site_information', 'site_equipment', 'stock_items', 'site_visits', 'activity_log',
       'costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },

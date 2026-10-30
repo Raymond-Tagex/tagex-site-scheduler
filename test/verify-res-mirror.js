@@ -63,9 +63,9 @@ t('RES has its own base id, not O&M\'s', !!T.BASES.RES && T.BASES.RES !== T.BASE
 const modules = Object.keys(T.TABLES);
 // OM_ONLY modules are one store for every base, held in O&M on purpose (tables.js).
 const omModules = modules.filter((m) => T.TABLES[m].OM && !T.OM_ONLY.has(m));
-t('only restricted personal data is O&M-only', same([...T.OM_ONLY], ['restricted_personal']));
+t('only restricted personal data and the subscriber contracts are O&M-only', same([...T.OM_ONLY], ['restricted_personal', 'subscribers']));
 t('and it is not mirrored', T.TABLES.restricted_personal.RES === undefined
-  && !T.resolve('RES', 'restricted_personal', 'fica_documents').ok);
+  && !T.resolve('RES', 'restricted_personal', 'fica_documents').ok && T.TABLES.subscribers.RES === undefined && !T.resolve('RES', 'subscribers').ok);
 t('every O&M module resolves in RES', omModules.every((m) => T.resolve('RES', m, m === 'tickets' ? 'ticket' : null).ok),
   omModules.filter((m) => !T.resolve('RES', m, m === 'tickets' ? 'ticket' : null).ok).join(', '));
 t('to the same table ids', omModules.every((m) => same(T.TABLES[m].RES, T.TABLES[m].OM)));

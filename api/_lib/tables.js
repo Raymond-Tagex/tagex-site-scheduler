@@ -49,6 +49,13 @@ const TABLES = {
     CI: 'tblljzSDboKGUJAXg',
     OM: 'tblljzSDboKGUJAXg',
   },
+  // Maintenance subscriber contracts from the SxE cost log (26 Oct 2026), in the O&M base beside the O&M
+  // clients its Client Record link points at. Read only by the Clients tab (api/_lib/clientsreport.js,
+  // the delivery app's module, brought over 30 Oct 2026), which checks clients_report itself; no role
+  // holds a key for it here. O&M-only (OM_ONLY): RES has no such table.
+  subscribers: {
+    OM: 'tblIwT7Raew39aqMP',
+  },
   documents: {
     CI: 'tbljdfGLoiHlrdzfs',
     OM: 'tbljdfGLoiHlrdzfs',
@@ -204,7 +211,10 @@ const NOT_PROVISIONED = new Set([
 
 // UI-only surfaces. Never resolve to a table; permission checks on them govern
 // whether the nav item renders and whether an export is allowed to run.
-const VIRTUAL_MODULES = new Set(['dashboard', 'reports']);
+// clients_report is the Clients tab (api/_lib/clientsreport.js): the subscriber contracts and a report over
+// them. clients_money is the O&M figures on that tab. Both are the delivery app's keys, read from the same
+// access levels, so the same people see the tab in both apps.
+const VIRTUAL_MODULES = new Set(['dashboard', 'reports', 'clients_report', 'clients_money']);
 
 // ─────────────────────────────────────────────────────────────
 // GLOBAL NEVER-RETURN FIELDS
@@ -341,7 +351,7 @@ const SCOPE_FIELDS = {
 // base. Mirroring it would point RES at a table id that does not exist there -- and for FICA
 // data, would open a second door to it.
 // ─────────────────────────────────────────────────────────────
-const OM_ONLY = new Set(['restricted_personal']);
+const OM_ONLY = new Set(['restricted_personal', 'subscribers']);
 
 function mirrorOmToRes(map) {
   for (const [key, entry] of Object.entries(map)) {
