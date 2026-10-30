@@ -83,6 +83,7 @@ const SYM = {
   tblYXKBqfN4zituh1: 'people',
   tblWSJlbiGWlZ6yGL: 'activity_log',
   tblljzSDboKGUJAXg: 'clients',
+  tblLZ7zJFusjwUkbU: 'costing',
   People: 'people',            // the tickets module refers to People by name
 };
 
@@ -1454,6 +1455,7 @@ const OM_T = {
   JC:  'tbl2wqnfM0eDa8M7P',
   ACT: 'tblWSJlbiGWlZ6yGL',
   CLI: 'tblljzSDboKGUJAXg',
+  COST:'tblLZ7zJFusjwUkbU',
   PPL: 'People',
 };
 const OM_F = {
@@ -3336,7 +3338,22 @@ async function omOpenDetail(id){
   document.getElementById('om-d-body').innerHTML='<div class="om-loading"><span class="om-sp"></span>Loading activity log…</div>';
   const actLog=await omLoadActLog(id);
   await omLoadEquip();
+  await omLoadFullJc(rec);
+  await omLoadCosting(rec);
   omBuildDetail(rec,actLog);
+}
+
+/**
+ * The job card list is read with a short field list, which does not include the printed
+ * job card's own fields -- so the detail screen opened every one of them blank, however much
+ * had been filled in. The record is read whole when it is opened, and kept.
+ */
+async function omLoadFullJc(rec){
+  try{
+    const r=await TX.get(SCHED_BASE,'job_cards',rec.id,{params:{returnFieldsByFieldId:true}});
+    const full=(r.records||[])[0];
+    if(full&&full.id===rec.id&&full.fields) Object.assign(rec.fields,full.fields);
+  }catch(e){ /* the list's fields are still there; the form shows what it has */ }
 }
 
 
@@ -3405,7 +3422,6 @@ function jcDetailSections(){
       ['Conducted by', JCF.JC_INSPBY, 'text'],
       ['Date of inspection', JCF.JC_INSPDT, 'date'],
       ['Confirmations', JCF.JC_INSPCONF, 'multi', JC_INSP_CONFIRMS],
-      ['Supplier quotes attached', JCF.JC_QUOTES, 'check'],
     ]],
     ['Responsible Personnel & Timeline', [
       ['Technician / installer', JCF.JC_TECH, 'text'],
@@ -3431,8 +3447,15 @@ function jcDetailSections(){
 }
 
 /** One editable control, wired to save itself. */
-function jcControl(id, label, fid, kind, options, value){
-  const act = `data-on="change" data-act="omJcSet" data-a1="${id}" data-a2="${fid}" data-a3="@val"`;
+function jcControl(id, label, fid, kind, options, value, how){
+  const fn = (how && how.act) || 'omJcSet';
+  const off = how && how.readOnly ? ' disabled' : '';
+  const act = `data-on="change" data-act="${fn}" data-a1="${id}" data-a2="${fid}" data-a3="@val"${off}`;
+  if(kind==='num'||kind==='money'){
+    const v=(typeof value==='number'&&isFinite(value))?value:'';
+    return `<input type="number" step="${kind==='money'?'0.01':'any'}" min="0" inputmode="decimal"`
+      + ` value="${v}" ${act} placeholder="${kind==='money'?'R':'\u2014'}">`;
+  }
   if(kind==='select'){
     const opts=(value&&!(options||[]).includes(value))?(options||[]).concat([value]):(options||[]);
     return `<select ${act}><option value="">\u2014</option>`
@@ -3442,12 +3465,15 @@ function jcControl(id, label, fid, kind, options, value){
   if(kind==='long'){
     return `<textarea rows="3" ${act} placeholder="\u2014">${esc(value||'')}</textarea>`;
   }
+  if(kind==='show'){
+    return `<div class="om-jcshow">${value||'\u2014'}</div>`;
+  }
   if(kind==='date'){
     return `<input type="date" value="${esc(value||'')}" ${act}>`;
   }
   if(kind==='check'){
-    return `<label class="om-jcchk"><input type="checkbox" ${value?'checked':''}`
-      + ` data-on="change" data-act="omJcSet" data-a1="${id}" data-a2="${fid}" data-a3="@checked">`
+    return `<label class="om-jcchk"><input type="checkbox" ${value?'checked':''}${off}`
+      + ` data-on="change" data-act="${fn}" data-a1="${id}" data-a2="${fid}" data-a3="@checked">`
       + `<span>${esc(label)}</span></label>`;
   }
   if(kind==='multi'){
@@ -3475,6 +3501,302 @@ function jcDetailForm(rec){
           + jcControl(id,label,fid,kind,options,omFstr(f,fid)||f[fid])+'</div>').join('')
       + '</div>').join('')
     + '<div id="om-jcsetmsg"></div>';
+}
+
+// ── Stock, Material & Logistics Allocation ───────────────────────────────────────────────
+//
+// TAGEX JOB CARD TEMPLATE OCT2026.docx, as the printed form draws it (api/_lib/jobcardform.js,
+// LOGISTICS and COST_ROWS). None of it is on the job card: it is the job card's Costing record.
+// Costing was in O&M before RES was copied from it, so these ids are the same in both bases.
+// Costing is a financial module -- Technician and Warehouse have no access -- so the block is
+// drawn only for a role that may view costing, and editable only for one that may edit it.
+const CF = {
+  JC:'fldHWIVXfl3dF7kpo',
+  TRAVEL:'fldBb6QGEOTzG8oqc', FUEL:'fldje3BfZWeDVNfJo', INCL:'fldv08q2OEP3yoOJ1',
+  VEHICLE:'fldLA3EiDwfSOYw5P', DIST:'fldfAfYxUNhhHTset', TOTKM:'fldtuluPcmGzIq5kl',
+  DRIVER:'fldrCNEaLuIMBtfuZ', TOLLREQ:'fldIoj5xpYQKWSqqN', TOLL:'fldqH91OKYVQzP425',
+  TRIP1:'fld99zcVddJbbxxeA', TRIP2:'fldztzyJHljZQnarK', TRIP3:'fldmFTNNXQFpOJl2N',
+  TRAVEL_OK:'fldqJ8wY5fAUPyNNz',
+  ACC:'fldrTruV0I1g67SpI', ACC_WHERE:'fldaTudGhisguZlkn', ACC_PPL:'fldRDfj0WcbtABqNQ',
+  ACC_FROM:'fldc9kc33HXErVBnQ', ACC_TO:'fldfiqCNdKn2DDY8y', ACC_NIGHTS:'fldvHf35C9ONQCkOn',
+  ACC_RATE:'flduiGY27ciO7zI4l', ACC_OK:'fldnvdopoUX7A8PGB',
+  LAB:'fldPCvQfk0ICwOnxo', LAB_WHERE:'fldvnkhcFBTFfY5fC', LAB_DAYS:'fldYkOMUrsSXmpgP5',
+  LAB_STAFF:'fldjBYMaMjpHCflvg', LAB_RATE:'flddrUigTSyIIDckK', LAB_OK:'fldUZjguLYsEdB8Qh',
+  RENT:'fldnBIJ70ylIZC89n', RENT_WHERE:'fldu8p3DA24ey92EV', RENT_EQ:'fldupVyLFGSNhTIiV',
+  RENT_DAYS:'fldi6YM1I7q0ChiBt', RENT_FIXED:'fldxS8WgVHVnyG4am', RENT_RATE:'fldOwnoEGle2hHnJu',
+  RENT_OK:'fld48cjdbSe4bjAxv',
+};
+// Summary of Costs, in the paper's order: label, category total, Warehouse, Supplier.
+// "Consumables" is Material Cost and "Unforseen items" is Other Cost, as on the printed form.
+const COST_GRID = [
+  ['Capital Goods',    'fldOzSSoXM91ftp0s', 'fldDkkhY53mnFjAkb', 'fld3JXH5fgnjmsMQb'],
+  ['DC Equipment',     'fldOgBn0q2dZEOkGu', 'fld53LsWGSPAHLpGD', 'fld06BiGhaKApQAeQ'],
+  ['AC Equipment',     'fldnXl9XUbmxMPIFP', 'fldXkrsCclFxXNPuQ', 'fldCEgbcHtRJmy7EA'],
+  ['Consumables',      'fldUFWMkq8bjYr9O3', 'fldCrN0eHxL4yGB0r', 'fldQFbMQcxM6ijc0T'],
+  ['Travelling',       'fldqOF81KYF03trsB', 'fldiye5HXqlHcUVOQ', 'fldawCVTNJ5r3oDQ9'],
+  ['Accommodation',    'fldTYwFSJgjOvVJvI', 'fldoIbyEjN8fSkYfK', 'fldPMspUYBAeHnysI'],
+  ['Labour',           'fldxmwuffbIMDhBvj', 'fldyRi8gTHwcbU0vK', 'fldWT2xNGX8D0DtlF'],
+  ['Equipment Rental', 'fldXCz5D4ie6xPVAF', 'fldDMZG8LPNxYyQgS', 'fldXLlagfzNKVmuZW'],
+  ['Unforseen items',  'fld8YDUTrvI2dbISe', 'fldqDHykUQwqNCjPp', 'fldGh5A01hJPoaQqv'],
+];
+const COST_TOTAL = (label) => COST_GRID.find((r) => r[0] === label)[1];
+
+/**
+ * The four logistics blocks, line for line as the paper has them: name, its "Required" box,
+ * its rows, the total it carries (a Summary of Costs category) and its management approval.
+ * One list, used to draw the block and to know which fields are numbers when saving.
+ */
+function jcLogisticsBlocks(){
+  return [
+    ['Transportation Details', CF.TRAVEL, 'Travel required', [
+      ['Fuel cost inclusive wear & tear (R/km)', CF.INCL, 'money'],
+      ['Fuel only (R/km)', CF.FUEL, 'money'],
+      ['Vehicle allocation', CF.VEHICLE, 'text'],
+      ['Distance to site (km)', CF.DIST, 'num'],
+      ['Total km', CF.TOTKM, 'num'],
+      ['Driver name', CF.DRIVER, 'text'],
+      ['Toll fees', CF.TOLLREQ, 'check'],
+      ['Toll fees (R)', CF.TOLL, 'money'],
+      ['Site visit km', CF.TRIP1, 'num', 'trip'],
+      ['Trip 2 km', CF.TRIP2, 'num', 'trip'],
+      ['Trip 3 km', CF.TRIP3, 'num', 'trip'],
+    ], COST_TOTAL('Travelling'), 'Total travel cost (R)', CF.TRAVEL_OK],
+    ['Accommodation Details', CF.ACC, 'Accommodation required', [
+      ['Location / establishment name', CF.ACC_WHERE, 'text'],
+      ['Number of personnel', CF.ACC_PPL, 'num'],
+      ['From date', CF.ACC_FROM, 'date'],
+      ['To date', CF.ACC_TO, 'date'],
+      ['Number of nights', CF.ACC_NIGHTS, 'num'],
+      ['Cost per night (R)', CF.ACC_RATE, 'money'],
+    ], COST_TOTAL('Accommodation'), 'Total accommodation cost (R)', CF.ACC_OK],
+    ['Labour Details', CF.LAB, 'Labour required', [
+      ['Location / establishment name', CF.LAB_WHERE, 'text'],
+      ['Number of days', CF.LAB_DAYS, 'num'],
+      ['Staff names', CF.LAB_STAFF, 'long'],
+      ['Cost per day (R)', CF.LAB_RATE, 'money'],
+    ], COST_TOTAL('Labour'), 'Total cost (R)', CF.LAB_OK],
+    ['Rental Details', CF.RENT, 'Rental required', [
+      ['Location / establishment name', CF.RENT_WHERE, 'text'],
+      ['Equipment (attached quotes)', CF.RENT_EQ, 'text'],
+      ['Number of days', CF.RENT_DAYS, 'num'],
+      ['Fixed cost (R)', CF.RENT_FIXED, 'money'],
+      ['Cost per day (R)', CF.RENT_RATE, 'money'],
+    ], COST_TOTAL('Equipment Rental'), 'Total cost (R)', CF.RENT_OK],
+  ];
+}
+
+/** Every Costing field the screen saves as a number rather than as the text an input gives. */
+function jcCostNumeric(){
+  const out = new Set();
+  jcLogisticsBlocks().forEach(([, , , rows, total]) => {
+    out.add(total);
+    rows.forEach(([, fid, kind]) => { if(kind==='num'||kind==='money') out.add(fid); });
+  });
+  COST_GRID.forEach(([, t, w, sp]) => { out.add(t); out.add(w); out.add(sp); });
+  return out;
+}
+
+// { jcId, rec, error, many } for the job card on screen; rec is null when it has no Costing.
+let omJcCost = null;
+
+async function omLoadCosting(rec){
+  omJcCost = null;
+  if(!TX.can('costing','view')) return;
+  const ids = [].concat(rec.fields[OM_F.JC_COST]||[]).map((x) => (x&&x.id)||x).filter(Boolean);
+  omJcCost = { jcId: rec.id, rec: null, error: '', many: ids.length > 1 };
+  if(!ids.length) return;
+  try{
+    const r = await TX.get(SCHED_BASE,'costing',ids[0],{params:{returnFieldsByFieldId:true}});
+    omJcCost.rec = (r.records||[])[0] || null;
+  }catch(e){ omJcCost.error = TX.errorText(e); }
+}
+
+const jcNum = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+const jcRand = (n) => 'R ' + Number(n).toLocaleString('en-ZA', { minimumFractionDigits:2, maximumFractionDigits:2 });
+
+/** The per-km rate a trip is costed at: the inclusive rate, else fuel only -- as printed. */
+function jcKmRate(c){
+  const incl = jcNum(c[CF.INCL]);
+  return incl !== null ? incl : jcNum(c[CF.FUEL]);
+}
+
+/** This job card's site visits that carry kilometres, oldest first. Cancelled ones do not count. */
+function jcLoggedTrips(jcId){
+  return (DATA.visits||[]).map(normVisit)
+    .filter((v) => v.jcIds.includes(jcId) && v.status !== 'Cancelled' && v.km !== null)
+    .sort((a, b) => String(a.start||'').localeCompare(String(b.start||'')));
+}
+
+/**
+ * The Summary of Costs row: a category's own total where it has one, otherwise Warehouse plus
+ * Supplier -- the rule the printed form uses, so the screen and the paper agree.
+ */
+function jcCostRow(c, t, w, sp){
+  const own = jcNum(c[t]), wh = jcNum(c[w]), su = jcNum(c[sp]);
+  const total = own !== null ? own : ((wh !== null || su !== null) ? (wh||0) + (su||0) : null);
+  return { wh, su, total };
+}
+
+function jcLogisticsHtml(rec){
+  if(!omJcCost || omJcCost.jcId !== rec.id) return '';
+  const can = TX.can('costing','edit');
+  const head = '<div class="om-slbl" style="margin-top:14px">Stock, Material &amp; Logistics Allocation</div>';
+  if(omJcCost.error){
+    return head + '<div class="om-err">\u2715 The costing could not be read: '+esc(omJcCost.error)+'</div>';
+  }
+  const c = omJcCost.rec ? omJcCost.rec.fields : null;
+  const f = rec.fields;
+  const bom = [].concat(f['fldDxORruB9P2KwXu']||[]).length;
+  const warehouse = !!c && COST_GRID.some(([, , w]) => (jcNum(c[w])||0) !== 0);
+  const attached = '<div class="om-fcard"><div class="om-fttl">Attached</div>'
+    + '<div class="om-fld">'+jcControl(rec.id,'BOM attached',null,'show',null,
+        (bom ? '\u2611 BOM attached ('+bom+' BOM sheet'+(bom===1?'':'s')+')' : '\u2610 No BOM attached'))+'</div>'
+    + (TX.can('job_cards','edit')
+      ? '<div class="om-fld">'+jcControl(rec.id,'Supplier quotes attached',JCF.JC_QUOTES,'check',null,f[JCF.JC_QUOTES])+'</div>'
+      : '<div class="om-fld">'+jcControl(rec.id,'',null,'show',null,(f[JCF.JC_QUOTES]?'\u2611':'\u2610')+' Supplier quotes attached')+'</div>')
+    + '<div class="om-fld">'+jcControl(rec.id,'',null,'show',null,
+        (warehouse?'\u2611':'\u2610')+' Warehouse costing attached'
+        + ' <span class="om-hint">(any Warehouse figure in the Summary of Costs)</span>')+'</div>'
+    + '</div>';
+  if(!c){
+    return head + attached
+      + '<div class="om-fcard"><div class="om-hint">This job card has no costing yet, so there are no '
+      + 'travel, accommodation, labour or rental details.</div>'
+      + (TX.can('costing','create')
+        ? '<button class="om-act" data-act="omCostStart" data-a1="'+rec.id+'">+ Start costing for this job card</button>' : '')
+      + '</div><div id="om-costmsg"></div>';
+  }
+  const cid = omJcCost.rec.id;
+  const how = { act:'omCostSet', readOnly: !can };
+  const field = (label, fid, kind, val) => kind==='check'
+    ? '<div class="om-fld">'+jcControl(cid,label,fid,kind,null,val,how)+'</div>'
+    : '<div class="om-fld"><label>'+esc(label)+'</label>'+jcControl(cid,label,fid,kind,null,val,how)+'</div>';
+  const rate = jcKmRate(c);
+
+  const blocks = jcLogisticsBlocks().map(([name, req, reqLabel, rows, total, totalLabel, ok]) => {
+    let extra = '';
+    if(name === 'Transportation Details'){
+      const trips = jcLoggedTrips(rec.id);
+      const sum = trips.reduce((a, v) => a + v.km, 0);
+      const tripCost = [CF.TRIP1,CF.TRIP2,CF.TRIP3].reduce((a, k) => a + (jcNum(c[k])||0), 0) * (rate||0);
+      const toll = c[CF.TOLLREQ] ? (jcNum(c[CF.TOLL])||0) : 0;
+      extra = '<div class="om-jctrips"><div class="om-hint">Kilometres logged on this job card\u2019s site visits:</div>'
+        + (trips.length
+          ? '<table class="om-jctbl"><tr><th>Date</th><th>Visit</th><th>Km</th></tr>'
+            + trips.map((v) => '<tr><td>'+esc(v.start?String(v.start).slice(0,10):'\u2014')+'</td><td>'
+              + esc(v.subject||v.visitId||'')+'</td><td>'+esc(String(v.km))+'</td></tr>').join('')
+            + '<tr class="om-jctot"><td></td><td>Total</td><td>'+esc(String(Math.round(sum*10)/10))+'</td></tr></table>'
+            + (can ? '<button class="om-act" data-act="omCostTrips" data-a1="'+rec.id+'">Use these for the trips and total km</button>'
+              + (trips.length > 3 ? '<div class="om-hint">The paper has three trips; the first three are used and Total km counts every one.</div>' : '')
+              : '')
+          : '<div class="om-hint">None yet \u2014 km is entered on each site visit.</div>')
+        + '</div>'
+        + '<div class="om-hint">Trips at '+(rate!==null?jcRand(rate)+'/km':'no rate yet')
+        + (toll ? ', plus tolls,' : '')+' come to <b>'+jcRand(tripCost + toll)+'</b>.</div>';
+    }
+    return '<div class="om-fcard"><div class="om-fttl">'+esc(name)+'</div>'
+      + field(reqLabel, req, 'check', c[req])
+      + rows.map(([label, fid, kind, isTrip]) => {
+        const html = field(label, fid, kind, kind==='num'||kind==='money'||kind==='check' ? c[fid] : (c[fid]||''));
+        if(!isTrip) return html;
+        const km = jcNum(c[fid]);
+        const cost = km!==null && rate!==null ? jcRand(km*rate) : '\u2014';
+        return html.replace(/<\/div>$/, '<div class="om-hint">'+esc(label.replace(' km',''))+' cost: '+cost+'</div></div>');
+      }).join('')
+      + extra
+      + field(totalLabel, total, 'money', c[total])
+      + field('Approved by management', ok, 'check', c[ok])
+      + '</div>';
+  }).join('');
+
+  const sums = { wh:0, su:0, total:0 };
+  const cell = (fid, v) => can
+    ? '<td><input type="number" step="0.01" min="0" inputmode="decimal" value="'+(v!==null&&v!==undefined?v:'')+'"'
+      + ' data-on="change" data-act="omCostSet" data-a1="'+cid+'" data-a2="'+fid+'" data-a3="@val" placeholder="R"></td>'
+    : '<td>'+(v!==null&&v!==undefined?jcRand(v):'')+'</td>';
+  const grid = '<div class="om-fcard"><div class="om-fttl">Summary of Costs</div>'
+    + '<div class="om-jcgridw"><table class="om-jctbl om-jcgrid"><tr><th>Cost description</th><th>Warehouse</th><th>Supplier</th><th>Total cost</th></tr>'
+    + COST_GRID.map(([label, t, w, sp]) => {
+      const r = jcCostRow(c, t, w, sp);
+      sums.wh += r.wh||0; sums.su += r.su||0; sums.total += r.total||0;
+      return '<tr><td>'+esc(label)+'</td>'+cell(w, c[w])+cell(sp, c[sp])+cell(t, c[t])+'</tr>';
+    }).join('')
+    + '<tr class="om-jctot"><td>TOTAL COST</td><td>'+jcRand(sums.wh)+'</td><td>'+jcRand(sums.su)+'</td><td>'+jcRand(sums.total)+'</td></tr>'
+    + '</table></div><div class="om-hint">A row with no total of its own counts Warehouse plus Supplier, as the printed job card does. '
+    + 'Unforseen costs are the Unforseen items row.</div></div>';
+
+  return head + attached + blocks + grid
+    + (omJcCost.many ? '<div class="om-hint">This job card has more than one costing record; the first is shown.</div>' : '')
+    + '<div id="om-costmsg"></div>';
+}
+
+function omRedrawLogistics(){
+  const box = document.getElementById('om-jclog');
+  const rec = omJcData.find((r) => omJcCost && r.id === omJcCost.jcId);
+  if(box && rec) box.innerHTML = jcLogisticsHtml(rec);
+}
+
+/**
+ * Save one Costing field. Numbers go as numbers -- an input hands over text, and Airtable
+ * refuses "12" for a number field. What came back is kept, not what was sent.
+ */
+async function omCostSet(costId, fid, value){
+  const msg = () => document.getElementById('om-costmsg');
+  if(!omJcCost || !omJcCost.rec || omJcCost.rec.id !== costId) return;
+  let v = (value===''||value===undefined) ? null : value;
+  if(v !== null && jcCostNumeric().has(fid)){
+    v = Number(v);
+    if(!isFinite(v) || v < 0){
+      if(msg()) msg().innerHTML = '<div class="om-err">\u2715 Not saved: that is not a number.</div>';
+      return;
+    }
+  }
+  try{
+    const up = await omPatch(OM_T.COST, costId, { [fid]: v });
+    if(up && up.fields) omJcCost.rec.fields[fid] = up.fields[fid];
+    else omJcCost.rec.fields[fid] = v;
+    omRedrawLogistics();
+    if(msg()) msg().innerHTML = '<div class="om-ok">\u2713 Saved.</div>';
+  }catch(e){
+    if(msg()) msg().innerHTML = '<div class="om-err">\u2715 Not saved: '+esc(TX.errorText(e))+'</div>';
+  }
+}
+
+/** Copy the km logged on the site visits into the paper's three trips and its total. */
+async function omCostTrips(jcId){
+  if(!omJcCost || !omJcCost.rec || omJcCost.jcId !== jcId) return;
+  const trips = jcLoggedTrips(jcId);
+  if(!trips.length) return;
+  const km = (i) => (trips[i] ? trips[i].km : null);
+  const fields = { [CF.TRIP1]: km(0), [CF.TRIP2]: km(1), [CF.TRIP3]: km(2),
+    [CF.TOTKM]: Math.round(trips.reduce((a, v) => a + v.km, 0) * 10) / 10, [CF.TRAVEL]: true };
+  const msg = () => document.getElementById('om-costmsg');
+  try{
+    const up = await omPatch(OM_T.COST, omJcCost.rec.id, fields);
+    Object.keys(fields).forEach((k) => {
+      omJcCost.rec.fields[k] = up && up.fields && k in up.fields ? up.fields[k] : fields[k];
+    });
+    omRedrawLogistics();
+    if(msg()) msg().innerHTML = '<div class="om-ok">\u2713 Trips and total km saved.</div>';
+  }catch(e){
+    if(msg()) msg().innerHTML = '<div class="om-err">\u2715 Not saved: '+esc(TX.errorText(e))+'</div>';
+  }
+}
+
+/** A job card with no Costing gets one, linked to it, so the block has somewhere to save. */
+async function omCostStart(jcId){
+  const rec = omJcData.find((r) => r.id === jcId);
+  if(!rec || !TX.can('costing','create')) return;
+  const msg = () => document.getElementById('om-costmsg');
+  try{
+    const made = await omPost(OM_T.COST, { [CF.JC]: [jcId] });
+    if(!made || !made.id) throw new Error('Airtable did not return the new costing record.');
+    rec.fields[OM_F.JC_COST] = [made.id].concat([].concat(rec.fields[OM_F.JC_COST]||[]));
+    omJcCost = { jcId, rec: made, error: '', many: false };
+    omRedrawLogistics();
+  }catch(e){
+    if(msg()) msg().innerHTML = '<div class="om-err">\u2715 Costing not started: '+esc(TX.errorText(e))+'</div>';
+  }
 }
 
 /**
@@ -3564,6 +3886,7 @@ function omBuildDetail(rec,actLog){
     ${canCost ? omRow('Costing', omLinkCount(f, OM_F.JC_COST, 'entry')) : ''}
     <div class="om-df"><label>Record ID</label><div style="font-family:monospace;font-size:10px;color:var(--muted2);">${id}</div></div>
     ${jcDetailForm(rec)}
+    <div id="om-jclog">${jcLogisticsHtml(rec)}</div>
     <hr style="border-color:var(--line);margin:12px 0;">
     <div class="om-slbl">Activity Log (${actLog.length})</div>
     <div class="om-tl">${aHtml}</div>
@@ -4194,6 +4517,9 @@ async function omSubmitNewJC(){
     add('dashClear', typeof dashClear === 'function' ? dashClear : null);
     add('openDetail', typeof openDetail === 'function' ? openDetail : null);
     add('omProgPreview', omProgPreview);
+    add('omCostSet', typeof omCostSet === 'function' ? omCostSet : null);
+    add('omCostTrips', typeof omCostTrips === 'function' ? omCostTrips : null);
+    add('omCostStart', typeof omCostStart === 'function' ? omCostStart : null);
     return reg;
   }
 

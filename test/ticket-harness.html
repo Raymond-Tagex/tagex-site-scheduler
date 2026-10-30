@@ -291,13 +291,19 @@ const VISITS = [
       fldgtKHwY1VcJHT0s:['recJC1'], fldu5Aou8gQZoG38h:'Maintenance',
       [FID.vStart]:new Date(Date.now() - 21 * 864e5).toISOString(),
       fldaC9cFqOIpPKhDn:new Date(Date.now() - 21 * 864e5 + 72e5).toISOString(),
-      [FID.vStatus]:'Completed', fldXKl0jI6lbIvj4u:['recTKTk'] } },
+      [FID.vStatus]:'Completed', fldXKl0jI6lbIvj4u:['recTKTk'], fld6hkVkjUjbT0k9A:120 } },
   { id:'recV3', fields:{ fldl6AeZcPmO9gVj9:'untied',
       fldgtKHwY1VcJHT0s:['recJC1'], fldDB3DUqHvADw0op:'2026-09-17T07:00:00.000Z',
       fldaC9cFqOIpPKhDn:'2026-09-17T09:00:00.000Z',
       fldu5Aou8gQZoG38h:'Maintenance', fldEoAd9YkLfCIBDj:'Completed',
-      flddCyyVn6w0h5y0H:'A VISIT WITH NO TICKET' } },
+      flddCyyVn6w0h5y0H:'A VISIT WITH NO TICKET', fld6hkVkjUjbT0k9A:95.5 } },
 ];
+
+// recJC1's Costing. The ids are Costing's: Inclusive Rate per km, Vehicle Allocation, Transport Cost
+// (Warehouse) and (Supplier). Reset by the logistics section before it starts.
+window.COSTS = {};
+window.JC_FULL = {};
+window.READS = [];
 
 function stubTX() {
   TX.me = () => ({ user:{ email:'raymond@tagexenergy.co.za', fullName:'Raymond' },
@@ -341,6 +347,17 @@ function stubTX() {
       return { records: TICKETS.filter((r) => r.id === q.recordId) };
     }
     if (q.op === 'list' || q.op === 'get') {
+      window.READS.push({ op:q.op, table:q.table, recordId:q.recordId });
+      // A whole job card: the list's record plus what only a full read returns.
+      if (q.table === 'job_cards' && q.op === 'get') {
+        const j = JOBCARDS.find((r) => r.id === q.recordId);
+        return { records: j ? [{ id:j.id, fields:{ ...j.fields, ...(window.JC_FULL[j.id] || {}) } }] : [] };
+      }
+      if (q.table === 'costing' && q.op === 'get') {
+        const c = window.COSTS[q.recordId];
+        if (!c) throw new Error('NOT_FOUND');
+        return { records: [{ id:q.recordId, fields:{ ...c } }] };
+      }
       if (q.table === 'job_cards') return { records: JOBCARDS };
       if (q.table === 'clients') return { records: CLIENTS };
       if (q.table === 'activity_log') return { records: ACTS };
@@ -399,6 +416,14 @@ function stubTX() {
     }
     if (q.table === 'site_visits' && q.op === 'create') {
       return { records:[{ id:'recNEWVISIT', fields:q.fields }] };
+    }
+    if (q.table === 'costing' && q.op === 'update' && window.COSTS[q.recordId]) {
+      Object.assign(window.COSTS[q.recordId], q.fields);
+      return { records:[{ id:q.recordId, fields:{ ...window.COSTS[q.recordId] } }] };
+    }
+    if (q.table === 'costing' && q.op === 'create') {
+      window.COSTS.recCOSTNEW = { ...q.fields };
+      return { records:[{ id:'recCOSTNEW', fields:{ ...q.fields } }] };
     }
     if (q.table === 'site_equipment' && q.op === 'create') {
       const r = { id:'recEQ' + (EQUIP.length + 1), fields:{ ...q.fields } };
@@ -1500,6 +1525,119 @@ async function suite(log) {
   }
   omCloseAnyModal();
 
+  log('\nTHE JOB CARD SHOWS ITS PRINTED FIELDS AND ITS LOGISTICS (OCT 2026 TEMPLATE)');
+  // Raymond, 30 Oct 2026: "Add in the Site Visit detail as per NEW JOBCARD info - listing the km".
+  {
+    const CF = { incl:'fldv08q2OEP3yoOJ1', vehicle:'fldLA3EiDwfSOYw5P', trip1:'fld99zcVddJbbxxeA',
+      trip2:'fldztzyJHljZQnarK', trip3:'fldmFTNNXQFpOJl2N', totkm:'fldtuluPcmGzIq5kl',
+      travel:'fldBb6QGEOTzG8oqc', whT:'fldiye5HXqlHcUVOQ', jc:'fldHWIVXfl3dF7kpo' };
+    const jc1 = JOBCARDS.find((r) => r.id === 'recJC1');
+    jc1.fields.fldO7Uk0MU2gIkNnB = ['recCOST1'];
+    window.COSTS = { recCOST1: { [CF.incl]:4.5, [CF.vehicle]:'Hilux CA 123', fldOzSSoXM91ftp0s:1000,
+      // Travelling has only its Warehouse split: its row total must come from that.
+      [CF.whT]:300, [CF.trip1]:100 } };
+    // A cancelled trip on this job card: its km must not count.
+    const cancelled = { id:'recVCAN', fields:{ fldl6AeZcPmO9gVj9:'called off', fldgtKHwY1VcJHT0s:['recJC1'],
+      [FID.vStart]:'2026-09-01T07:00:00.000Z', [FID.vStatus]:'Cancelled', fld6hkVkjUjbT0k9A:999 } };
+    VISITS.push(cancelled);
+    // Who inspected is a printed-form field the job card LIST never reads.
+    window.JC_FULL = { recJC1: { flduLbQNH2M2pTcK5:'Adriaan de Jager' } };
+    const openJc1 = async () => {
+      omCloseAnyModal();
+      document.getElementById('ombn-jc').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+      await settle(8);
+      document.querySelector('#om-view-jc .om-chip[data-a2="EVERY"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+      await settle(8);
+      [...document.querySelectorAll('#om-jclist .om-jc')].find((e) => e.textContent.includes('OM-2026-0157'))
+        .dispatchEvent(new MouseEvent('click', { bubbles:true }));
+      await settle(20);
+    };
+    const box = () => document.getElementById('om-jclog');
+    const input = (fid) => box() && box().querySelector('[data-a2="' + fid + '"]');
+    const change = async (el, v) => { el.value = v; el.dispatchEvent(new Event('change', { bubbles:true })); await settle(12); };
+
+    window.READS = [];
+    await openJc1();
+    const insp = document.querySelector('#om-view-detail [data-a2="flduLbQNH2M2pTcK5"]');
+    t('a printed-form field the list does not read is shown as saved, not blank', insp && insp.value, 'Adriaan de Jager');
+    t('because the job card is read whole when it is opened',
+      window.READS.some((r) => r.op === 'get' && r.table === 'job_cards' && r.recordId === 'recJC1'), true);
+    t('the logistics block is drawn', !!box() && /Stock, Material &amp; Logistics Allocation|Stock, Material & Logistics Allocation/.test(box().innerHTML), true);
+    t('with the paper\'s four blocks, in its order',
+      ['Transportation Details', 'Accommodation Details', 'Labour Details', 'Rental Details', 'Summary of Costs']
+        .map((h) => [...box().querySelectorAll('.om-fttl')].map((e) => e.textContent).indexOf(h)).every((x, i, a) => x >= 0 && (!i || x > a[i - 1])), true);
+    t('the Costing record\'s values are in it', input(CF.incl) && input(CF.vehicle) && [input(CF.incl).value, input(CF.vehicle).value], ['4.5', 'Hilux CA 123']);
+    t('a trip is costed at the inclusive rate', /Site visit cost: R\s?450[.,]00/.test(box().textContent), true);
+    t('the km logged on this job card\'s visits are listed, oldest first, with their total',
+      [...box().querySelectorAll('.om-jctrips tr td:last-child')].map((td) => td.textContent), ['95.5', '120', '215.5']);
+    t('supplier quotes attached is under logistics, where the paper has it',
+      !!box().querySelector('[data-a2="fldFmxBQ3mXE3OuM8"]'), true);
+    t('and no longer under the on-site inspection',
+      [...document.querySelectorAll('#om-view-detail .om-fcard')].some((c) => /On-Site Inspection/.test(c.textContent)
+        && c.querySelector('[data-a2="fldFmxBQ3mXE3OuM8"]')), false);
+    const grid = box().querySelector('.om-jcgrid');
+    t('the summary of costs adds a row with no total of its own from its split, as the paper does',
+      grid && [...grid.querySelectorAll('tr.om-jctot td')].map((x) => x.textContent.replace(/\s/g, '')),
+      ['TOTALCOST', 'R300,00', 'R0,00', 'R1300,00']);
+
+    VISITS.splice(VISITS.indexOf(cancelled), 1);
+    window.SENT = [];
+    await change(input(CF.incl), '5.25');
+    const rateUp = window.SENT.find((x) => x.op === 'update' && x.table === 'costing');
+    t('a rate is saved to the Costing record, as a number', rateUp && [rateUp.recordId, rateUp.fields[CF.incl]], ['recCOST1', 5.25]);
+    t('and the trip cost follows it', /Site visit cost: R\s?525[.,]00/.test(box().textContent), true);
+
+    window.SENT = [];
+    await change(input(CF.vehicle), '');
+    const clr = window.SENT.find((x) => x.op === 'update' && x.table === 'costing');
+    t('emptying a box clears the field rather than saving an empty string', clr && clr.fields[CF.vehicle], null);
+
+    window.SENT = [];
+    box().querySelector('[data-act="omCostTrips"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
+    const trips = window.SENT.find((x) => x.op === 'update' && x.table === 'costing');
+    t('the logged km become the trips, oldest first, and the total km',
+      trips && [trips.fields[CF.trip1], trips.fields[CF.trip2], trips.fields[CF.trip3], trips.fields[CF.totkm], trips.fields[CF.travel]],
+      [95.5, 120, null, 215.5, true]);
+    t('and show on the screen', input(CF.trip1) && input(CF.trip1).value, '95.5');
+
+    window.SENT = [];
+    await change(box().querySelector('.om-jcgrid [data-a2="' + CF.whT + '"]'), '80');
+    const whUp = window.SENT.find((x) => x.op === 'update' && x.table === 'costing');
+    t('a summary of costs cell saves to its own Costing field', whUp && whUp.fields[CF.whT], 80);
+
+    // May see costing, may not change it: the values are there, every control is shut.
+    const realCan = TX.can;
+    TX.can = (m, a) => !(m === 'costing' && a !== 'view');
+    await openJc1();
+    t('a role that may only view costing sees it', !!input(CF.incl) && input(CF.incl).value, '5.25');
+    t('but every control is disabled',
+      [...box().querySelectorAll('input[data-act="omCostSet"],textarea[data-act="omCostSet"]')].every((el) => el.disabled), true);
+    t('and the trips cannot be overwritten', !!box().querySelector('[data-act="omCostTrips"]'), false);
+
+    // No costing access at all (Technician, Warehouse): no block, and Costing is not even read.
+    TX.can = (m) => m !== 'costing';
+    window.READS = [];
+    await openJc1();
+    t('a role without costing access gets no logistics block', box() ? box().innerHTML.trim() : '', '');
+    t('and Costing is never asked for', window.READS.some((r) => r.table === 'costing'), false);
+
+    // A job card with no Costing yet: one is started, linked to it.
+    TX.can = realCan;
+    jc1.fields.fldO7Uk0MU2gIkNnB = [];
+    await openJc1();
+    t('a job card with no costing says so', /has no costing yet/.test(box().textContent), true);
+    window.SENT = [];
+    box().querySelector('[data-act="omCostStart"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+    await settle(12);
+    const made = window.SENT.find((x) => x.op === 'create' && x.table === 'costing');
+    t('starting costing creates a Costing record linked to the job card', made && made.fields[CF.jc], ['recJC1']);
+    t('and the block opens on it', !!input(CF.incl), true);
+    delete jc1.fields.fldO7Uk0MU2gIkNnB;
+    window.COSTS = {}; window.JC_FULL = {};
+  }
+  omCloseAnyModal();
+
   log('\nA NEW JOB CARD SAVES ITS TYPE AS AIRTABLE SPELLS IT');
   // Raymond, 29 Oct 2026: "Installation" would not save. Airtable's choice is "Installation "
   // (trailing space); an option with no value attribute sends its text trimmed, which is no choice.
@@ -2540,6 +2678,22 @@ const MUTANTS = [
   ['the tab badge counts finished job cards too',
    '  const open=omJcData.filter(omLive).length;',
    '  const open=omJcData.length;'],
+
+  ['the job card is not read whole, so printed fields open blank',
+   "  await omLoadFullJc(rec);\n", ""],
+  ['a costing number is sent as the text the input gave',
+   "    v = Number(v);\n", ""],
+  ['a costing control is left open for a role that may only view',
+   "const how = { act:'omCostSet', readOnly: !can };", "const how = { act:'omCostSet', readOnly: false };"],
+  ['Costing is read for a role with no access to it',
+   "  if(!TX.can('costing','view')) return;\n  const ids", "  const ids"],
+  ['the trips are taken newest first',
+   ".sort((a, b) => String(a.start||'').localeCompare(String(b.start||'')));",
+   ".sort((a, b) => String(b.start||'').localeCompare(String(a.start||'')));"],
+  ['a cancelled visit\'s km counts toward the trips',
+   "v.jcIds.includes(jcId) && v.status !== 'Cancelled' && v.km !== null", "v.jcIds.includes(jcId) && v.km !== null"],
+  ['the summary row ignores the warehouse / supplier split',
+   ": ((wh !== null || su !== null) ? (wh||0) + (su||0) : null);", ": null;"],
 
   ['a select option is sent as its trimmed text, not its exact value',
    "opts.map(o=>`<option value=\"${esc(o)}\"${o===def?' selected':''}>",
