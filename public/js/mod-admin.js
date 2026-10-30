@@ -30,6 +30,54 @@
     'error_criteria', 'second_hand_parts', 'support_requests', 'response_templates',
   ]);
 
+  // Every TAGEX app reads the SAME roles (the Identity & Access base), so one role's Permissions hold the
+  // modules of all of them. This screen used to show only this app's, so the expense keys could be set in
+  // the expense app alone (Raymond, 30 Oct 2026: "where are the expense & expense-approval on my other
+  // access rights applications?" -- "Show all in each"). The other apps' modules are now listed under this
+  // app's, grouped by the app that uses them, and saved like any other box. KEEP THIS LIST THE SAME in the
+  // mod-admin.js of all four apps (delivery, O&M scheduler, residential, expense): it is copied, not shared.
+  const ALL_APPS = [
+    { app: 'Delivery & BOM', keys: [
+      'dashboard', 'job_cards', 'clients', 'documents', 'restricted_personal',
+      'stock_requests', 'stock_request_items', 'tagex_bom', 'tagex_bom_lines',
+      'suppliers', 'supplier_quotes', 'quote_lines', 'other_requests', 'other_request_lines',
+      'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
+      'stock_items', 'stock_screen', 'site_visits', 'activity_log',
+      'costing', 'project_costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
+    { app: 'O&M scheduler', keys: [
+      'dashboard', 'job_cards', 'clients', 'documents', 'restricted_personal',
+      'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
+      'site_information', 'site_equipment', 'stock_items', 'site_visits', 'activity_log',
+      'costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
+    { app: 'Residential', keys: [
+      'dashboard', 'job_cards', 'clients', 'documents',
+      'sites', 'site_equipment', 'system_templates', 'system_template_lines', 'installations', 'installation_lines',
+      'stock_requests', 'stock_request_items', 'tagex_bom', 'tagex_bom_lines',
+      'suppliers', 'supplier_quotes', 'quote_lines', 'other_requests', 'other_request_lines',
+      'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
+      'stock_items', 'stock_screen', 'site_visits', 'activity_log',
+      'costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
+    { app: 'Expense claims', keys: [
+      'dashboard', 'job_cards', 'clients', 'documents', 'restricted_personal',
+      'site_information', 'site_equipment', 'expenses', 'expense_approval', 'project_costing',
+      'stock_items', 'site_visits', 'activity_log',
+      'costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
+  ];
+  const THIS_APP = 'O&M scheduler';
+  /** This app's modules first, then each other app's that are not already shown, under its name. */
+  const GROUPS = (() => {
+    const shown = new Set(MODULES);
+    const out = [{ app: THIS_APP + ' (this app)', keys: MODULES.slice(), own: true }];
+    for (const a of ALL_APPS) {
+      if (a.app === THIS_APP) continue;
+      const keys = a.keys.filter((k) => !shown.has(k));
+      keys.forEach((k) => shown.add(k));
+      if (keys.length) out.push({ app: 'Used by ' + a.app, keys });
+    }
+    return out;
+  })();
+  const SHOWN = new Set(GROUPS.flatMap((g) => g.keys));
+
   let USERS = [], ROLES = [], AUDIT = [];
   let panel = null;
   let currentTab = 'users';
@@ -462,16 +510,18 @@
     const grid = '<table class="admin-matrix"><thead><tr><th>Module</th>'
       + OPS.map((o) => '<th>' + o[0].toUpperCase() + o.slice(1) + '</th>').join('')
       + '</tr></thead><tbody>'
-      + MODULES.map((m) => {
-        const rule = perms[m] || {};
-        const unprov = NOT_PROVISIONED.has(m);
-        return '<tr' + (unprov ? ' class="unprov"' : '') + '><td>' + esc(m)
-          + (unprov ? ' <span class="admin-pill">no table yet</span>' : '') + '</td>'
-          + OPS.map((o) =>
-            '<td><input type="checkbox" data-m="' + m + '" data-o="' + o + '"'
-            + (rule[o] === true ? ' checked' : '') + '></td>').join('')
-          + '</tr>';
-      }).join('')
+      + GROUPS.map((g) => '<tr class="admin-group' + (g.own ? ' is-own' : '') + '"><th colspan="' + (OPS.length + 1) + '">'
+        + esc(g.app) + (g.own ? '' : ' <span class="admin-group-note">same role, set here or in that app</span>') + '</th></tr>'
+        + g.keys.map((m) => {
+          const rule = perms[m] || {};
+          const unprov = g.own && NOT_PROVISIONED.has(m);
+          return '<tr' + (unprov ? ' class="unprov"' : '') + '><td>' + esc(m)
+            + (unprov ? ' <span class="admin-pill">no table yet</span>' : '') + '</td>'
+            + OPS.map((o) =>
+              '<td><input type="checkbox" data-m="' + m + '" data-o="' + o + '"'
+              + (rule[o] === true ? ' checked' : '') + '></td>').join('')
+            + '</tr>';
+        }).join('')).join('')
       + '</tbody></table>';
 
     $('#rEditor').innerHTML =
@@ -493,7 +543,7 @@
       $('#rSummary').innerHTML = keys.length
         ? '<strong>This role can:</strong><ul>' + keys.map((k) =>
             '<li>' + esc(k) + ' — ' + granted[k].join(', ')
-            + (NOT_PROVISIONED.has(k) ? ' <em>(no table yet; denied until built)</em>' : '') + '</li>').join('') + '</ul>'
+            + (NOT_PROVISIONED.has(k) && MODULES.includes(k) ? ' <em>(no table yet; denied until built)</em>' : '') + '</li>').join('') + '</ul>'
         : '<strong>This role can do nothing.</strong> Every module is denied.';
     };
     $$('#rEditor input[type=checkbox]').forEach((cb) => cb.addEventListener('change', recompute));
@@ -529,7 +579,7 @@
       // from its checkboxes alone, so a key with no checkbox was being dropped on every save --
       // which, under deny-by-default, revoked it. This app shares the Identity & Access base
       // with the delivery application, so a save here could revoke ITS modules.
-      const rendered = new Set(MODULES);
+      const rendered = SHOWN;
       for (const [m, rule] of Object.entries(perms)) {
         if (!rendered.has(m) && !(m in next)) next[m] = rule;
       }

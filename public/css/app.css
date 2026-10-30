@@ -309,6 +309,10 @@ body.gated { overflow: hidden; }
   text-align: left; font-family: var(--mono); font-size: 11px; color: var(--text);
 }
 .admin-matrix tr.unprov td { opacity: .55; }
+/* Access levels: one group per TAGEX app (all share the same roles; 30 Oct 2026). */
+.admin-matrix tr.admin-group th { text-align: left; padding-top: 14px; background: transparent; color: var(--amber, inherit); }
+.admin-matrix tr.admin-group.is-own th { padding-top: 6px; }
+.admin-matrix .admin-group-note { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: .7; margin-left: 8px; }
 .admin-matrix input { accent-color: var(--amber); width: 15px; height: 15px; cursor: pointer; }
 
 .admin-summary {
