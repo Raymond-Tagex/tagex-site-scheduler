@@ -20,6 +20,32 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..');
 const T = require(path.join(ROOT, 'api', '_lib', 'tables.js'));
 
+// Tables O&M has and RES deliberately does not.
+//
+// A link field pointing INTO one of these cannot exist in RES: a link needs its target table,
+// and creating the target would mean importing a whole subsystem into a base with no use for
+// it. "Expense Claims" alone is 40 fields carrying employee names, emails, user ids and
+// payment methods -- the same class of personal data the FICA rule already keeps out of RES.
+//
+// So a missing link into one of these is NOT drift, and is exempted below. Everything else
+// still fails. The list is explicit, and the set is asserted against the live bases, so a new
+// O&M-only table surfaces as a decision to make rather than a silent exemption.
+const OM_ONLY_TABLES = {
+  tbl5z9m0gfMV6QPXB: 'FICA Documents',
+  tblIwT7Raew39aqMP: 'Subscriber Contracts',
+  tblDa3chhbJvIHej2: 'Expense Categories',
+  tblz6IE6BOL0S71Kv: 'Expense Claims',
+  tbl7nxlGbIeiiXoKD: 'Expense Items',
+  tblQYamWME9XBK11D: 'Expense Approval History',
+  tblkNuGbYI7Jq3Ua7: 'Expense Payments',
+};
+
+// A field RES may be without: a link whose far table is one RES deliberately does not carry.
+function exemptLink(f) {
+  return f.type === 'multipleRecordLinks'
+    && f.options && OM_ONLY_TABLES[f.options.linkedTableId];
+}
+
 let pass = 0, fail = 0;
 const failures = [];
 function t(label, ok, detail) {
@@ -135,14 +161,26 @@ async function endpoints() {
         const v = T.TABLES[m].OM;
         for (const id of typeof v === 'string' ? [v] : Object.values(v)) ids.add(id);
       }
+      const omOnly = Object.keys(om).filter((id) => !res[id]).sort();
+      const known = Object.keys(OM_ONLY_TABLES).sort();
+      t('the O&M-only tables are exactly the ones we know about',
+        JSON.stringify(omOnly) === JSON.stringify(known),
+        `live: ${omOnly.map((i) => (om[i] || {}).name || i).join(', ')}\n      known: ${known.map((i) => OM_ONLY_TABLES[i]).join(', ')}`);
+
       for (const id of ids) {
         const a = om[id]; const b = res[id];
         if (!a) { t(`O&M has table ${id}`, false, 'mapped in tables.js but missing from O&M itself'); continue; }
         t(`RES has "${a.name}" under the same id`, !!b && b.name === a.name, b ? `RES calls it "${b.name}"` : 'missing');
         if (!b) continue;
         const have = new Set(b.fields.map((f) => `${f.name}|${f.type}`));
-        const missing = a.fields.filter((f) => !have.has(`${f.name}|${f.type}`)).map((f) => f.name);
+        const absent = a.fields.filter((f) => !have.has(`${f.name}|${f.type}`));
+        const exempt = absent.filter(exemptLink);
+        const missing = absent.filter((f) => !exemptLink(f)).map((f) => f.name);
         t(`  and every O&M field, with the same type`, !missing.length, `missing or retyped in RES: ${missing.join(', ')}`);
+        for (const f of exempt) {
+          console.log(`        \x1b[2m-- ${f.name} is a link into ${OM_ONLY_TABLES[f.options.linkedTableId]},`
+            + ' which RES does not carry on purpose\x1b[0m');
+        }
       }
       const src = Object.values(res).find((x) => x.id === T.TABLES.site_information.RES);
       const sb = src && src.fields.find((f) => f.name === 'Source Base');
