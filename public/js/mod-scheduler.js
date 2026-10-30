@@ -3835,9 +3835,11 @@ function omRenderTriage(){
 }
 
 // ── Clients/People/Log ──
-async function omCliTab(el,tab){document.querySelectorAll('.om-tab').forEach(t=>t.classList.remove('on'));el.classList.add('on');await omRenderCli(tab);}
-async function omRenderCli(tab){
-  const el=document.getElementById('om-cli');
+// People / Staff and Activity Log each have a view of their own now (30 Oct 2026); Clients is the report
+// (mod-clients.js). The client register list that was the old Clients tab is still drawn by 'clients', unused.
+async function omRenderCli(tab,target){
+  const el=document.getElementById(target||'om-cli');
+  if(!el) return;
   if(tab==='clients'){
     // The register, not this base's copies: every client, with its contracts, and whether this
     // base has a copy yet. Escaped -- client details are typed by people and imported from files.
@@ -3891,7 +3893,9 @@ function omGoView(name){
   if(name==='dash') omRenderDash();
   if(name==='jc')   omApplyJCFilters();
   if(name==='triage') omRenderTriage();
-  if(name==='cli')  omRenderCli('clients');
+  if(name==='cli')  { if(TX.clientsReport) TX.clientsReport.start(); }
+  if(name==='ppl')  omRenderCli('people','om-ppl');
+  if(name==='log')  omRenderCli('log','om-log');
   if(name==='newjc'){ omNjcForTkt=''; omRenderNewJC(); }
   if(name==='new')   omSetReportedNow();
   if(name==='tickets') omShowTickets();
@@ -4170,7 +4174,6 @@ async function omSubmitNewJC(){
     add('omTktSaveResolution', typeof omTktSaveResolution === 'function' ? omTktSaveResolution : null);
     add('omTktSaveCost', typeof omTktSaveCost === 'function' ? omTktSaveCost : null);
     add('omFilterJCs', typeof omFilterJCs === 'function' ? omFilterJCs : null);
-    add('omCliTab', typeof omCliTab === 'function' ? omCliTab : null);
     add('omCliPick', typeof omCliPick === 'function' ? omCliPick : null);
     add('omJCPick', typeof omJCPick === 'function' ? omJCPick : null);
     add('omRefBuild', typeof omRefBuild === 'function' ? omRefBuild : null);

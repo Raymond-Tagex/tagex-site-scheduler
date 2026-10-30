@@ -34,6 +34,7 @@ const S = require('./_lib/session.js');
 const H = require('./_lib/http.js');
 const A = require('./_lib/audit.js');
 const G = require('./_lib/guards.js');
+const CRP = require('./_lib/clientsreport.js');
 
 const VALID_OPS = new Set(['list', 'get', 'create', 'update', 'delete']);
 
@@ -70,7 +71,7 @@ module.exports = async function handler(req, res) {
   const fields = body.fields && typeof body.fields === 'object' ? body.fields : null;
   const params = body.params && typeof body.params === 'object' ? body.params : {};
 
-  if (!VALID_OPS.has(op)) {
+  if (!VALID_OPS.has(op) && op !== 'clients_report') {
     return H.fail(res, 400, 'unknown_op', 'op must be one of: list, get, create, update, delete.');
   }
 
@@ -112,6 +113,11 @@ module.exports = async function handler(req, res) {
     await A.auditNow({ ...ctx, action: 'View', result: 'Denied', denialReason: 'rate_limited' });
     return H.tooManyRequests(res, rl.retryAfter);
   }
+
+  // The Clients tab's report (the delivery app's, 30 Oct 2026): past the same session, password, MFA and
+  // rate gates as everything else, then its own check of clients_report:view / :export / :edit. Inside
+  // the proxy so it costs no function of its own.
+  if (op === 'clients_report') return CRP.handle({ body, auth, ctx: { ...ctx, module: CRP.MODULE, baseSymbol: '' }, res });
 
   // ── STEP 3 — resolve symbols ────────────────────────────────────────────
   const resolved = T.resolve(baseSymbol, tableSymbol, subSymbol);

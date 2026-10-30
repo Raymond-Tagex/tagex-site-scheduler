@@ -267,6 +267,8 @@
       <button class="btn ghost sm" id="ombn-new"    data-act="omGoView" data-a1="new">+ New Ticket</button>
       <button class="btn ghost sm" id="ombn-newjc"  data-act="omGoView" data-a1="newjc">+ New Job Card</button>
       <button class="btn ghost sm" id="ombn-cli"    data-act="omGoView" data-a1="cli">Clients</button>
+      <button class="btn ghost sm" id="ombn-ppl"    data-act="omGoView" data-a1="ppl">People / Staff</button>
+      <button class="btn ghost sm" id="ombn-log"    data-act="omGoView" data-a1="log">Activity Log</button>
       <div style="flex:1"></div>
       <div id="om-dot" style="width:7px;height:7px;border-radius:50%;background:#464e62;flex-shrink:0;"></div>
       <span id="om-pill" style="font-family:monospace;font-size:9px;color:#8b92a8;">—</span>
@@ -465,13 +467,18 @@
         </button>
       </div>
 
+      <!-- Clients is the subscriber-contracts report (js/mod-clients.js, the delivery app's Clients tab, 30 Oct
+           2026). People / Staff and Activity Log were tabs inside the old Clients view; they are views of their own. -->
       <div class="om-view" id="om-view-cli" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;">
-        <div style="display:flex;background:var(--card);border-radius:8px;padding:3px;gap:2px;margin-bottom:10px;">
-          <div class="om-tab on" data-act="omCliTab" data-a1="@el" data-a2="clients">Clients</div>
-          <div class="om-tab" data-act="omCliTab" data-a1="@el" data-a2="people">People</div>
-          <div class="om-tab" data-act="omCliTab" data-a1="@el" data-a2="log">Activity Log</div>
-        </div>
-        <div id="om-cli"></div>
+        <div id="om-cli-report"></div>
+      </div>
+      <div class="om-view" id="om-view-ppl" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;">
+        <div class="om-fttl" style="margin-bottom:8px">People / Staff</div>
+        <div id="om-ppl"></div>
+      </div>
+      <div class="om-view" id="om-view-log" style="position:absolute;inset:0;overflow-y:auto;padding:14px 18px 40px;">
+        <div class="om-fttl" style="margin-bottom:8px">Activity Log</div>
+        <div id="om-log"></div>
       </div>
 
       <div class="om-view" id="om-view-detail" style="position:absolute;inset:0;overflow-y:auto;">
@@ -574,6 +581,7 @@
 <script src="/js/login.js"></script>
 <script src="/js/contract-panel.js"></script>
 <script src="/js/mod-scheduler.js"></script>
+<script src="/js/mod-clients.js"></script>
 <script src="/js/mod-siteinfo.js"></script>
 <script src="/js/siteinfo-import.js"></script>
 <script src="/js/pdfpages.js"></script>
