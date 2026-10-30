@@ -67,7 +67,7 @@ const ids = (v) => (Array.isArray(v) ? v : []).map((x) => (x && typeof x === 'ob
 
 /**
  * @param {object[]} rows     subscriber rows as { contract, client, category, firstInvoice, description,
- *                            omReceived, clientIds, equipment: [{ type, item, qty }] }
+ *                            omReceived, clientIds, regClient: { id, name } | null, equipment: [{ type, item, qty }] }
  * @param {object}   names    client record id -> client name
  * @param {{categories?: string[], sections?: string[], money?: boolean}} want
  *                            what the user ticked (nothing ticked = everything); money: whether the
@@ -97,9 +97,12 @@ function buildReport(rows, names, want) {
       const row = {
         id: r.id, category: r.category, contract: r.contract, client: r.client, firstInvoice: r.firstInvoice,
         description: r.description,
-        linkedClient: r.clientIds.map((id) => names[id] || '').filter(Boolean).join(', '),
-        // Every link is to a client record in the O&M base, where the subscriber table lives.
-        clientBase: r.clientIds.length ? 'O&M' : 'Not linked',
+        linkedClient: r.clientIds.length ? r.clientIds.map((id) => names[id] || '').filter(Boolean).join(', ')
+          : (r.regClient ? r.regClient.name : ''),
+        // An O&M client record where the contract is linked to one; otherwise the client register's client for
+        // that contract number -- the register is what tickets and job cards read, and most subscribers have no
+        // O&M client record until they first need service.
+        clientBase: r.clientIds.length ? 'O&M' : (r.regClient ? 'Register' : 'Not linked'),
       };
       if (money) row.omReceived = r.omReceived;
       return row;
@@ -130,23 +133,61 @@ function buildReport(rows, names, want) {
     out.equipmentContracts = picked.filter((r) => r.equipment.length).length;
   }
   if (secs.includes('clients')) {
-    // One line per linked client record, with how many of the ticked contracts sit under it.
+    // One line per client, with how many of the ticked contracts sit under it: its O&M client record where the
+    // contract is linked to one, otherwise its client in the register.
     const seen = new Map();
-    for (const r of picked) for (const id of r.clientIds) seen.set(id, (seen.get(id) || 0) + 1);
-    out.clients = [...seen.entries()]
-      .map(([id, n]) => ({ name: names[id] || id, contracts: n }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    out.unlinked = picked.filter((r) => !r.clientIds.length).length;
+    const add = (k, name) => { const g = seen.get(k) || { name, contracts: 0 }; g.contracts += 1; seen.set(k, g); };
+    for (const r of picked) {
+      if (r.clientIds.length) for (const id of r.clientIds) add(id, names[id] || id);
+      else if (r.regClient) add('reg:' + r.regClient.id, r.regClient.name);
+    }
+    out.clients = [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+    out.unlinked = picked.filter((r) => !r.clientIds.length && !r.regClient).length;
   }
   return out;
 }
 
 // ── reading ─────────────────────────────────────────────────────────────────────────────────
 
+// "SUB -156" and "sub-156" are one contract number.
+const contractKey = (n) => txt(n).toUpperCase().replace(/\s+/g, '');
+
+/**
+ * Contract number -> its client in the client register (TAGEX Clients base), as { id, name }. Only a number the
+ * register holds once, with one client, is answered: anything else is left for a person to link. An unreadable
+ * register gives an empty map, so the report still draws from the O&M links alone.
+ */
+async function readRegisterClients() {
+  const R = T.CLIENT_REGISTER;
+  const baseId = T.BASES[R.base];
+  if (!baseId) return new Map();
+  try {
+    const [contracts, clients] = await Promise.all([
+      at.list(baseId, R.contracts, { fields: ['Contract Number', 'Client'], pageSize: 100 }, 5000),
+      at.list(baseId, R.clients, { fields: ['Client Name'], pageSize: 100 }, 5000),
+    ]);
+    const name = new Map(clients.map((c) => [c.id, txt(c.fields['Client Name'])]));
+    const seen = new Map();
+    for (const c of contracts) {
+      const k = contractKey(c.fields['Contract Number']);
+      if (!k) continue;
+      const cl = ids(c.fields.Client);
+      seen.set(k, seen.has(k) || cl.length !== 1 || !name.get(cl[0]) ? null : { id: cl[0], name: name.get(cl[0]) });
+    }
+    return seen;
+  } catch (e) {
+    console.error('[clients_report] client register unavailable:', e && e.message);
+    return new Map();
+  }
+}
+
 async function readRows() {
   const sub = T.resolve('OM', 'subscribers');
   if (!sub.ok) throw Object.assign(new Error('subscribers unavailable'), { status: 500 });
-  const recs = await at.list(sub.baseId, sub.tableId, { fields: SUB_FIELDS, pageSize: 100 }, 5000);
+  const [recs, register] = await Promise.all([
+    at.list(sub.baseId, sub.tableId, { fields: SUB_FIELDS, pageSize: 100 }, 5000),
+    readRegisterClients(),
+  ]);
   const rows = recs.map((rec) => {
     const f = rec.fields;
     const equipment = EQUIPMENT.map((e) => ({ type: e.type, item: txt(f[e.field]), qty: f[e.qty] == null ? null : num(f[e.qty]) }))
@@ -160,6 +201,7 @@ async function readRows() {
       description: txt(f['System Description']),
       omReceived: num(f['O&M Received']),
       clientIds: ids(f['Client Record']),
+      regClient: register.get(contractKey(f.Contract)) || null,
       equipment,
     };
   });

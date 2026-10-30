@@ -30,7 +30,7 @@
     { id: 'clients', label: 'Clients' },
   ];
   const TYPES = ['PV panel', 'Inverter', 'Battery', 'PV-Therm'];
-  const BASES = ['O&M', 'Not linked'];
+  const BASES = ['O&M', 'Register', 'Not linked'];
 
   let started = false;
   let DATA = null;          // the last report the server built
