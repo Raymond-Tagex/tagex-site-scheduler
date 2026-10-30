@@ -2523,8 +2523,8 @@ const MUTANTS = [
    '    const cli=jcCli.length?jcCli:(cliId?[cliId.replace(/^reg:/,\'\')]:[]);'],
 
   ['the client lists read this base’s Clients again, not the register',
-   "    const r=await TX.request('/api/client-register',{op:'list',base:SCHED_BASE});",
-   "    const r=null;"],
+   "    const ask=()=>TX.request('/api/client-register',{op:'list',base:SCHED_BASE});",
+   "    const ask=()=>Promise.resolve(null);"],
 
   ['contract numbers are left out of the picker',
    "const omCliLabel=(c)=>omCliName(c)+(c.contracts&&c.contracts.length?",

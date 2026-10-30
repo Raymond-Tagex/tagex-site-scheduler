@@ -53,8 +53,9 @@ t('linked client name carried', one.subscribers[0].linkedClient, 'Client One');
 t('unlinked contract has no client text', one.subscribers[1].linkedClient, '');
 
 const cl = CR.buildReport(rows, names, { sections: ['clients'], money: true });
-t('clients: one line per linked client, with contracts counted',
-  cl.clients, [{ name: 'Client One', contracts: 2 }, { name: 'Client Two', contracts: 2 }]);
+t('clients: one line per linked client, with its contract numbers, funders and count',
+  cl.clients, [{ name: 'Client One', contractNumbers: 'SUB-0001, SUB-0003', funders: 'PPA, Alpine', contracts: 2 },
+    { name: 'Client Two', contractNumbers: 'SUB-0003, SUB-0004', funders: 'Alpine, TxE', contracts: 2 }]);
 t('clients: contracts with no link counted as unlinked', cl.unlinked, 1);
 
 const eq = CR.buildReport(rows, names, { sections: ['equipment'], money: true });

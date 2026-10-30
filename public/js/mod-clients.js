@@ -132,7 +132,7 @@
         rows: d.equipmentByFunder });
     }
     if (d.clients) {
-      out.push({ id: 'clients', title: 'Clients', cols: [col('name', 'Client'), col('contracts', 'Contracts', { num: true })], rows: d.clients });
+      out.push({ id: 'clients', title: 'Clients', cols: [col('name', 'Client'), col('contractNumbers', 'Contract'), col('funders', 'Funder'), col('contracts', 'Contracts', { num: true })], rows: d.clients });
     }
     return out;
   }
