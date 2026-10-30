@@ -38,12 +38,12 @@
   // mod-admin.js of all four apps (delivery, O&M scheduler, residential, expense): it is copied, not shared.
   const ALL_APPS = [
     { app: 'Delivery & BOM', keys: [
-      'dashboard', 'job_cards', 'clients', 'documents', 'restricted_personal',
+      'dashboard', 'job_cards', 'clients', 'subscribers', 'documents', 'restricted_personal',
       'stock_requests', 'stock_request_items', 'tagex_bom', 'tagex_bom_lines',
       'suppliers', 'supplier_quotes', 'quote_lines', 'other_requests', 'other_request_lines',
       'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
       'stock_items', 'stock_screen', 'site_visits', 'activity_log',
-      'costing', 'project_costing', 'clients_report', 'clients_money', 'subscribers', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
+      'costing', 'project_costing', 'clients_report', 'clients_money', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
     { app: 'O&M scheduler', keys: [
       'dashboard', 'job_cards', 'clients', 'subscribers', 'clients_report', 'clients_money', 'documents', 'restricted_personal',
       'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
