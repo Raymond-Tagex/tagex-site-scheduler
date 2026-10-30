@@ -1595,7 +1595,10 @@ const omCliName=(c)=>omFstr(c.fields,OM_F.CL_NAME)||'(unnamed)';
 
 async function omLoadClients(){
   try{
-    const r=await TX.request('/api/client-register',{op:'list',base:SCHED_BASE});
+    // Once more before falling back: a slow first read (cold start) is the usual failure, and the
+    // fallback leaves every contract panel without its funder and warranty until a reload.
+    const ask=()=>TX.request('/api/client-register',{op:'list',base:SCHED_BASE});
+    const r=await ask().catch(()=>ask());
     if(r&&Array.isArray(r.clients)) return r.clients.map(c=>({
       id:(c.mirrors||[])[0]||'', regId:c.id||'', mirrors:c.mirrors||[], status:c.status||'Active',
       contracts:c.contracts||[], contractDetails:c.contractDetails||[], unregistered:!!c.unregistered,

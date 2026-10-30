@@ -135,13 +135,23 @@ function buildReport(rows, names, want) {
   if (secs.includes('clients')) {
     // One line per client, with how many of the ticked contracts sit under it: its O&M client record where the
     // contract is linked to one, otherwise its client in the register.
+    // Each line names its contract numbers and their funders (Raymond, 30 Oct 2026: "Anita Naidoo — SUB-168 — PPA").
     const seen = new Map();
-    const add = (k, name) => { const g = seen.get(k) || { name, contracts: 0 }; g.contracts += 1; seen.set(k, g); };
+    const add = (k, name, r) => {
+      const g = seen.get(k) || { name, contracts: 0, numbers: new Set(), funders: new Set() };
+      g.contracts += 1;
+      if (r.contract) g.numbers.add(r.contract);
+      if (r.category) g.funders.add(r.category);
+      seen.set(k, g);
+    };
     for (const r of picked) {
-      if (r.clientIds.length) for (const id of r.clientIds) add(id, names[id] || id);
-      else if (r.regClient) add('reg:' + r.regClient.id, r.regClient.name);
+      if (r.clientIds.length) for (const id of r.clientIds) add(id, names[id] || id, r);
+      else if (r.regClient) add('reg:' + r.regClient.id, r.regClient.name, r);
     }
-    out.clients = [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+    out.clients = [...seen.values()]
+      .map((g) => ({ name: g.name, contractNumbers: [...g.numbers].sort().join(', '),
+        funders: cats.filter((c) => g.funders.has(c)).join(', '), contracts: g.contracts }))
+      .sort((a, b) => a.name.localeCompare(b.name));
     out.unlinked = picked.filter((r) => !r.clientIds.length && !r.regClient).length;
   }
   return out;

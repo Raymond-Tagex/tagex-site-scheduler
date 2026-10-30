@@ -139,6 +139,10 @@
   function chipHtml(res, esc) {
     const c = res.contract;
     if (c) return '<span class="om-con-chip">' + esc(c.funder || '?') + ' · ' + esc(c.number) + '</span>';
+    // The number saved on the record is shown even when the register could not be read: the funder is then
+    // unknown, but which contract it is was never in doubt (Raymond, 30 Oct 2026: SUB-168 showed no chip).
+    if (res.how === 'unknown' && res.number) return '<span class="om-con-chip">' + esc(res.number) + '</span>';
+    if (res.how === 'stale' && res.number) return '<span class="om-con-chip warn">⚠ ' + esc(res.number) + '</span>';
     if (res.how === 'choose' || res.how === 'stale' || res.how === 'none') {
       return '<span class="om-con-chip warn">⚠ contract</span>';
     }

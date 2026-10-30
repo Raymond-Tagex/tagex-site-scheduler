@@ -91,7 +91,9 @@ console.log('\n\x1b[1mTHE SHORT FORM ON A LIST CARD\x1b[0m\n');
 {
   t('funder and contract', C.chipHtml(C.resolve(BISSET, 'SUB-148-1'), esc), '<span class="om-con-chip">Alpine · SUB-148-1</span>');
   t('a warning when someone must choose', /warn/.test(C.chipHtml(C.resolve(BISSET, ''), esc)), true);
-  t('nothing when the register could not be read', C.chipHtml(C.resolve(null, ''), esc), '');
+  t('nothing when the register could not be read and no number is saved', C.chipHtml(C.resolve(null, ''), esc), '');
+  t('the saved number still shows when the register could not be read', C.chipHtml(C.resolve(null, 'SUB-168'), esc), '<span class="om-con-chip">SUB-168</span>');
+  t('a saved number the client does not have is flagged with it', C.chipHtml(C.resolve(BISSET, 'SUB-999'), esc), '<span class="om-con-chip warn">⚠ SUB-999</span>');
 }
 
 console.log('\n\x1b[1mEQUIPMENT AND SERIAL NUMBERS\x1b[0m\n');
