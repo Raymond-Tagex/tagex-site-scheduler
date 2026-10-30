@@ -62,7 +62,9 @@
 
   .mod-scheduler main{flex:1;overflow:auto;padding:18px}
   .mod-scheduler main.om-mode{padding:0}
-  .mod-scheduler .view{max-width:1280px;margin:0 auto}
+  /* Full width (Raymond, 30 Oct 2026): the screens were capped at 1280px and sat in a narrow column
+     on a wide monitor. */
+  .mod-scheduler .view{max-width:none;margin:0}
 
   
   /* ---------- Calendar toolbar ---------- */
