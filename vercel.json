@@ -29,6 +29,9 @@
     "api/auth.js": {
       "maxDuration": 20
     },
+    "api/client-register.js": {
+      "maxDuration": 30
+    },
     "api/siteinfo-upload.js": {
       "maxDuration": 60,
       "includeFiles": "{api/_lib/tessdata/**,node_modules/tesseract.js-core/**}"

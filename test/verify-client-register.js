@@ -262,6 +262,11 @@ const byName = (r, nm) => (r.body.clients || []).find((c) => c.name === nm);
   r = await call(OPS, { op: 'list', base: 'OM' });
   t('an Airtable failure says the register could not be read', [r.code, r.body.reason], [502, 'register_unavailable']);
 
+  // Three tables, about six seconds of Airtable reads. Under the default 10-second limit a cold
+  // start cut it off and every contract panel said "could not be read" (30 Oct 2026).
+  const vj = JSON.parse(require('fs').readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
+  t('the register has time to answer', ((vj.functions || {})['api/client-register.js'] || {}).maxDuration >= 30, true);
+
   console.log('\n' + (bad ? '\x1b[31m\x1b[1m  ' + bad + ' FAILED\x1b[0m, ' : '  ') + (n - bad) + ' passed');
   process.exit(bad ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
