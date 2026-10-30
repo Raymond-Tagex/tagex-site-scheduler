@@ -98,13 +98,19 @@ module.exports = async function handler(req, res) {
     const reg = { baseId: T.BASES[R.base], tableId: R.clients };
     const con = { baseId: T.BASES[R.base], tableId: R.contracts };
     if (!mirror.ok || !reg.baseId) throw new Error('The client register is not configured.');
-    const { idToName: mirrorNames } = await at.fieldMaps(mirror.baseId, mirror.tableId);
-    const { idToName: regNames } = await at.fieldMaps(reg.baseId, reg.tableId);
+    // Read side by side, not one after another: the three tables take about six seconds in a row,
+    // which with sign-in and a cold start ran past the function's time limit -- and every ticket
+    // and job card then said the register could not be read (Raymond, 30 Oct 2026, TKT-2026-0093).
+    const [{ idToName: mirrorNames }, { idToName: regNames }] = await Promise.all([
+      at.fieldMaps(mirror.baseId, mirror.tableId), at.fieldMaps(reg.baseId, reg.tableId)]);
 
     // The copies of each client in this base, as the role may see them: the proxy's own filter.
     const filter = P.buildReadFilter({ moduleKey: 'clients', baseSymbol: base, rule, scope, user: auth.user, clientFilter: null });
-    const rows = await listAll(mirror.baseId, mirror.tableId, filter ? { filterByFormula: filter } : {});
-    const register = await listAll(reg.baseId, reg.tableId);
+    const [rows, register, contractRows] = await Promise.all([
+      listAll(mirror.baseId, mirror.tableId, filter ? { filterByFormula: filter } : {}),
+      listAll(reg.baseId, reg.tableId),
+      op === 'list' ? listAll(con.baseId, con.tableId) : null,
+    ]);
     const byMaster = new Map();
     for (const r of rows) {
       const m = str(r.fields['Master Client ID']);
@@ -118,7 +124,7 @@ module.exports = async function handler(req, res) {
 
     // ── list ──────────────────────────────────────────────────────────────
     async function list() {
-      const contracts = await listAll(con.baseId, con.tableId);
+      const contracts = contractRows;
       const numbers = new Map();
       // What a ticket or job card shows about its contract: who funds it, when warranty started
       // (the 1st invoice date) and what was installed. Portfolio is the funder (PPA, Alpine,
