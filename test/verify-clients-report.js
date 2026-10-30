@@ -93,6 +93,20 @@ t('clientBase: a linked contract says O&M', CR.buildReport(rows, names, { money:
 t('clientBase: an unlinked contract says Not linked', CR.buildReport(rows, names, { money: false }).subscribers[1].clientBase, 'Not linked');
 t('subscriber rows carry their record id', CR.buildReport(rows, names, { money: false }).subscribers[0].id, 'r1');
 
+// A contract with no O&M client record takes its client from the register (Raymond, 30 Oct 2026: 259 contracts
+// "not linked" although the register links every one). An O&M link still wins over the register.
+{
+  const reg = rows.map((r) => ({ ...r, regClient: null }));
+  reg[1] = { ...reg[1], regClient: { id: 'recREG1', name: 'Register Person' } };
+  reg[0] = { ...reg[0], regClient: { id: 'recREG9', name: 'Not This One' } };
+  const rr = CR.buildReport(reg, names, { money: false });
+  t('register: an unlinked contract names its register client', [rr.subscribers[1].linkedClient, rr.subscribers[1].clientBase], ['Register Person', 'Register']);
+  t('register: an O&M link still wins', [rr.subscribers[0].linkedClient, rr.subscribers[0].clientBase], ['Client One', 'O&M']);
+  t('register: the client is listed under clients', rr.clients.some((c) => c.name === 'Register Person' && c.contracts === 1), true);
+  t('register: and the contract is no longer counted as unlinked', rr.unlinked, 0);
+  t('register: without it the contract is still unlinked', CR.buildReport(rows, names, { sections: ['clients'] }).unlinked, 1);
+}
+
 // ── linking a contract to a client: the server's write path, with Airtable stubbed ────────────
 const path2 = path.join(__dirname, '..', 'api', '_lib');
 const AT = require(path.join(path2, 'airtable.js'));
