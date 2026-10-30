@@ -27,6 +27,8 @@ tmp/
 # Client site documents. These are FICA / POPIA material and must never enter version
 # control — keep them outside the repository, not merely untracked.
 /*.pdf
+# A client site pack used to test the site-information import (30 Oct 2026): ALAN AUCAMP residence.
+docs/ALAN AUCAMP*.pdf
 
 # Client lists and cost logs carry personal information (POPIA). Read them, never commit them.
 docs/*.xlsx
