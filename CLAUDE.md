@@ -192,6 +192,27 @@ and a filter or sort on them is refused. Do not lift the deny on a role: overrid
 lifted per person, so it would open them to everyone on that role. The Costing table (labour on the
 printed job card) is unchanged.
 
+## A user may hold several Access Levels
+
+Raymond, 2 Nov 2026: Melanie keeps Operations Manager and adds an expense role, rather than a copy
+of both. Sign-in loads every linked role (one to five, `session.roleForUser`) and merges them in
+`permissions.combineRoles` into one role, so everything downstream still sees a single role:
+
+- an operation any role allows is allowed; a module no role holds stays shut;
+- a field stays hidden only if **every** role that can read (or write) the module hides it — so a
+  role holding `job_cards` without the money denies would open the money to its holders. Every role
+  that grants `job_cards` must carry those denies;
+- sensitivity caps, Default Record Scope, Approval Limit and the Can… flags take the widest;
+  `scope: "own"` only if every role says so; `require_user_flag` / `audit_every_read` stay on if
+  any role sets them; MFA applies if any role needs it (`mfaRole` reads the merged role);
+- inactive roles are left out (all inactive is refused as before); **one role passes through
+  untouched**, so nothing changes until somebody is given a second.
+
+Admin → Users → Manage ticks the roles; `guardUserUpdate` refuses none or more than five
+(`bad_roles`). The same code is copied into every TAGEX app that signs in against IAM.
+**Rollout rule: nobody is given a second role until O&M, RMA, delivery, residential, work-schedule
+and expenses all have this** — an app without it refuses that person outright.
+
 ## Why things are vendored
 
 `vercel.json` sets `script-src 'self'`, so no CDN scripts. The OCR language data and pdf.js are
@@ -201,7 +222,7 @@ on a third party being up stops working for reasons nobody here can fix. Keep it
 ## Testing
 
 ```bash
-npm test                       # ten node suites; verify-part-c needs AIRTABLE_PAT
+npm test                       # the node suites; verify-part-c needs AIRTABLE_PAT
 node scripts/ui-harness.js     # then http://localhost:4321/test/<name>.html
 ```
 

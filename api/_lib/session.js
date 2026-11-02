@@ -148,11 +148,17 @@ async function loadRole(recordId) {
   return role;
 }
 
-/** Resolve a user record's linked Access Level. Exactly one is required. */
+// More than this is a data-entry mistake, not a job description.
+const MAX_ROLES = 5;
+
+/**
+ * Resolve a user record's linked Access Levels into one role (P.combineRoles). At least one is
+ * required; several are merged so the user may do what any of them allows (Raymond, 2 Nov 2026).
+ */
 async function roleForUser(userFields) {
   const links = userFields['Access Level'];
-  if (!Array.isArray(links) || links.length !== 1) return null;
-  return loadRole(links[0]);
+  if (!Array.isArray(links) || !links.length || links.length > MAX_ROLES) return null;
+  return P.combineRoles(await Promise.all(links.map(loadRole)));
 }
 
 // ── session lifecycle ──────────────────────────────────────────────────────
@@ -254,7 +260,7 @@ async function markSessionTouchedRestricted(sid) {
  *
  * Steps 1 and 2 of the Part C1 enforcement chain:
  *   1. valid JWT (signature, algorithm, expiry) + live, unrevoked session + idle timeout
- *   2. user exists, Status === 'Active', exactly one role
+ *   2. user exists, Status === 'Active', at least one active role (several are merged)
  *
  * @returns {{ok:true, ...ctx} | {ok:false, status:number, reason:string, detail:string}}
  */
@@ -344,7 +350,8 @@ function invalidateUser(email) {
 function invalidateRole(roleRecordId) {
   roleCache.delete(roleRecordId);
   for (const [sid, entry] of sessionCache.entries()) {
-    if (entry && entry.value && entry.value.role && entry.value.role.id === roleRecordId) sessionCache.delete(sid);
+    const role = entry && entry.value && entry.value.role;
+    if (role && (role.id === roleRecordId || (role.ids || []).includes(roleRecordId))) sessionCache.delete(sid);
   }
 }
 

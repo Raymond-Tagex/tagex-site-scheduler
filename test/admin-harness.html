@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin panel — browser harness</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<!--
+  Drives the REAL mod-admin.js against stubbed TX.list / TX.update: a user can be given several
+  access levels, and the save sends every one ticked.
+
+      node scripts/ui-harness.js   then   http://localhost:4321/test/admin-harness.html
+
+  The page title ends in PASS or FAIL.
+-->
+<pre id="out" style="padding:12px;font:12px/1.7 ui-monospace,monospace;white-space:pre-wrap;background:#f4f6f9;margin:0;"></pre>
+<button id="btnLogout" type="button" hidden>Log out</button>
+<script src="/js/core.js"></script>
+<script src="/js/mod-admin.js"></script>
+<script src="/test/admin-harness.js"></script>
+</body>
+</html>

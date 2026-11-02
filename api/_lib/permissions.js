@@ -180,6 +180,86 @@ function effectivePermissions(rolePermissionsRaw, userOverridesRaw) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// SEVERAL ROLES (Raymond, 2 Nov 2026)
+//
+// A user may hold more than one Access Level: an Operations Manager who also verifies expense
+// slips holds "Operations Manager" and an expense role, rather than a copy of one with the other
+// pasted in. The roles are merged into one, so everything downstream still sees a single role.
+//
+// The merge grants what ANY of the roles grants, and never more: an operation is allowed when a
+// role holding that module allows it; a field stays hidden only when every role that can read
+// (or write) the module hides it; a cap or scope takes the widest that one of the roles has.
+// Nothing here can grant a module that none of the roles holds. One role passes through untouched.
+// Shared with the other TAGEX apps (same code in each); keep them the same.
+// ─────────────────────────────────────────────────────────────
+
+const SCOPE_ORDER = Object.freeze(['Own Records Only', 'Assigned Only', 'All Records']);
+const ROLE_FLAGS = Object.freeze(['Can Manage Users', 'Can Edit Permissions', 'Can Delete Records', 'Can Export Data',
+  'Can View Restricted Documents']);
+
+const intersect = (lists) => (lists.length ? lists.reduce((a, b) => a.filter((x) => b.includes(x))) : []);
+
+/** The Permissions of several roles as one object (see above). Unparseable roles contribute nothing. */
+function mergeRolePermissions(rawList) {
+  const roles = rawList.map((raw) => parseJsonField(raw, null)).filter(Boolean);
+  const out = {};
+  const modules = new Set(roles.flatMap((r) => Object.keys(r)));
+  for (const moduleKey of modules) {
+    const holders = roles.map((r) => r[moduleKey]).filter((x) => x && typeof x === 'object');
+    if (!holders.length) continue;
+    const merged = {};
+    for (const op of OPS) merged[op] = holders.some((h) => h[op] === true);
+    // A field a role may read is readable; a field a role may write is writable. Only the roles
+    // that can read (or write) at all decide; one that cannot has nothing to say about fields.
+    const readers = holders.filter((h) => h.view === true);
+    const writers = holders.filter((h) => h.create === true || h.edit === true);
+    const denies = (list, key) => intersect((list.length ? list : holders).map((h) => (h.fields && h.fields[key]) || []));
+    const fields = { deny_read: denies(readers, 'deny_read'), deny_write: denies(writers, 'deny_write') };
+    // allow_write narrows writing to a list; a writer with no such list writes freely.
+    const writeLists = (writers.length ? writers : holders).map((h) => h.fields && h.fields.allow_write);
+    if (writeLists.every(Array.isArray)) fields.allow_write = [...new Set(writeLists.flat())];
+    merged.fields = fields;
+    // An absent cap means nothing passes, so the widest declared cap is the most any role allows.
+    for (const key of ['sensitivity_max', 'export_sensitivity_max']) {
+      const caps = holders.map((h) => h[key]).filter(Boolean);
+      if (caps.length) merged[key] = caps.reduce((a, b) => (T.sensitivityRank(b) > T.sensitivityRank(a) ? b : a));
+    }
+    // "own" only when every role holding the module is limited to its own records.
+    if (holders.every((h) => h.scope === 'own')) merged.scope = 'own';
+    // The restricted-personal double gate and its read audit stay on if any role asks for them.
+    if (holders.some((h) => h.require_user_flag === true)) merged.require_user_flag = true;
+    if (holders.some((h) => h.audit_every_read === true)) merged.audit_every_read = true;
+    const lv = holders.find((h) => 'list_view' in h);
+    if (lv) merged.list_view = lv.list_view;
+    out[moduleKey] = merged;
+  }
+  return out;
+}
+
+/**
+ * A user's Access Levels as one role. Inactive roles are left out; when every one is inactive the
+ * result says so (Active false) and sign-in refuses it as before. Returns null for no roles.
+ * `ids` lists the roles merged, so a change to any of them invalidates the session.
+ */
+function combineRoles(roles) {
+  const list = (roles || []).filter(Boolean);
+  if (!list.length) return null;
+  if (list.length === 1) return { ...list[0], ids: [list[0].id] };
+  const live = list.filter((r) => r.Active !== false);
+  if (!live.length) return { ...list[0], ids: list.map((r) => r.id), Active: false };
+  if (live.length === 1) return { ...live[0], ids: [live[0].id] };
+  const out = { ...live[0], ids: live.map((r) => r.id), Active: true,
+    'Role Name': live.map((r) => r['Role Name']).filter(Boolean).join(' + ') };
+  for (const f of ROLE_FLAGS) out[f] = live.some((r) => r[f] === true);
+  out['Approval Limit (R)'] = Math.max(0, ...live.map((r) => Number(r['Approval Limit (R)']) || 0));
+  const scopes = live.map((r) => r['Default Record Scope']).filter((s) => SCOPE_ORDER.includes(s));
+  if (scopes.length) out['Default Record Scope'] = scopes.reduce((a, b) => (SCOPE_ORDER.indexOf(b) > SCOPE_ORDER.indexOf(a) ? b : a));
+  else delete out['Default Record Scope'];
+  out.Permissions = JSON.stringify(mergeRolePermissions(live.map((r) => r.Permissions)));
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
 // LAYER 1 — MODULE + OPERATION
 // ─────────────────────────────────────────────────────────────
 
@@ -556,6 +636,8 @@ module.exports = {
   fieldContains,
   parseJsonField,
   effectivePermissions,
+  mergeRolePermissions,
+  combineRoles,
   COUPLED_DENIES,
   can,
   canViewRestricted,
