@@ -69,6 +69,10 @@ async function guardUserUpdate({ actorEmail, targetRecordId, fields }) {
   const touchingRole = Object.prototype.hasOwnProperty.call(fields, 'Access Level');
   const touchingStatus = Object.prototype.hasOwnProperty.call(fields, 'Status');
   if (!touchingRole && !touchingStatus) return { ok: true };
+  // A user holds one to five Access Levels; sign-in merges them (session.roleForUser).
+  if (touchingRole && (!Array.isArray(fields['Access Level']) || !fields['Access Level'].length || fields['Access Level'].length > 5)) {
+    return { ok: false, status: 400, reason: 'bad_roles', detail: 'Give the user one to five access levels.' };
+  }
 
   const target = await at.get(IAM(), USERS(), targetRecordId).catch(() => null);
   if (!target) return { ok: true }; // a missing record fails later, on its own terms

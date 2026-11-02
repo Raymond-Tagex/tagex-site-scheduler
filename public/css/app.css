@@ -276,6 +276,9 @@ body.gated { overflow: hidden; }
   font-size: 12.5px; color: var(--text-2); line-height: 1.6; cursor: pointer;
 }
 .admin-check input { margin-top: 3px; accent-color: var(--amber); flex-shrink: 0; }
+/* Several access levels per user: one tick box each. */
+.admin-roles { display: grid; gap: 2px; }
+.admin-roles .admin-check { margin: 0; }
 
 .admin-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
 

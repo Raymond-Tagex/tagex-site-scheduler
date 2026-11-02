@@ -74,8 +74,9 @@ const esc = (s) => String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/"/
     const roleName = (r) => {
       const l = r.fields['Access Level'];
       if (!Array.isArray(l) || !l.length) return '—';
-      const m = levels.find((x) => x.id === l[0]);
-      return m ? m.fields['Role Name'] : '—';
+      // Several Access Levels are merged at sign-in; show them all.
+      const names = l.map((id) => levels.find((x) => x.id === id)).filter(Boolean).map((m) => m.fields['Role Name']);
+      return names.length ? names.join(' + ') : '—';
     };
 
     console.log(`\n\x1b[1m  ${rows.length} user(s)\x1b[0m\n`);

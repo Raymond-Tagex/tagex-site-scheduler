@@ -141,11 +141,12 @@
     ROLES = r.records || [];
   }
 
+  // A user may hold several Access Levels; sign-in merges them (permissions.combineRoles).
   const roleNameFor = (rec) => {
     const links = rec.fields['Access Level'];
     if (!Array.isArray(links) || !links.length) return '—';
-    const role = ROLES.find((x) => x.id === links[0]);
-    return role ? role.fields['Role Name'] : '—';
+    const names = links.map((id) => ROLES.find((x) => x.id === id)).filter(Boolean).map((r) => r.fields['Role Name']);
+    return names.length ? names.join(' + ') : '—';
   };
 
   async function renderUsers() {
@@ -244,8 +245,10 @@
       + '<div id="uMsg"></div>'
 
       + '<div class="admin-grid">'
-      + field('Access level', selectHtml('dRole', ROLES.filter((r) => r.fields.Active !== false)
-          .map((r) => r.fields['Role Name']), roleNameFor(u)))
+      + field('Access levels (tick one or more)', '<div id="dRoles" class="admin-roles">' + ROLES.filter((r) => r.fields.Active !== false
+          || (f['Access Level'] || []).includes(r.id)).map((r) => '<label class="admin-check"><input type="checkbox" value="' + esc(r.id) + '"'
+          + ((f['Access Level'] || []).includes(r.id) ? ' checked' : '') + '> ' + esc(r.fields['Role Name'])
+          + (r.fields.Active === false ? ' (inactive)' : '') + '</label>').join('') + '</div>')
       + field('Status', selectHtml('dStatus', ['Invited', 'Active', 'Suspended', 'Disabled'], f.Status))
       + field('Record scope', selectHtml('dScope', ['All Records', 'Assigned Only', 'Own Records Only'], f['Record Scope']))
       + field('Approval limit (R)', '<input id="dLimit" type="number" step="0.01" value="' + esc(f['Approval Limit (R)'] || 0) + '">')
@@ -338,8 +341,8 @@
   }
 
   async function saveUser(u) {
-    const roleName = $('#dRole').value;
-    const role = ROLES.find((r) => r.fields['Role Name'] === roleName);
+    const roleIds = [...document.querySelectorAll('#dRoles input:checked')].map((i) => i.value);
+    if (!roleIds.length) return msg('err', 'Tick at least one access level.');
     const fields = {
       Status: $('#dStatus').value,
       'Record Scope': $('#dScope').value,
@@ -348,7 +351,7 @@
       'Assigned Clients': JSON.stringify(toList($('#dClients').value)),
       'Assigned Sites': JSON.stringify(toList($('#dSites').value)),
     };
-    if (role) fields['Access Level'] = [role.id];
+    fields['Access Level'] = roleIds;
 
     try {
       await TX.update('IAM', 'users', u.id, fields);

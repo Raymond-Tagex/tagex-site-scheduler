@@ -43,6 +43,17 @@ A role without `site_visits` is refused by the server whatever the page decides 
 The client-side check in `public/js/boot.js` exists only so the refusal is explained rather
 than silent.
 
+**Several roles per user.** A user may hold more than one access level: tick each one under
+Admin → Users → Manage. At sign-in they are merged into one. The user may do anything one of
+the roles allows, a field stays hidden only if every role that can see that module hides it, and
+admin rights, record scope and sensitivity take the widest of the roles. An inactive role is
+ignored. One to five roles per user. The merge is in `api/_lib/permissions.js` (`combineRoles`)
+and is shared with the other TAGEX apps.
+
+**Rollout:** every app that signs in against these users must have the merge before anyone is
+given a second role; an app without it refuses that person. The apps are O&M (this one), RMA,
+delivery, residential, work-schedule and expenses.
+
 ## Layout
 
 ```
