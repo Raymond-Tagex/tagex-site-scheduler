@@ -62,6 +62,7 @@
       'site_information', 'site_equipment', 'expenses', 'expense_approval', 'project_costing',
       'stock_items', 'site_visits', 'activity_log',
       'costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
+    { app: 'Work schedule', keys: ['work_schedule'] },
   ];
   const THIS_APP = 'O&M scheduler';
   /** This app's modules first, then each other app's that are not already shown, under its name. */
