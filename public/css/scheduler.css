@@ -320,6 +320,9 @@
   }
   .mod-scheduler .om-chanopt:hover{border-color:var(--accent-ink);color:var(--text);}
   .mod-scheduler .om-chanopt.sel{background:rgba(240,165,0,.12);border-color:var(--accent-ink);color:var(--accent-ink);}
+  /* The new-client panel under a client picker, opened by its "+ New client" row. */
+  .mod-scheduler .om-newcli{border-left:2px solid var(--accent);padding:4px 0 8px 10px;margin:4px 0 10px;}
+  .mod-scheduler .om-newcli[hidden]{display:none;}
   .mod-scheduler .om-jcprev{display:none;background:var(--card);border:1px solid var(--line2);border-radius:8px;padding:9px 11px;margin-top:-4px;font-family:monospace;font-size:10px;color:var(--muted);line-height:1.8;}
   .mod-scheduler .om-ibox{background:rgba(240,165,0,.1);border:1px solid rgba(240,165,0,.2);border-radius:8px;padding:8px 12px;font-family:monospace;font-size:9px;color:var(--accent-ink);margin-bottom:10px;line-height:1.6;}
   .mod-scheduler .om-ok{background:rgba(62,207,142,.1);border:1px solid rgba(62,207,142,.25);border-radius:8px;padding:8px 12px;font-family:monospace;font-size:9px;color:var(--ok);margin-bottom:10px;}

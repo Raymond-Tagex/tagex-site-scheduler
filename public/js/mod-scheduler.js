@@ -1602,6 +1602,9 @@ async function omLoadClients(){
     if(r&&Array.isArray(r.clients)) return r.clients.map(c=>({
       id:(c.mirrors||[])[0]||'', regId:c.id||'', mirrors:c.mirrors||[], status:c.status||'Active',
       contracts:c.contracts||[], contractDetails:c.contractDetails||[], unregistered:!!c.unregistered,
+      // For the search (3 Nov 2026): Palladium code(s), billing address, phones, and the SUB / SOL
+      // number, name and address of each site the role may see.
+      palladium:c.palladium||'', address:c.address||'', phone:c.phone||'', mobile:c.mobile||'', siteInfo:c.siteInfo||[],
       fields:{[OM_F.CL_NAME]:c.name||'',[OM_F.CL_CONT]:c.contact||'',[OM_F.CL_EMAIL]:c.email||'',[OM_F.CL_SITE]:c.sites||''},
     }));
   }catch(e){ console.warn('Client register unavailable; reading this base\u2019s Clients instead.',e); }
@@ -1619,8 +1622,43 @@ function omPickableClis(){
   return omCliData.filter(c=>c.status!=='Inactive'&&(c.id||mayCopy))
     .sort((a,b)=>omCliName(a).localeCompare(omCliName(b)));
 }
-/** Name, then contract numbers, so typing "SUB-148" in a picker finds the client. */
+/** Name, then contract numbers: the one-line form, for places that are not a picker. */
 const omCliLabel=(c)=>omCliName(c)+(c.contracts&&c.contracts.length?' \u00b7 '+c.contracts.slice(0,4).join(', ')+(c.contracts.length>4?'\u2026':''):'');
+
+/**
+ * Every number a client is known by: its contracts, its Palladium code(s), its sites' SUB / SOL
+ * numbers, and any written into its name ("SOL120 - Elmar"). Palladium writes a subscription as
+ * TESUB-0001 where the contract says SUB-0001; both forms are kept, so either finds it.
+ */
+function omCliNums(c){
+  const out=[].concat(c.contracts||[],String(c.palladium||'').split(/,\s*/),(c.siteInfo||[]).map(s=>s.number));
+  for(const m of omCliName(c).matchAll(/\b(?:TE)?(?:SUB|SOL)[\s\-_]*\d+/gi)) out.push(m[0]);
+  const all=out.map(s=>String(s||'').trim()).filter(Boolean);
+  return [...new Set(all.concat(all.filter(s=>/^TESUB/i.test(s)).map(s=>s.slice(2))))];
+}
+
+/**
+ * One picker option. The label is the name alone -- it is what the box shows once chosen. The
+ * numbers, sites, addresses and contact details are hidden search terms (data-search, data-num),
+ * so a client is found by any of them (Raymond, 3 Nov 2026); data-sub is the second line that
+ * tells two clients of one name apart. Escaped: all of it is typed or imported data.
+ */
+function omCliOption(c){
+  const f=c.fields, nums=omCliNums(c);
+  const places=[f[OM_F.CL_SITE],c.address].concat((c.siteInfo||[]).flatMap(s=>[s.name,s.address])).filter(Boolean);
+  const search=nums.concat(places,[f[OM_F.CL_CONT],f[OM_F.CL_EMAIL],c.phone,c.mobile]).filter(Boolean).join(' ');
+  const shown=nums.filter(n=>!/^SUB/i.test(n)||!nums.some(m=>/^TESUB/i.test(m)&&m.slice(2)===n));
+  const where=String(places[0]||'').split('\n')[0].trim();
+  const sub=[shown.slice(0,3).join(', ')+(shown.length>3?'\u2026':''),where].filter(Boolean).join(' \u00b7 ');
+  return '<option value="'+esc(omCliVal(c))+'" data-num="'+esc(nums.join(' '))+'" data-search="'+esc(search)+'"'
+    +(sub?' data-sub="'+esc(sub)+'"':'')+'>'+esc(omCliName(c))+'</option>';
+}
+
+/** "+ New client" under a picker, for a role that may add clients; the server checks again. */
+function omOfferNewCli(sel){
+  if(TX.can('clients','create')) sel.setAttribute('data-create','client');
+  else sel.removeAttribute('data-create');
+}
 
 /** This base's record for a picker value, making the copy first when there is none. */
 async function omResolveCli(v){
@@ -3955,8 +3993,8 @@ function omPopTktCliDropdown(){
   if(!sel)return;
   const was=sel.value;
   const clients=omPickableClis();
-  sel.innerHTML='<option value="">\u2014 Select client \u2014</option>'
-    +clients.map(c=>'<option value="'+esc(omCliVal(c))+'">'+esc(omCliLabel(c))+'</option>').join('');
+  sel.innerHTML='<option value="">\u2014 Select client \u2014</option>'+clients.map(omCliOption).join('');
+  omOfferNewCli(sel);
   if(was&&clients.some(c=>omCliVal(c)===was)) sel.value=was;
   if(TX.pick) TX.pick.refresh(sel);
 }
@@ -4339,19 +4377,71 @@ function omRenderNewJC(){
   document.getElementById('njc-prog').value='0';
   document.getElementById('njc-title').value='';
   // client list (existing + new)
-  const sel=document.getElementById('njc-cli');
-  const clients=omPickableClis();
-  sel.innerHTML='<option value="">— Select client —</option>'+clients.map(c=>'<option value="'+esc(omCliVal(c))+'">'+esc(omCliLabel(c))+'</option>').join('')
-    +(TX.can('clients','create')?'<option value="__new__">➕ New client…</option>':'');
-  if(TX.pick) TX.pick.refresh(sel);
-  document.getElementById('njc-newcli').style.display='none';
-  ['njc-clinew-name','njc-clinew-cont','njc-clinew-email','njc-clinew-site'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});
+  omPopNjcClients('');
+  omCancelNewCli('njc');
   document.getElementById('njc-msg').innerHTML='';
+}
+/** The New Job Card client list, keeping `keep` chosen if it is still offered. */
+function omPopNjcClients(keep){
+  const sel=document.getElementById('njc-cli'); if(!sel) return;
+  const clients=omPickableClis();
+  sel.innerHTML='<option value="">— Select client —</option>'+clients.map(omCliOption).join('');
+  omOfferNewCli(sel);
+  if(keep&&clients.some(c=>omCliVal(c)===keep)) sel.value=keep;
+  if(TX.pick) TX.pick.refresh(sel);
 }
 function omCliPick(){
   const v=document.getElementById('njc-cli').value;
-  document.getElementById('njc-newcli').style.display=v==='__new__'?'block':'none';
-  omFillContractSel('njc-contract',v&&v!=='__new__'?omCliByVal(v):null,'');
+  omFillContractSel('njc-contract',v?omCliByVal(v):null,'');
+}
+
+// ── A new client, from the "+ New client" row under a client picker ──
+//
+// It goes into the register at once (/api/client-register create), not when the ticket or job card
+// is saved: the client exists whatever happens to the form, and is chosen in the picker like any
+// other. A name already in the register is not made twice -- that client is chosen instead.
+const OM_NC_SEL={om:'om-clisel',njc:'njc-cli'};
+function omPickCreate(e){
+  const p=Object.keys(OM_NC_SEL).find(k=>OM_NC_SEL[k]===(e.target&&e.target.id)); if(!p) return;
+  const box=document.getElementById(p+'-nc'); if(!box) return;
+  ['name','cont','mob','email','site'].forEach(k=>{const el=document.getElementById(p+'-nc-'+k); if(el) el.value='';});
+  // What was typed becomes the name -- unless it was a number, which was a search, not a name.
+  const t=String((e.detail&&e.detail.text)||'').trim();
+  if(t&&!/^(?:te)?(?:sub|sol)?[\s\-_]*\d/i.test(t)) document.getElementById(p+'-nc-name').value=t;
+  document.getElementById(p+'-nc-msg').innerHTML='';
+  box.hidden=false;
+  document.getElementById(p+'-nc-name').focus();
+}
+function omCancelNewCli(p){ const b=document.getElementById(p+'-nc'); if(b) b.hidden=true; }
+async function omSaveNewCli(p){
+  const v=(k)=>{const el=document.getElementById(p+'-nc-'+k); return el?el.value.trim():'';};
+  const msg=document.getElementById(p+'-nc-msg'), name=v('name');
+  if(!name){ msg.innerHTML='<div class="om-err">\u26a0 The client needs a name</div>'; return; }
+  msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving to the client register\u2026</div>';
+  let pick='';
+  try{
+    const r=await TX.request('/api/client-register',{op:'create',base:SCHED_BASE,name,
+      contact:v('cont'),mobile:v('mob'),email:v('email'),sites:v('site')});
+    const c={id:r.mirrorId,regId:r.clientId,mirrors:[r.mirrorId],status:'Active',contracts:[],contractDetails:[],
+      palladium:'',address:'',phone:'',mobile:v('mob'),siteInfo:[],
+      fields:{[OM_F.CL_NAME]:name,[OM_F.CL_CONT]:v('cont'),[OM_F.CL_EMAIL]:v('email'),[OM_F.CL_SITE]:v('site')}};
+    omCliData.push(c); pick=omCliVal(c);
+  }catch(e){
+    const twin=e&&e.reason==='client_exists'?omCliData.find(x=>x.regId===(e.payload&&e.payload.clientId)):null;
+    if(!twin){
+      msg.innerHTML='<div class="om-err">\u2715 '+esc(e&&e.reason==='client_exists'
+        ?((e.payload&&e.payload.name)||name)+' is already in the client register. Reload to see them.'
+        :(TX.errorText?TX.errorText(e):e.message))+'</div>';
+      return;
+    }
+    pick=omCliVal(twin);
+    toast(omCliName(twin)+' is already in the client register, so they were chosen','ok');
+  }
+  msg.innerHTML='';
+  omCancelNewCli(p);
+  omPopTktCliDropdown(); omPopNjcClients(document.getElementById('njc-cli')?document.getElementById('njc-cli').value:'');
+  const sel=document.getElementById(OM_NC_SEL[p]);
+  if(sel&&[...sel.options].some(o=>o.value===pick)){ sel.value=pick; sel.dispatchEvent(new Event('change',{bubbles:true})); }
 }
 async function omSubmitNewJC(){
   const msg=document.getElementById('njc-msg'), btn=document.getElementById('njc-subtxt');
@@ -4368,30 +4458,9 @@ async function omSubmitNewJC(){
   btn.innerHTML='<span class="om-sp"></span> Creating…';
   try{
     // 1. create client on the fly if needed
-    let clientId=cliVal;
-    if(cliVal==='__new__'){
-      const cn=document.getElementById('njc-clinew-name').value.trim();
-      if(!cn){ msg.innerHTML='<div class="om-err">⚠ New client name is required</div>'; btn.textContent='➕ Create Job Card in Airtable'; return; }
-      // A new client goes into the register first and gets its copy here; the server does
-      // both. A name already in the register is refused with that client named, so it is
-      // chosen rather than made twice.
-      const body={op:'create',base:SCHED_BASE,name:cn,
-        contact:document.getElementById('njc-clinew-cont').value.trim(),
-        email:document.getElementById('njc-clinew-email').value.trim(),
-        sites:document.getElementById('njc-clinew-site').value.trim()};
-      try{
-        clientId=(await TX.request('/api/client-register',body)).mirrorId;
-      }catch(e){
-        if(e&&e.reason==='client_exists'){
-          msg.innerHTML='<div class="om-err">\u26a0 '+esc((e.payload&&e.payload.name)||cn)
-            +' is already in the client register. Choose them from the client list.</div>';
-          btn.textContent='➕ Create Job Card in Airtable'; return;
-        }
-        throw e;
-      }
-    }else{
-      clientId=await omResolveCli(cliVal);
-    }
+    // A new client is saved from the picker's "+ New client" row before this point, so the
+    // client is always one already in the list.
+    const clientId=await omResolveCli(cliVal);
     // 2. assemble job card fields (write by field ID; selects as option-name strings)
     const f={[OM_F.JC_REF]:ref,[OM_F.JC_TITLE]:title,[OM_F.JC_CLI]:[clientId]};
     const ty=document.getElementById('njc-type').value; if(ty)f[OM_F.JC_TYPE]=ty;
@@ -4501,6 +4570,8 @@ async function omSubmitNewJC(){
     add('omTktSaveCost', typeof omTktSaveCost === 'function' ? omTktSaveCost : null);
     add('omFilterJCs', typeof omFilterJCs === 'function' ? omFilterJCs : null);
     add('omCliPick', typeof omCliPick === 'function' ? omCliPick : null);
+    add('omSaveNewCli', typeof omSaveNewCli === 'function' ? omSaveNewCli : null);
+    add('omCancelNewCli', typeof omCancelNewCli === 'function' ? omCancelNewCli : null);
     add('omJCPick', typeof omJCPick === 'function' ? omJCPick : null);
     add('omRefBuild', typeof omRefBuild === 'function' ? omRefBuild : null);
     add('omSetOwner', typeof omSetOwner === 'function' ? omSetOwner : null);
@@ -4570,6 +4641,8 @@ async function omSubmitNewJC(){
     ['click', 'change', 'input'].forEach((evtName) => {
       root.addEventListener(evtName, (e) => dispatch(evtName, e, reg));
     });
+    // A client picker's "+ New client" row (pick.js). Not a data-act: the picker raises it.
+    root.addEventListener('tx-pick-create', (e) => omPickCreate(e));
   }
 
   // ══════════════════════════════════════════════════════════════════════════

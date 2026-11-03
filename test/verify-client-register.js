@@ -22,6 +22,7 @@ const T = require(api('_lib/tables.js'));
 const REG = T.CLIENT_REGISTER.clients;
 const CON = T.CLIENT_REGISTER.contracts;
 const CLI_TBL = T.resolve('OM', 'clients').tableId;
+const SITE_TBL = T.resolve('OM', 'site_information').tableId;
 
 // ── the stubbed world ──────────────────────────────────────────────────────
 let DB, SEQ, WRITES, AUDIT, FAIL_LIST, LISTS;
@@ -31,7 +32,8 @@ function reset() {
     [T.BASES.CLI]: {
       [REG]: [
         { id: 'recREGGROOTVLEI01', fields: { 'Client Name': 'Grootvlei', Status: 'Active', 'Contact Person': 'Oubaas',
-          Email: 'oubaas@grootvlei.co.za', 'Mobile Number': '082 555 1234', 'OM Client Record': 'recOMGROOTVLEI001, recOMGROOTVLEI002', 'Use In': ['OM'] } },
+          Email: 'oubaas@grootvlei.co.za', 'Mobile Number': '082 555 1234', 'Palladium Code': 'SOL0042, SOL-ABSA- GROOT',
+          'Postal / Billing Address': 'PO Box 7\nDelmas', Phone: '013 665 1234', 'OM Client Record': 'recOMGROOTVLEI001, recOMGROOTVLEI002', 'Use In': ['OM'] } },
         { id: 'recREGBISSET00001', fields: { 'Client Name': 'Sean Bisset', Status: 'Active', Sites: '12 Main Rd, Benoni' } },
         { id: 'recREGDELMAS00001', fields: { 'Client Name': 'Delmas Dairy', Status: 'Active', 'CI Client Record': 'recCIDELMAS000001', 'Use In': ['CI'] } },
       ],
@@ -49,6 +51,12 @@ function reset() {
         { id: 'recOMGROOTVLEI002', fields: { 'Client Name': 'Grootvlei Farm', 'Master Client ID': 'recREGGROOTVLEI01' } },
         { id: 'recOMWALKIN000001', fields: { 'Client Name': 'Walk-in Client', 'Contact Person': 'Thabo' } },   // not adopted yet
       ],
+      // One site linked through a copy of Grootvlei, one naming Sean Bisset only by text, one nobody's.
+      [SITE_TBL]: [
+        { id: 'recSITE0000000001', fields: { 'Site Name': 'Grootvlei Hatchery', 'SUB / SOL Number': 'SOL120', 'Property Address': 'Plot 5, Loskop', Client: ['recOMGROOTVLEI002'] } },
+        { id: 'recSITE0000000002', fields: { 'Site Name': 'Bisset House', 'SUB / SOL Number': 'SUB-0148', 'Client Name': 'Sean Bisset' } },
+        { id: 'recSITE0000000003', fields: { 'Site Name': 'Orphan Site', 'SUB / SOL Number': 'SOL999', 'Client Name': 'Nobody We Know' } },
+      ],
     },
     [T.BASES.RES]: { [CLI_TBL]: [] },
     [T.BASES.CI]: { [CLI_TBL]: [{ id: 'recCIDELMAS000001', fields: { 'Client Name': 'Delmas Dairy', 'Master Client ID': 'recREGDELMAS00001' } }] },
@@ -57,6 +65,7 @@ function reset() {
 const rows = (b, tb) => ((DB[b] || {})[tb] || (DB[b][tb] = []));
 const NAMES = {
   [CLI_TBL]: ['Client Name', 'Contact Person', 'Mobile Number', 'Email', 'Sites', 'Master Client ID'],
+  [SITE_TBL]: ['Site Name', 'SUB / SOL Number', 'Property Address', 'Client', 'Client Name'],
   [REG]: ['Client Name', 'Status', 'Contact Person', 'Mobile Number', 'Email', 'Sites', 'Use In', 'Source', 'Segment',
     'CI Client Record', 'OM Client Record', 'RES Client Record'],
 };
@@ -109,6 +118,10 @@ const handler = require(api('client-register.js'));
 const who = (clients, user) => ({ ok: true, email: 'ops@tagexenergy.co.za', userRecordId: 'recUSER0000000000',
   sid: 'sid-' + Math.random(), role: {}, user: { Email: 'ops@tagexenergy.co.za', ...(user || {}) },
   perms: P.effectivePermissions(JSON.stringify({ clients }), null) });
+const ALLOPS = { view: true, create: true, edit: true, delete: false, export: true };
+// who() takes the clients rule alone; this one also holds site_information, which the search reads.
+const withSites = (siteRule) => { const w = who(ALLOPS);
+  w.perms = P.effectivePermissions(JSON.stringify({ clients: ALLOPS, site_information: siteRule }), null); return w; };
 const OPS = who({ view: true, create: true, edit: true, delete: false, export: true });
 const TECH = who({ view: true, create: false, edit: false, delete: false, export: false });
 const STORES = who({ view: true, create: false, edit: false, delete: false, export: false,
@@ -173,6 +186,33 @@ const byName = (r, nm) => (r.body.clients || []).find((c) => c.name === nm);
   r = await call(NONE, { op: 'list', base: 'OM' });
   t('a role without clients:view is refused', r.code, 403);
   t('and the refusal is audited', AUDIT.some((a) => a.result === 'Denied'), true);
+
+  console.log('\n\x1b[1mSEARCH TERMS\x1b[0m');
+  reset();
+  r = await call(OPS, { op: 'list', base: 'OM' });
+  t('the Palladium code, billing address and phone come with a client',
+    [byName(r, 'Grootvlei').palladium, byName(r, 'Grootvlei').address, byName(r, 'Grootvlei').phone],
+    ['SOL0042, SOL-ABSA- GROOT', 'PO Box 7\nDelmas', '013 665 1234']);
+  t('a role that may not view sites gets no site terms, and no site is read',
+    [byName(r, 'Grootvlei').siteInfo, LISTS.some((l) => l.tableId === SITE_TBL)], [[], false]);
+  reset();
+  r = await call(withSites({ view: true }), { op: 'list', base: 'OM' });
+  t('a site linked through a copy here names its client', byName(r, 'Grootvlei').siteInfo,
+    [{ number: 'SOL120', name: 'Grootvlei Hatchery', address: 'Plot 5, Loskop' }]);
+  t('a site naming its client only in text still finds it', byName(r, 'Sean Bisset').siteInfo,
+    [{ number: 'SUB-0148', name: 'Bisset House', address: '' }]);
+  t('a site of nobody in the register is hung on no one',
+    r.body.clients.some((c) => (c.siteInfo || []).some((x) => x.number === 'SOL999')), false);
+  reset();
+  r = await call(withSites({ view: true, fields: { deny_read: ['SUB / SOL Number'] } }), { op: 'list', base: 'OM' });
+  t('a site field the role may not read is not searchable either', byName(r, 'Grootvlei').siteInfo[0].number, '');
+  reset();
+  r = await call(OPS, { op: 'create', base: 'OM', name: 'Brand New Client', phone: '011 555 0000', address: 'PO Box 1' });
+  const nr = WRITES.find((w) => w.op === 'create' && w.baseId === T.BASES.CLI);
+  t('a new client can be given a phone and a billing address',
+    [r.code, nr && nr.fields.Phone, nr && nr.fields['Postal / Billing Address']], [200, '011 555 0000', 'PO Box 1']);
+  t('which stay in the register, not the copy here',
+    'Phone' in (WRITES.find((w) => w.op === 'create' && w.baseId === T.BASES.OM) || { fields: {} }).fields, false);
 
   console.log('\n\x1b[1mENSURE: THIS BASE’S COPY\x1b[0m');
   reset();

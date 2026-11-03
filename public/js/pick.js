@@ -29,8 +29,31 @@
   /** Down to letters and digits: the spacing and punctuation of a name never hide it. */
   const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '');
 
-  /** The typed query as independent words, each normalised. */
-  const terms = (q) => String(q == null ? '' : q).split(/\s+/).map(norm).filter(Boolean);
+  // A contract or customer number is typed every way: SOL120, sol 120, SUB-0148, SUB-148,
+  // TESUB-0001. Leading zeros after the prefix are dropped on BOTH sides, so SUB-0148 and SUB-148
+  // find each other; "SOL 120" is two words, and both must match, so it still finds SOL120.
+  const canon = (s) => s.replace(/(sub|sol)0+(?=\d)/g, '$1');
+
+  /** The typed query as independent words, each normalised. A bare number loses its leading zeros. */
+  const terms = (q) => String(q == null ? '' : q).split(/\s+/).map(norm).filter(Boolean)
+    .map((t) => (/^\d+$/.test(t) ? t.replace(/^0+(?=\d)/, '') : canon(t)));
+
+  /**
+   * How well an option answers the query, lowest first. The list keeps its own order within a
+   * rank, so with nothing typed nothing moves. A number the option carries beats its name; its
+   * name beginning with the query beats a word in it; any of those beat a match found only in
+   * the hidden terms (a site, an address) -- which is why typing "sol" puts SOL-numbered clients
+   * above "Cedar Solution" and "Sasolburg".
+   */
+  function rank(o, ts, typed) {
+    const q = canon(norm(typed));
+    if (q && /\d/.test(q) && o.nums.some((n) => n.indexOf(q) === 0)) return 0;
+    if (q && o.label.indexOf(q) === 0) return 1;
+    if (ts.every((t) => o.words.some((w) => w.indexOf(t) === 0))) return 2;
+    if (hit(o.label, ts)) return 3;
+    if (ts.some((t) => o.nums.some((n) => n.indexOf(t) === 0))) return 3;
+    return 4;
+  }
 
   /** Every word must appear somewhere, which makes the order the user types irrelevant. */
   function hit(hay, ts) {
@@ -87,6 +110,12 @@
   color:#8b919c;background:#16181c;position:sticky;top:0;
 }
 .tx-pick-none{padding:14px 12px;font-size:12px;color:#8b919c;}
+.tx-pick-sub{display:block;font-size:10.5px;color:#8b919c;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tx-pick-new{
+  display:block;width:100%;text-align:left;padding:9px 12px;font:inherit;font-size:12.5px;font-weight:600;
+  color:#f0a500;background:#1d1f24;border:0;border-top:1px solid #2a2e38;cursor:pointer;
+}
+.tx-pick-new:hover,.tx-pick-new.is-on{background:#2a2412;}
 .tx-pick-foot{
   padding:6px 12px;font-size:10px;color:#6a7079;border-top:1px solid #2a2e38;background:#16181c;
 }
@@ -184,7 +213,16 @@
     scroll.setAttribute('role', 'listbox');
     const foot = document.createElement('div');
     foot.className = 'tx-pick-foot';
+    // "+ New client" under the list, when the select asks for it with data-create="client". Read
+    // from the attribute each time the list opens, so a page can switch it on or off by role.
+    // Choosing it does not change the select: it fires 'tx-pick-create' on the select with what
+    // was typed, and the page decides what making one means.
+    const make = document.createElement('button');
+    make.type = 'button';
+    make.className = 'tx-pick-new';
+    make.hidden = true;
     pop.appendChild(scroll);
+    pop.appendChild(make);
     pop.appendChild(foot);
     document.body.appendChild(pop);
 
@@ -203,13 +241,21 @@
         const p = o.parentNode;
         const group = (p && p.tagName === 'OPTGROUP') ? (p.label || '') : '';
         const text = (o.textContent || '').trim();
+        const ds = o.dataset || {};
         out.push({
           value: o.value,
           text,
           group,
           disabled: o.disabled,
-          // The group is searchable too, so typing "om" narrows to the O&M side.
-          hay: norm(group + ' ' + text),
+          // The group is searchable too, so typing "om" narrows to the O&M side. So is anything the
+          // page put in data-search -- a client's site, address or contract numbers -- without it
+          // having to be printed in the label.
+          hay: canon(norm(group + ' ' + text + ' ' + (ds.search || ''))),
+          label: canon(norm(text)),
+          words: String(text).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(canon),
+          // data-num: the option's numbers, space-separated, ranked first when the query is one.
+          nums: String(ds.num || '').split(/\s+/).map((n) => canon(norm(n))).filter(Boolean),
+          sub: ds.sub || '',
         });
       }
       return out;
@@ -249,6 +295,18 @@
       const ts = terms(typed);
       const all = read();
       shown = ts.length ? all.filter((o) => hit(o.hay, ts)) : all;
+      if (ts.length) {
+        // Best answers first; the select's own order breaks ties (sort is stable).
+        const r = new Map(shown.map((o) => [o, rank(o, ts, typed)]));
+        shown = shown.slice().sort((a, b) => r.get(a) - r.get(b));
+      }
+
+      const what = sel.getAttribute('data-create');
+      make.hidden = !what;
+      if (what) {
+        const said = typed.trim();
+        make.textContent = '+ New ' + what + (said ? ' “' + said + '”' : '');
+      }
 
       scroll.innerHTML = '';
       if (!shown.length) {
@@ -282,6 +340,15 @@
         row.dataset.i = String(i);
         row.textContent = o.text;
         row.title = o.text;
+        if (o.sub) {
+          // A second line -- contract numbers, a site -- so two clients of one name can be told
+          // apart. textContent, never markup: the line is built from typed and imported data.
+          const sub = document.createElement('span');
+          sub.className = 'tx-pick-sub';
+          sub.textContent = o.sub;
+          row.appendChild(sub);
+          row.title = o.text + '\n' + o.sub;
+        }
         scroll.appendChild(row);
       });
 
@@ -379,6 +446,16 @@
       close();
     }
 
+    /** The "+ New …" row: hand what was typed to the page, which makes the record. */
+    function makeNew() {
+      if (make.hidden) return;
+      const cur = chosen();
+      const said = input.value.trim();
+      const text = (cur && said === cur.text) ? '' : said;     // the chosen label is not a query
+      close();
+      sel.dispatchEvent(new CustomEvent('tx-pick-create', { bubbles: true, detail: { text } }));
+    }
+
     /** Commit one option: the select is set first, then told about it, exactly as before. */
     function choose(o) {
       if (!o || o.disabled) return;
@@ -410,7 +487,9 @@
         if (!open) { show(); return; }
         move(k === 'ArrowDown' ? 1 : -1);
       } else if (k === 'Enter') {
-        if (open) { e.preventDefault(); choose(shown[active]); }
+        // Nothing to choose but a "+ New" row on offer: Enter makes one, as a click would.
+        if (open && !shown.some((o) => o.value && !o.disabled) && !make.hidden) { e.preventDefault(); makeNew(); }
+        else if (open) { e.preventDefault(); choose(shown[active]); }
       } else if (k === 'Escape') {
         if (open) { e.preventDefault(); e.stopPropagation(); close(); }
       } else if (k === 'Tab') {
@@ -427,6 +506,7 @@
     // underneath the finger before the tap lands.
     pop.addEventListener('mousedown', (e) => { e.preventDefault(); });
     pop.addEventListener('click', (e) => {
+      if (e.target === make) { makeNew(); return; }
       const row = e.target.closest('.tx-pick-opt');
       if (!row) return;
       choose(shown[+row.dataset.i]);

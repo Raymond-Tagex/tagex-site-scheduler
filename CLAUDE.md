@@ -120,6 +120,18 @@ register: **Clients** and **Contracts** (SUB/C&I numbers from the SxE cost log; 
   `clients:create` — so roles without it are offered only clients that already have a copy. A new
   client is made in the register first (`create`); a name already there is refused with that
   client named. If the register cannot be read, the lists fall back to the base's own Clients.
+- **Palladium customers are in the register** (Raymond, 3 Nov 2026): `scripts/load-palladium-customers.js
+  <export.xlsx>` added **Palladium Code**, **Postal / Billing Address** and **Phone**, filled the
+  44 clients it matched (blanks only, names untouched) and made 287 new ones. A customer name under
+  several codes (ABSA under eight site codes) is one client carrying them all. Re-runs match on
+  Palladium Code. There is no Clients table in the Palladium Stock base: "the Palladium master" is
+  this register.
+- **The client pickers search** name, every number a client is known by (contracts, Palladium
+  codes, sites' SUB / SOL numbers, numbers in the name) and its sites, addresses and contact details
+  (`omCliOption`; `pick.js` `data-search` / `data-num` / `data-sub`). SUB-0148 finds SUB-148; a
+  number match ranks above a name, a name above a hidden term. Site terms come only from sites the
+  role may view. **"+ New client"** under the list (`data-create`, for `clients:create`) saves to the
+  register at once and chooses the client; a name already there chooses that one instead.
 - **Not yet:** the other apps (delivery, residential, RMA, C&I scheduler) and Site Information's
   client matching, which still read their own base's Clients.
 - The cost log holds personal information. It is read from the .xlsx and never committed.

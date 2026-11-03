@@ -386,7 +386,20 @@
         </div>
         <div class="om-fcard">
           <div class="om-fttl">Client and Job Card</div>
-          <div class="om-fld"><label>Client *</label><select id="om-clisel" data-search="clients" data-on="change" data-act="omTktCliPick" data-a1="@el"><option value="">— Select —</option></select></div>
+          <div class="om-fld"><label>Client *</label><select id="om-clisel" data-search="clients" data-on="change" data-act="omTktCliPick" data-a1="@el"><option value="">— Select —</option></select>
+            <div class="om-hint">Search by name, SOL / SUB number, site or address.</div></div>
+          <div id="om-nc" class="om-newcli" hidden>
+            <div class="om-fld"><label>New client name *</label><input type="text" id="om-nc-name" placeholder="Company / client name"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div class="om-fld"><label>Contact person</label><input type="text" id="om-nc-cont"></div>
+              <div class="om-fld"><label>Mobile</label><input type="tel" id="om-nc-mob"></div>
+            </div>
+            <div class="om-fld"><label>Email</label><input type="email" id="om-nc-email"></div>
+            <div class="om-fld"><label>Site / Address</label><textarea id="om-nc-site" rows="2" placeholder="Where the system is installed"></textarea></div>
+            <div id="om-nc-msg"></div>
+            <button class="btn sm" data-act="omSaveNewCli" data-a1="om">Save client</button>
+            <button class="btn ghost sm" data-act="omCancelNewCli" data-a1="om">Cancel</button>
+          </div>
           <div class="om-fld"><label>Job Card</label><select id="om-jcsel" data-search="job cards" data-on="change" data-act="omJCPick" data-a1="@el"><option value="">— Select —</option></select>
             <div class="om-hint">Optional. If a site visit is needed, attach or create one from the ticket later.</div></div>
           <div id="om-jcprev" class="om-jcprev"></div>
@@ -449,16 +462,21 @@
         </div>
         <div class="om-fcard">
           <div class="om-fttl">Client</div>
-          <div class="om-fld"><label>Client *</label><select id="njc-cli" data-search="clients" data-on="change" data-act="omCliPick"></select></div>
+          <div class="om-fld"><label>Client *</label><select id="njc-cli" data-search="clients" data-on="change" data-act="omCliPick"></select>
+            <div class="om-hint">Search by name, SOL / SUB number, site or address.</div></div>
           <div class="om-fld"><label>Contract</label><select id="njc-contract"><option value="">— Choose a client first —</option></select>
             <div class="om-hint">From the client register: decides the funder and the warranty shown on the job card.</div></div>
-          <div id="njc-newcli" style="display:none;border-left:2px solid var(--accent);padding-left:10px;margin-top:6px;">
-            <div class="om-fld"><label>New client name *</label><input type="text" id="njc-clinew-name" placeholder="Company / client name"></div>
+          <div id="njc-nc" class="om-newcli" hidden>
+            <div class="om-fld"><label>New client name *</label><input type="text" id="njc-nc-name" placeholder="Company / client name"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div class="om-fld"><label>Contact person</label><input type="text" id="njc-clinew-cont"></div>
-              <div class="om-fld"><label>Email</label><input type="email" id="njc-clinew-email"></div>
+              <div class="om-fld"><label>Contact person</label><input type="text" id="njc-nc-cont"></div>
+              <div class="om-fld"><label>Mobile</label><input type="tel" id="njc-nc-mob"></div>
             </div>
-            <div class="om-fld"><label>Site / Address</label><textarea id="njc-clinew-site" rows="2" placeholder="Physical site / address"></textarea></div>
+            <div class="om-fld"><label>Email</label><input type="email" id="njc-nc-email"></div>
+            <div class="om-fld"><label>Site / Address</label><textarea id="njc-nc-site" rows="2" placeholder="Where the system is installed"></textarea></div>
+            <div id="njc-nc-msg"></div>
+            <button class="btn sm" data-act="omSaveNewCli" data-a1="njc">Save client</button>
+            <button class="btn ghost sm" data-act="omCancelNewCli" data-a1="njc">Cancel</button>
           </div>
         </div>
         <div id="njc-msg"></div>
