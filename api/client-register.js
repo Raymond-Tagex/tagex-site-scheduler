@@ -30,7 +30,8 @@ const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 
 const DETAILS = ['Contact Person', 'Mobile Number', 'Email', 'Sites'];
-const LIMITS = { 'Client Name': 200, 'Contact Person': 200, 'Mobile Number': 40, 'Email': 200, 'Sites': 2000 };
+const LIMITS = { 'Client Name': 200, 'Contact Person': 200, 'Mobile Number': 40, 'Email': 200, 'Sites': 2000,
+  'Phone': 40, 'Postal / Billing Address': 1000 };
 const REC_RE = /^rec[A-Za-z0-9]{14}$/;
 const REFUSED = Object.freeze({ refused: true });
 
@@ -106,10 +107,22 @@ module.exports = async function handler(req, res) {
 
     // The copies of each client in this base, as the role may see them: the proxy's own filter.
     const filter = P.buildReadFilter({ moduleKey: 'clients', baseSymbol: base, rule, scope, user: auth.user, clientFilter: null });
-    const [rows, register, contractRows] = await Promise.all([
+    // Site Information, for the pickers' search: a site's SUB / SOL number, name and address find
+    // its client (Raymond, 3 Nov 2026). Read only for a role that may view sites, through that
+    // module's own scope filter and field denies -- the search must not reveal a site the role
+    // could not open. Read alongside the rest, not after it: see the timing note above.
+    const siteView = op === 'list' ? P.can(auth.perms, 'site_information', 'view') : { ok: false };
+    const site = siteView.ok ? T.resolve(base, 'site_information') : { ok: false };
+    const siteRule = site.ok ? T.expandFieldRules(siteView.rule, 'site_information', base) : null;
+    const siteFilter = site.ok ? P.buildReadFilter({ moduleKey: 'site_information', baseSymbol: base, rule: siteRule,
+      scope: P.effectiveScope(auth.role, auth.user, siteRule), user: auth.user, clientFilter: null }) : null;
+    const [rows, register, contractRows, siteRows, siteNames] = await Promise.all([
       listAll(mirror.baseId, mirror.tableId, filter ? { filterByFormula: filter } : {}),
       listAll(reg.baseId, reg.tableId),
       op === 'list' ? listAll(con.baseId, con.tableId) : null,
+      // A site read that fails costs the search its site terms, never the client list.
+      site.ok ? listAll(site.baseId, site.tableId, siteFilter ? { filterByFormula: siteFilter } : {}).catch(() => []) : [],
+      site.ok ? at.fieldMaps(site.baseId, site.tableId).then((m) => m.idToName).catch(() => ({})) : {},
     ]);
     const byMaster = new Map();
     for (const r of rows) {
@@ -143,6 +156,20 @@ module.exports = async function handler(req, res) {
           details.set(id, (details.get(id) || []).concat(d));
         }
       }
+      // Each visible site, keyed to its register client: through its Client link to a copy here,
+      // or failing that by the Client Name it carries.
+      const regOfMirror = new Map();
+      for (const [mid, ids] of byMaster) for (const id of ids) regOfMirror.set(id, mid);
+      const regOfName = new Map(register.map((m) => [key(m.fields['Client Name']), m.id]));
+      const sitesOf = new Map();
+      for (const s of siteRows) {
+        const f = P.filterReadFields(siteRule, s.fields, siteNames);
+        const owner = [].concat(f.Client || []).map((id) => regOfMirror.get(id)).find(Boolean)
+          || regOfName.get(key(f['Client Name']));
+        if (!owner) continue;
+        const entry = { number: str(f['SUB / SOL Number']), name: str(f['Site Name']), address: str(f['Property Address']) };
+        if (entry.number || entry.name || entry.address) sitesOf.set(owner, (sitesOf.get(owner) || []).concat(entry));
+      }
       const out = [];
       for (const m of register) {
         const mirrors = byMaster.get(m.id) || [];
@@ -152,6 +179,9 @@ module.exports = async function handler(req, res) {
         out.push({
           id: m.id, name: str(f['Client Name']), status: str(f.Status) || 'Active',
           contact: str(f['Contact Person']), mobile: str(f['Mobile Number']), email: str(f.Email), sites: str(f.Sites),
+          // From Palladium (3 Nov 2026): the customer code(s), billing address and phone.
+          palladium: str(f['Palladium Code']), address: str(f['Postal / Billing Address']), phone: str(f.Phone),
+          siteInfo: sitesOf.get(m.id) || [],
           contracts: (numbers.get(m.id) || []).filter(Boolean).sort(), mirrors,
           contractDetails: (details.get(m.id) || []).filter((d) => d.number)
             .sort((a, b) => a.number.localeCompare(b.number)),
@@ -199,6 +229,8 @@ module.exports = async function handler(req, res) {
       if (str(body.mobile)) fields['Mobile Number'] = str(body.mobile);
       if (str(body.email)) fields.Email = str(body.email);
       if (str(body.sites)) fields.Sites = str(body.sites);
+      if (str(body.phone)) fields.Phone = str(body.phone);
+      if (str(body.address)) fields['Postal / Billing Address'] = str(body.address);
       for (const [k, v] of Object.entries(fields)) {
         if (v.length > LIMITS[k]) return H.fail(res, 400, 'bad_request', k + ' is too long.');
       }

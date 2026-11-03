@@ -126,11 +126,14 @@ const CLIENTS = [
 const REGISTER = [
   // Two contracts, so a Grootvlei ticket or job card has to be told which one it is for.
   { id:'recREGGROOTVLEI01', name:'Grootvlei', contact:'Oubaas', email:'', sites:'', mobile:'', status:'Active',
+    palladium:'SOL0042', address:'PO Box 7, Delmas', phone:'013 665 1234',
+    siteInfo:[{ number:'SOL120', name:'Grootvlei Hatchery', address:'Plot 5, Loskop' }],
     contracts:['SUB-200','SUB-201'], mirrors:['recCLI1'], contractDetails:[
       { number:'SUB-200', funder:'Alpine', firstInvoice:'2025-03-25', system:'5KW SYSTEM', kind:'Subscription' },
       { number:'SUB-201', funder:'PPA', firstInvoice:'2025-09-25', system:'x3 7.5kW Hybrid G4', kind:'Subscription' }] },
-  { id:'recREGDELMAS00001', name:'Delmas Dairy', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:[], mirrors:['recCLI2'] },
-  { id:'recREGBISSET00001', name:'Sean Bisset', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-148'], mirrors:[] },
+  { id:'recREGDELMAS00001', name:'Delmas Dairy', contact:'', email:'', sites:'Sasolburg depot', mobile:'', status:'Active', contracts:[], mirrors:['recCLI2'] },
+  { id:'recREGBISSET00001', name:'Sean Bisset', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-148'], mirrors:[],
+    palladium:'TESUB-0007' },
   // Never chosen in this suite, so the Clients view still has one with no copy here to show.
   { id:'recREGTHANDI00001', name:'Thandi Mokoena', contact:'', email:'', sites:'', mobile:'', status:'Active', contracts:['SUB-120'], mirrors:[] },
 ];
@@ -328,7 +331,13 @@ function stubTX() {
       if (window.REG_FAIL) throw new Error(window.REG_FAIL);
       if (body.op === 'list') return { ok: true, clients: JSON.parse(JSON.stringify(REGISTER)) };
       if (body.op === 'ensure') return { ok: true, mirrorId: 'recCLI9', created: true };
-      if (body.op === 'create') return { ok: true, clientId: 'recREGNEW00000001', mirrorId: 'recCLI10' };
+      if (body.op === 'create') {
+        if (/^grootvlei$/i.test(String(body.name).trim())) {
+          throw Object.assign(new Error('A client of that name is already in the register.'),
+            { status: 409, reason: 'client_exists', payload: { clientId: 'recREGGROOTVLEI01', name: 'Grootvlei' } });
+        }
+        return { ok: true, clientId: 'recREGNEW00000001', mirrorId: 'recCLI10' };
+      }
     }
     window.FORMS.push({ url, body: JSON.parse(JSON.stringify(body)) });
     if (window.FAIL_FORM) throw new Error(window.FAIL_FORM);
@@ -653,8 +662,33 @@ async function suite(log) {
   t('and holds the register’s clients, by their copy here where there is one',
     [...$('om-clisel').options].map((o) => o.value).filter(Boolean), ['recCLI2', 'recCLI1', 'reg:recREGBISSET00001', 'reg:recREGTHANDI00001']);
   t('read from the register, for this base', window.REG_CALLS.some((c) => c.op === 'list' && ['OM', 'RES'].includes(c.base)), true);
-  t('a client’s contract numbers are searchable in the picker',
-    [...$('om-clisel').options].find((o) => o.value === 'reg:recREGBISSET00001').textContent, 'Sean Bisset · SUB-148');
+  t('a client’s label is the name alone', [...$('om-clisel').options].find((o) => o.value === 'reg:recREGBISSET00001').textContent, 'Sean Bisset');
+  t('with its numbers on a second line, TESUB and its SUB twin shown once',
+    [...$('om-clisel').options].find((o) => o.value === 'reg:recREGBISSET00001').dataset.sub, 'SUB-148, TESUB-0007');
+
+  log('\nSEARCHING FOR A CLIENT');
+  // Typed into the picker as a person would; the rows read back off the open list.
+  const pk = () => $('om-clisel').__txPick;
+  const popOf = () => document.getElementById(pk().input.getAttribute('aria-controls'));
+  const findCli = async (q) => {
+    pk().input.focus(); pk().input.value = q;
+    pk().input.dispatchEvent(new Event('input', { bubbles:true })); await tick();
+    return [...popOf().querySelectorAll('.tx-pick-opt')].map((r) => r.firstChild.textContent);
+  };
+  const closePick = async () => { pk().input.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true })); await tick(); };
+  t('by contract number, however padded: SUB-0148 finds SUB-148', await findCli('SUB-0148'), ['Sean Bisset']);
+  t('by the Palladium code, as Palladium writes it', await findCli('TESUB-0007'), ['Sean Bisset']);
+  t('and as the contract would: SUB-7', (await findCli('SUB-7')).includes('Sean Bisset'), true);
+  t('by a site’s SOL number, typed with a space', await findCli('sol 120'), ['Grootvlei']);
+  t('by the Palladium code with its zeros left off', await findCli('SOL42'), ['Grootvlei']);
+  t('by a site’s address', await findCli('Loskop'), ['Grootvlei']);
+  t('by the billing address', await findCli('PO Box 7'), ['Grootvlei']);
+  t('by the phone number', await findCli('665 1234'), ['Grootvlei']);
+  t('a numbered client ranks above a loose hit in someone’s site', await findCli('sol'), ['Grootvlei', 'Delmas Dairy']);
+  t('by name, as before', await findCli('bisset'), ['Sean Bisset']);
+  t('the second line is shown under the name',
+    (await findCli('bisset')).length === 1 && popOf().querySelector('.tx-pick-sub').textContent, 'SUB-148, TESUB-0007');
+  await closePick();
   window.SENT = [];
   window.FORMS = [];
   window.FORM_FILED = { ok: false, reason: 'no_job_card', detail: 'It has no job card to be filed against.' };
@@ -730,6 +764,39 @@ async function suite(log) {
   await open('log');
   t('Activity Log opens its own view', view('log').classList.contains('active'), true);
   t('and draws the log there', document.getElementById('om-log').textContent.trim().length > 0, true);
+
+  log('\nA NEW CLIENT FROM THE PICKER');
+  document.getElementById('ombn-new').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick();
+  const newRow = () => popOf().querySelector('.tx-pick-new');
+  await findCli('Zola Mkhize');
+  t('nothing matches, and "+ New client" is offered with what was typed',
+    [popOf().querySelectorAll('.tx-pick-opt').length, !newRow().hidden, newRow().textContent], [0, true, '+ New client “Zola Mkhize”']);
+  newRow().dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick();
+  t('it opens the new-client panel, the name filled in', [$('om-nc').hidden, $('om-nc-name').value], [false, 'Zola Mkhize']);
+  $('om-nc-mob').value = '082 000 1111';
+  window.REG_CALLS = [];
+  document.querySelector('[data-act="omSaveNewCli"][data-a1="om"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(8);
+  const made = window.REG_CALLS.find((c) => c.op === 'create');
+  t('the client is made in the register, straight away', made && [made.name, made.mobile, made.base], ['Zola Mkhize', '082 000 1111', FORM_BASE]);
+  t('and chosen in the picker', [$('om-clisel').value, pk().input.value], ['recCLI10', 'Zola Mkhize']);
+  t('the panel closes', $('om-nc').hidden, true);
+  t('and the New Job Card list has them too', [...$('njc-cli').options].some((o) => o.value === 'recCLI10'), true);
+
+  await findCli('SOL555');
+  newRow().dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await tick();
+  t('a number typed is a search, not a name: the name is left empty', $('om-nc-name').value, '');
+  $('om-nc-name').value = ' grootvlei ';
+  window.REG_CALLS = [];
+  document.querySelector('[data-act="omSaveNewCli"][data-a1="om"]').dispatchEvent(new MouseEvent('click', { bubbles:true }));
+  await settle(8);
+  t('a name already in the register chooses that client rather than making a second',
+    [$('om-clisel').value, $('om-nc').hidden], ['recCLI1', true]);
+  $('om-clisel').value = ''; $('om-clisel').dispatchEvent(new Event('change', { bubbles:true }));
+  await tick();
 
   log('\nTHE TICKETS LIST');
   document.getElementById('ombn-tickets').dispatchEvent(new MouseEvent('click', { bubbles:true }));
@@ -2526,9 +2593,37 @@ const MUTANTS = [
    "    const ask=()=>TX.request('/api/client-register',{op:'list',base:SCHED_BASE});",
    "    const ask=()=>Promise.resolve(null);"],
 
-  ['contract numbers are left out of the picker',
-   "const omCliLabel=(c)=>omCliName(c)+(c.contracts&&c.contracts.length?",
-   "const omCliLabel=(c)=>omCliName(c)+(false&&c.contracts&&c.contracts.length?"],
+  ['contract numbers are left out of the picker’s search',
+   "  const search=nums.concat(places,[f[OM_F.CL_CONT],f[OM_F.CL_EMAIL],c.phone,c.mobile]).filter(Boolean).join(' ');",
+   "  const search=[].concat(places,[f[OM_F.CL_CONT],f[OM_F.CL_EMAIL],c.phone,c.mobile]).filter(Boolean).join(' ');"],
+
+  ['sites and addresses are left out of the picker’s search',
+   "  const places=[f[OM_F.CL_SITE],c.address].concat((c.siteInfo||[]).flatMap(s=>[s.name,s.address])).filter(Boolean);",
+   "  const places=[];"],
+
+  ['a site’s SOL number is not one of the client’s numbers',
+   "  const out=[].concat(c.contracts||[],String(c.palladium||'').split(/,\\s*/),(c.siteInfo||[]).map(s=>s.number));",
+   "  const out=[].concat(c.contracts||[],String(c.palladium||'').split(/,\\s*/));"],
+
+  ['the second line is dropped',
+   "    +(sub?' data-sub=\"'+esc(sub)+'\"':'')+'>'+esc(omCliName(c))+'</option>';",
+   "    +'>'+esc(omCliName(c))+'</option>';"],
+
+  ['"+ New client" is never offered',
+   "  if(TX.can('clients','create')) sel.setAttribute('data-create','client');",
+   "  if(false) sel.setAttribute('data-create','client');"],
+
+  ['a typed number becomes the new client’s name',
+   "  if(t&&!/^(?:te)?(?:sub|sol)?[\\s\\-_]*\\d/i.test(t)) document.getElementById(p+'-nc-name').value=t;",
+   "  if(t) document.getElementById(p+'-nc-name').value=t;"],
+
+  ['a name already in the register is not chosen',
+   "    const twin=e&&e.reason==='client_exists'?omCliData.find(x=>x.regId===(e.payload&&e.payload.clientId)):null;",
+   "    const twin=null;"],
+
+  ['the new client is not chosen once made',
+   "  if(sel&&[...sel.options].some(o=>o.value===pick)){ sel.value=pick; sel.dispatchEvent(new Event('change',{bubbles:true})); }",
+   "  // MUTANT: not chosen"],
 
   ['picking a job card leaves the client as it was',
    '    if(cs&&cli&&cs.value!==cli&&', '    if(false&&'],
