@@ -2478,6 +2478,7 @@ function omBuildTicket(rec,acts,spares){
       <div class="om-acts">
         ${closed?'':`<button class="btn sm" data-act="omBookVisit" data-a1="${esc(rec.id)}">\ud83d\udcc5 ${visits.length?'Schedule another visit':'Schedule site visit'}</button>`}
         ${TX.can('tickets','export')?`<button class="btn ghost sm" data-act="omTktForm" data-a1="${esc(rec.id)}">\ud83d\udcc4 Print ticket form</button>`:''}
+        ${TX.can('tickets','export')?`<button class="btn ghost sm" data-act="omCoverSheet" data-a1="tkt" data-a2="${esc(rec.id)}">\ud83d\uddc2 Cover sheet</button>`:''}
         ${TX.can('tickets','export')?`<button class="btn ghost sm" data-act="omTktReport" data-a1="${esc(rec.id)}">\ud83d\udcc4 Download report</button>`:''}
         ${jc&&TX.can('activity_log','edit')?`<button class="btn ghost sm" data-act="omTktPullHistory" data-a1="${esc(rec.id)}">\u2199 Pull job card history</button>`:''}
       </div>
@@ -2857,6 +2858,29 @@ async function omAutoForm(kind,id,opts){
 }
 
 /** Print a ticket's form again, as it stands now. Nothing is filed. */
+/**
+ * The O&M cover sheet ("Operations Maintenance & Service Assessment Form", Raymond 5 Nov 2026) for
+ * a ticket or a job card, built on the server from the record as it stands now
+ * (api/_lib/coversheet.js) and downloaded. Never filed: it summarises the record, so a filed copy
+ * would be stale as soon as the job moved on. The same export right as the other printed forms.
+ */
+async function omCoverSheet(kind,id){
+  const btn=document.querySelector('[data-act="omCoverSheet"][data-a2="'+id+'"]');
+  const was=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Building\u2026'; }
+  try{
+    const r=kind==='jc'
+      ?await TX.request('/api/jobcard-form',{ jobCardId:id, base:SCHED_BASE, cover:true })
+      :await TX.request('/api/ticket-report',{ ticketId:id, base:SCHED_BASE, cover:true });
+    omDownloadPdf(r,'cover-sheet.pdf');
+    toast('Cover sheet downloaded','ok');
+  }catch(e){
+    toast('The cover sheet could not be built: '+TX.errorText(e),'bad');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent=was; }
+  }
+}
+
 async function omTktForm(id){
   const btn=document.querySelector('[data-act="omTktForm"]');
   const was=btn?btn.textContent:'';
@@ -3898,6 +3922,7 @@ function omBuildDetail(rec,actLog){
       <button class="om-act cl"  data-act="omUpdStat" data-a1="${id}" data-a2="Closed">🔒 Close</button>
       <button class="om-act bad" data-act="omLogNote" data-a1="${id}" data-a2="Escalating — urgent attention required" data-a3="Issue Raised">↑ Escalate</button>
       ${TX.can('job_cards','export')?`<button class="om-act" data-act="omJcForm" data-a1="${id}">\ud83d\udcc4 Print job card</button>`:''}
+      ${TX.can('job_cards','export')?`<button class="om-act" data-act="omCoverSheet" data-a1="jc" data-a2="${id}">\ud83d\uddc2 Cover sheet</button>`:''}
     </div>
     <div class="om-df"><label>Client name</label><div style="font-size:13px;">${cli}</div></div>
     <div class="om-df"><label>Project manager</label><div style="font-size:13px;">${resp}</div></div>
@@ -4552,6 +4577,7 @@ async function omSubmitNewJC(){
     add('omBookVisit', typeof omBookVisit === 'function' ? omBookVisit : null);
     add('omTktReport', typeof omTktReport === 'function' ? omTktReport : null);
     add('omTktForm', typeof omTktForm === 'function' ? omTktForm : null);
+    add('omCoverSheet', typeof omCoverSheet === 'function' ? omCoverSheet : null);
     add('omTktPrintList', typeof omTktPrintList === 'function' ? ()=>omTktPrintList('pdf') : null);
     add('omTktExcelList', omTktExcelList);
     add('omJcForm', typeof omJcForm === 'function' ? omJcForm : null);

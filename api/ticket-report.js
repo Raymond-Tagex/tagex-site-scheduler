@@ -31,6 +31,7 @@ const P = require('./_lib/permissions.js');
 const R = require('./_lib/ticketreport.js');
 const TF = require('./_lib/ticketform.js');
 const FF = require('./_lib/formfile.js');
+const CS = require('./_lib/coversheet.js');
 
 const MAX_LIST_IDS = 5000;
 const MAX_VISITS = 200;
@@ -206,6 +207,7 @@ module.exports = async function handler(req, res) {
       generatedAt: new Date().toISOString(),
     };
 
+    if (body.cover === true) return coverSheet(auth, ctx, base, ticket, jcId, jobcard, payload, res);
     if (body.form === true) return ticketForm(auth, ctx, base, body, ticketId, jcId, payload, res);
 
     const pdf = await R.ticketReportPdf(payload);
@@ -235,6 +237,23 @@ module.exports = async function handler(req, res) {
  * A refusal to file does not withhold the form: building it is the export right the caller
  * has already been checked for; keeping a copy is documents:create, checked in fileForm.
  */
+/**
+ * The O&M cover sheet (api/_lib/coversheet.js) for a ticket. Its job card, when it has one, gives
+ * the recommended action, the job card number and the "in file" checklist. Printed on demand and
+ * never filed, like a reprint: it summarises the record as it stands now.
+ */
+async function coverSheet(auth, ctx, base, ticket, jcId, jobcard, payload, res) {
+  const clientIds = ids(ticket.fields.Client).length ? ids(ticket.fields.Client) : ids(jobcard.Client);
+  const facts = await CS.gather({ auth, base, read: (m, sub) => readAll(auth, base, m, sub), clientIds,
+    contractNo: R.str(ticket.fields['Contract Number']) || R.str(jobcard['Contract Number']), jobcardId: jcId || '' });
+  const bytes = await CS.coverSheetPdf({ ticket: ticket.fields, jobcard, visits: payload.visits,
+    spares: payload.spares, facts, generatedBy: auth.email });
+  const ref = R.str(ticket.fields['Ticket Ref']) || ticket.id;
+  await A.auditNow({ ...ctx, action: 'Export', result: 'Allowed', recordId: ticket.id, newValue: 'cover sheet printed for ' + ref });
+  return H.ok(res, { filename: CS.coverFilename(ref), contentType: 'application/pdf',
+    content: Buffer.from(bytes).toString('base64') });
+}
+
 async function ticketForm(auth, ctx, base, body, ticketId, jcId, payload, res) {
   const ref = R.str(payload.ticket['Ticket Ref']) || ticketId;
   const bytes = await TF.ticketFormPdf(payload);

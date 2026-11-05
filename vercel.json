@@ -17,11 +17,11 @@
   "functions": {
     "api/ticket-report.js": {
       "maxDuration": 30,
-      "includeFiles": "api/_lib/assets/**"
+      "includeFiles": "{api/_lib/assets/**,public/js/contract-panel.js}"
     },
     "api/jobcard-form.js": {
       "maxDuration": 30,
-      "includeFiles": "api/_lib/assets/**"
+      "includeFiles": "{api/_lib/assets/**,public/js/contract-panel.js}"
     },
     "api/at.js": {
       "maxDuration": 30

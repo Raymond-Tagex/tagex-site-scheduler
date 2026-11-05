@@ -158,6 +158,14 @@ downloaded. Reprints from the Print buttons are never filed.
   card for this ticket") or by attaching one (`omTktLinkJc`). Until then the ticket's own Client
   link names the client, its form is downloaded but not filed (`no_job_card`), and it is filed on
   attach.
+- **The O&M cover sheet** (Raymond, 5 Nov 2026; *O AND M EXECUTIVE SUMMERY.docx*): "Cover sheet" on
+  the ticket and job card screens; `{ cover: true }` on `/api/ticket-report` and `/api/jobcard-form`,
+  drawn by `_lib/coversheet.js`. One A4 page in the template's order, filled from the record, the
+  client register, its contract (warranty dates by `contract-panel.js`, so `vercel.json` ships that
+  file with both functions) and the contract's Site Equipment. **Estimated cost stays blank**
+  (job card money). Warranty Yes / No is a person's call: the dates are printed, nothing ticked.
+  The "in file" boxes are ticked only when a link or document proves it. Printed on demand and
+  **never filed** -- it is a summary of the record as it stands. Every read checks the role first.
 - Both forms open with the TAGEX logo, laid out as the delivery note's head
   (`api/_lib/assets/tagex-logo.png`, copied from tagex-delivery). It is read from disk, so
   `vercel.json` ships it with `jobcard-form.js` and `ticket-report.js` via `includeFiles` — a
