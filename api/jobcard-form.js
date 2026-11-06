@@ -26,6 +26,7 @@ const T = require('./_lib/tables.js');
 const P = require('./_lib/permissions.js');
 const F = require('./_lib/jobcardform.js');
 const FF = require('./_lib/formfile.js');
+const CS = require('./_lib/coversheet.js');
 
 const MAX_VISITS = 60;
 
@@ -164,6 +165,19 @@ module.exports = async function handler(req, res) {
       bomCount: ids(f['BOM Sheets']).length,
       generatedBy: auth.email,
     };
+    // { cover: true }: the O&M cover sheet (api/_lib/coversheet.js) instead of the job card form.
+    // Same right (export), printed on demand and never filed: it is a summary of the record as it
+    // stands, so a filed copy would be out of date the moment the job moved on.
+    if (body.cover === true) {
+      const facts = await CS.gather({ auth, base, read: (m, sub) => readAll(auth, base, m, sub),
+        clientIds: ids(f.Client), contractNo: String(f['Contract Number'] || '').trim(), jobcardId: jobCardId });
+      const cover = await CS.coverSheetPdf({ jobcard: f, visits, ticketRefs, facts, generatedBy: auth.email });
+      const ref = String(f['JC Reference'] || jobCardId);
+      await A.auditNow({ ...ctx, action: 'Export', result: 'Allowed', recordId: jobCardId, newValue: 'cover sheet printed for ' + ref });
+      return H.ok(res, { filename: CS.coverFilename(ref), contentType: 'application/pdf',
+        content: Buffer.from(cover).toString('base64') });
+    }
+
     const bytes = await F.jobCardFormPdf(payload);
     const filename = F.formFilename(f['JC Reference']);
 
