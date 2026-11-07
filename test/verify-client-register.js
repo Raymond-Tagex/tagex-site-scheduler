@@ -21,6 +21,7 @@ const t = (name, got, want) => {
 const T = require(api('_lib/tables.js'));
 const REG = T.CLIENT_REGISTER.clients;
 const CON = T.CLIENT_REGISTER.contracts;
+const PLANTS = T.CLIENT_REGISTER.plants;
 const CLI_TBL = T.resolve('OM', 'clients').tableId;
 const SITE_TBL = T.resolve('OM', 'site_information').tableId;
 
@@ -36,6 +37,13 @@ function reset() {
           'Postal / Billing Address': 'PO Box 7\nDelmas', Phone: '013 665 1234', 'OM Client Record': 'recOMGROOTVLEI001, recOMGROOTVLEI002', 'Use In': ['OM'] } },
         { id: 'recREGBISSET00001', fields: { 'Client Name': 'Sean Bisset', Status: 'Active', Sites: '12 Main Rd, Benoni' } },
         { id: 'recREGDELMAS00001', fields: { 'Client Name': 'Delmas Dairy', Status: 'Active', 'CI Client Record': 'recCIDELMAS000001', 'Use In': ['CI'] } },
+      ],
+      // Two SolaX plants for Grootvlei, one for nobody yet.
+      [PLANTS]: [
+        { id: 'recPLANT000000001', fields: { 'Plant Name': 'Grootvlei Main', Client: ['recREGGROOTVLEI01'], 'User Name': 'oubaas@grootvlei.co.za',
+          Location: 'Plot 5, Loskop', 'Plant Type': 'Residential', 'Status at Import': 'Plant Normal', Imported: '2026-11-06' } },
+        { id: 'recPLANT000000002', fields: { 'Plant Name': 'Grootvlei Pump', Client: ['recREGGROOTVLEI01'] } },
+        { id: 'recPLANT000000003', fields: { 'Plant Name': 'Hennie House' } },
       ],
       [CON]: [
         { id: 'recCON0000000001', fields: { 'Contract Number': 'SUB-148', Client: ['recREGBISSET00001'], Status: 'Active',
@@ -65,6 +73,7 @@ function reset() {
 const rows = (b, tb) => ((DB[b] || {})[tb] || (DB[b][tb] = []));
 const NAMES = {
   [CLI_TBL]: ['Client Name', 'Contact Person', 'Mobile Number', 'Email', 'Sites', 'Master Client ID'],
+  [PLANTS]: ['Plant Name', 'Client', 'User Name', 'Location'],
   [SITE_TBL]: ['Site Name', 'SUB / SOL Number', 'Property Address', 'Client', 'Client Name'],
   [REG]: ['Client Name', 'Status', 'Contact Person', 'Mobile Number', 'Email', 'Sites', 'Use In', 'Source', 'Segment',
     'CI Client Record', 'OM Client Record', 'RES Client Record'],
@@ -111,7 +120,15 @@ stub('_lib/session.js', {
   async authenticate() { return WHO; }, clientIp: () => '127.0.0.1', userAgent: () => 'verify',
   mustEnrolMfa: () => false,
 });
-stub('_lib/audit.js', { audit: (e) => AUDIT.push(e), auditNow: async (e) => { AUDIT.push(e); } });
+stub('_lib/audit.js', { audit: (e) => AUDIT.push(e), auditNow: async (e) => { AUDIT.push(e); },
+  // As audit.js does it: one Allowed Update entry per field whose value changed.
+  auditFieldChanges: async ({ before, after, ...ctx }) => {
+    for (const k of new Set([...Object.keys(before || {}), ...Object.keys(after || {})])) {
+      if (JSON.stringify((before || {})[k]) !== JSON.stringify((after || {})[k])) {
+        AUDIT.push({ ...ctx, action: 'Update', result: 'Allowed', field: k, oldValue: (before || {})[k], newValue: (after || {})[k] });
+      }
+    }
+  } });
 const P = require(api('_lib/permissions.js'));
 const handler = require(api('client-register.js'));
 
@@ -213,6 +230,48 @@ const byName = (r, nm) => (r.body.clients || []).find((c) => c.name === nm);
     [r.code, nr && nr.fields.Phone, nr && nr.fields['Postal / Billing Address']], [200, '011 555 0000', 'PO Box 1']);
   t('which stay in the register, not the copy here',
     'Phone' in (WRITES.find((w) => w.op === 'create' && w.baseId === T.BASES.OM) || { fields: {} }).fields, false);
+
+  console.log('\n\x1b[1mSOLAX PLANTS\x1b[0m');
+  reset();
+  r = await call(OPS, { op: 'list', base: 'OM' });
+  t('a client’s SolaX plants come with it', byName(r, 'Grootvlei').plants.map((p) => p.name), ['Grootvlei Main', 'Grootvlei Pump']);
+  t('with the login, location and status at import', [byName(r, 'Grootvlei').plants[0].user, byName(r, 'Grootvlei').plants[0].location,
+    byName(r, 'Grootvlei').plants[0].status], ['oubaas@grootvlei.co.za', 'Plot 5, Loskop', 'Plant Normal']);
+  t('a plant linked to nobody is hung on no one', r.body.clients.some((c) => (c.plants || []).some((p) => p.name === 'Hennie House')), false);
+  reset();
+  r = await call(STORES, { op: 'list', base: 'OM' });
+  t('a role denied clients’ Email is denied the SolaX login, which is one', byName(r, 'Grootvlei').plants[0].user, '');
+
+  console.log('\n\x1b[1mUPDATE: CONTACT DETAILS\x1b[0m');
+  reset();
+  r = await call(OPS, { op: 'update', base: 'OM', clientId: 'recREGBISSET00001', contact: 'Sean Bisset', mobile: '082 999 0000', email: 'sean@bisset.co.za' });
+  t('a client’s contact details are saved', [r.code, r.body.client && r.body.client.email], [200, 'sean@bisset.co.za']);
+  const ru = WRITES.find((w) => w.op === 'update' && w.baseId === T.BASES.CLI);
+  t('to the register', ru && ru.fields, { 'Contact Person': 'Sean Bisset', 'Mobile Number': '082 999 0000', Email: 'sean@bisset.co.za' });
+  t('each changed field is audited with old and new', AUDIT.filter((a) => a.action === 'Update' && a.result === 'Allowed').map((a) => a.field).sort(),
+    ['Contact Person', 'Email', 'Mobile Number']);
+  t('a client with no copy here writes no copy', WRITES.filter((w) => w.baseId === T.BASES.OM).length, 0);
+  reset();
+  r = await call(OPS, { op: 'update', base: 'OM', clientId: 'recREGGROOTVLEI01', email: 'new@grootvlei.co.za' });
+  t('and every copy of it here is kept in step', WRITES.filter((w) => w.op === 'update' && w.baseId === T.BASES.OM).map((w) => [w.recordId, w.fields]),
+    [['recOMGROOTVLEI001', { Email: 'new@grootvlei.co.za' }], ['recOMGROOTVLEI002', { Email: 'new@grootvlei.co.za' }]]);
+  reset();
+  r = await call(OPS, { op: 'update', base: 'OM', clientId: 'recREGGROOTVLEI01', mobile: '' });
+  t('emptying a field clears it rather than writing an empty string', WRITES.find((w) => w.baseId === T.BASES.CLI).fields, { 'Mobile Number': null });
+  reset();
+  r = await call(OPS, { op: 'update', base: 'OM', clientId: 'recREGGROOTVLEI01', name: 'Renamed' });
+  t('the name is not changed this way', [r.code, WRITES.length], [400, 0]);
+  r = await call(OPS, { op: 'update', base: 'OM', clientId: 'recREGGROOTVLEI01', email: 'not an email' });
+  t('a bad email is refused', [r.code, WRITES.length], [400, 0]);
+  r = await call(TECH, { op: 'update', base: 'OM', clientId: 'recREGGROOTVLEI01', email: 'x@y.co.za' });
+  t('a role without clients:edit cannot change them', [r.code, WRITES.length, AUDIT.some((a) => a.action === 'Update' && a.result === 'Denied')], [403, 0, true]);
+  reset(); ASSIGNED = ['Walk-in Client'];
+  r = await call(SCOPED, { op: 'update', base: 'OM', clientId: 'recREGBISSET00001', email: 'x@y.co.za' });
+  ASSIGNED = null;
+  t('nor a scoped role a client it has no copy of', [r.code, r.body.reason, WRITES.length], [403, 'scope_excluded', 0]);
+  reset();
+  r = await call(who({ ...ALLOPS, fields: { deny_write: ['Email'] } }), { op: 'update', base: 'OM', clientId: 'recREGBISSET00001', email: 'x@y.co.za' });
+  t('nor a field the role may not write', [r.code, WRITES.length], [403, 0]);
 
   console.log('\n\x1b[1mENSURE: THIS BASE’S COPY\x1b[0m');
   reset();

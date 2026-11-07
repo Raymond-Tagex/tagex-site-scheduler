@@ -35,10 +35,17 @@ const CON = [
   { id: 'recCON2', fields: { 'Contract Number': 'SUB-999', Client: ['recSOMEONEELSE001'], Status: 'Active', Portfolio: 'Alpine',
     'First Invoice Date': '2020-01-01', 'System Description': 'Someone else' } },
 ];
+// SolaX plants: one on Sean's contract, one on another of his contracts.
+const PLANTS = [
+  { id: 'recPL1', fields: { 'Plant Name': 'Bisset House', Client: ['recREGBISSET00001'], 'User Name': 'solax.sean@gmail.com',
+    Location: '12 Main Rd, Benoni', 'Contract Number': 'SUB-148' } },
+  { id: 'recPL2', fields: { 'Plant Name': 'Bisset Office', Client: ['recREGBISSET00001'], 'Contract Number': 'SUB-150' } },
+];
 const LISTED = [];
 const stub = (file, exports) => { const id = require.resolve(api(file)); require.cache[id] = { id, filename: id, loaded: true, exports }; };
 stub('_lib/airtable.js', {
-  async list(base, table) { LISTED.push(table); return JSON.parse(JSON.stringify(base === RB && table === R.clients ? REG : base === RB && table === R.contracts ? CON : [])); },
+  async list(base, table) { LISTED.push(table); return JSON.parse(JSON.stringify(base === RB && table === R.clients ? REG
+    : base === RB && table === R.contracts ? CON : base === RB && table === R.plants ? PLANTS : [])); },
   async fieldMaps() { return { idToName: {}, nameToId: {} }; },
 });
 const P = require(api('_lib/permissions.js'));
@@ -126,6 +133,17 @@ const TICKET = {
   t('the checklist ticks only what the record proves', c.checklist.filter(([, v]) => v).map(([l]) => l),
     ['Supplier quote', 'Delivery note', 'Photos*']);
   t('no job card money reaches the sheet', /12345|9999|12 345/.test(JSON.stringify(c)), false);
+
+  t('the plant on this contract is named, not one on another', c.plantLine, 'Bisset House · solax.sean@gmail.com · 12 Main Rd, Benoni');
+  t('a phone number in Contact Person leaves the contact line to be written on', c.client.contact, '');
+  const named = CS.contents({ ticket: TICKET, facts: { ...facts, client: { ...facts.client, contact: 'Lerato Bisset' } }, today: '2026-11-05' });
+  t('a contact person’s name has its own line', named.client.contact, 'Lerato Bisset');
+  const gaps = CS.contents({ ticket: TICKET, facts: { ...facts, client: { ...facts.client, email: '', install: '', phones: [], contact: '' } }, today: '2026-11-05' });
+  t('no email or address in the register: the SolaX login and location fill them',
+    [gaps.client.reach, gaps.client.install], ['solax.sean@gmail.com', '12 Main Rd, Benoni']);
+  const noMail = asRole({ clients: { ...ALL, fields: { deny_read: ['Email', 'Sites'] } } });
+  const f5 = await CS.gather({ auth: noMail, base: 'OM', read: reader(noMail, []), clientIds: ['recOMBISSET000001'], contractNo: 'SUB-148' });
+  t('a role denied Email and Sites does not get them through the plant', [f5.client.plants[0].user, f5.client.plants[0].location], ['', '']);
 
   const bare = CS.contents({ jobcard: { 'JC Reference': 'OM-1', 'Site / Address': ['Plot 9'] }, facts: {}, today: '2026-11-05' });
   t('with nothing known the lines stay blank to fill in, not filled with guesses',

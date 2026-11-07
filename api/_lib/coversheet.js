@@ -74,13 +74,14 @@ async function gather(o) {
   // seconds on its own reads, and the function has 30 (vercel.json). A read that fails costs the
   // sheet that section, never the sheet.
   const none = () => [];
-  const [mirrors, regRows, conRows, regNames, equipRows, docRows] = await Promise.all([
+  const [mirrors, regRows, conRows, regNames, equipRows, docRows, plantRows] = await Promise.all([
     cv ? read('clients').catch(none) : [],
     cv ? at.list(rb, R.clients, {}).catch(none) : [],
     cv ? at.list(rb, R.contracts, {}).catch(none) : [],
     cv ? at.fieldMaps(rb, R.clients).then((m) => m.idToName).catch(() => ({})) : {},
     may(auth, 'site_equipment') ? read('site_equipment').catch(none) : [],
     o.jobcardId && may(auth, 'documents') ? read('documents').catch(none) : [],
+    cv && R.plants ? at.list(rb, R.plants, {}).catch(none) : [],
   ]);
 
   // ── the client: its copy here names its register record ──
@@ -101,6 +102,13 @@ async function gather(o) {
       install: str(src.Sites),
       billing: str(src['Postal / Billing Address']),
       palladium: str(src['Palladium Code']),
+      // SolaX plants (6 Nov 2026). Login and location are read as the Email and Sites they stand
+      // for, so a role denied those on clients is denied them here (as /api/client-register does).
+      plants: reg ? plantRows.filter((p) => ids(p.fields.Client).includes(reg.id)).map((p) => {
+        const v = P.filterReadFields(T.expandFieldRules(cv.rule, 'clients', base),
+          { Email: p.fields['User Name'], Sites: p.fields.Location }, regNames);
+        return { name: str(p.fields['Plant Name']), user: str(v.Email), location: str(v.Sites), contract: str(p.fields['Contract Number']) };
+      }) : [],
     };
   }
 
@@ -199,7 +207,9 @@ function contents(d) {
   const spares = (d.spares || []).map((s) => (s.req ? s.req + ' × ' : '') + [str(s.code), str(s.desc)].filter(Boolean).join(' ')).filter(Boolean);
   if (spares.length) action.push('Spares requested: ' + spares.join('; '));
 
-  const latestTech = (d.visits || []).slice().sort((a, b) => String(b.start).localeCompare(String(a.start)))
+  // The client's plants on this contract; a plant naming no contract belongs to the client as a whole.
+  const plants = (cl.plants || []).filter((p) => !p.contract || !f.contractNo || norm(p.contract) === norm(f.contractNo));
+  const latestTech =(d.visits || []).slice().sort((a, b) => String(b.start).localeCompare(String(a.start)))
     .map((v) => str(v.tech)).find(Boolean) || '';
   const w = (f.contract && f.contract.warranty) || [];
   return {
@@ -207,16 +217,17 @@ function contents(d) {
     date: day(d.today || new Date().toISOString()),
     numbers: [f.contractNo, cl.palladium].filter(Boolean).join(' · '),
     client: {
-      // The contact person beside the name only when it is somebody else: the line asks for a
-      // number and an email, and "Christopher Maitin" there under "Christopher Maiten" read as noise.
-      // Some Contact Person fields hold a phone number; that belongs on the reach line, not here.
-      name: [cl.name || str(jc['Client Name']),
-        /[a-z]{2}/i.test(cl.contact || '') && cl.contact.toLowerCase().replace(/\W/g, '').slice(0, 6) !== String(cl.name || '').toLowerCase().replace(/\W/g, '').slice(0, 6)
-          ? '(contact: ' + cl.contact + ')' : ''].filter(Boolean).join(' '),
-      reach: [...(/[a-z]{2}/i.test(cl.contact || '') ? [] : [cl.contact]), ...(cl.phones || []), cl.email]
+      name: cl.name || str(jc['Client Name']),
+      // Its own line (Raymond, 6 Nov 2026). Some Contact Person fields hold a phone number: that
+      // goes with the numbers, and the contact line is left to write a name on.
+      contact: /[a-z]{2}/i.test(cl.contact || '') ? cl.contact : '',
+      // No email in the register: the client's SolaX login, when it is one, is the email they use.
+      reach: [...(/[a-z]{2}/i.test(cl.contact || '') ? [] : [cl.contact]), ...(cl.phones || []),
+        cl.email || (plants.map((p) => p.user).find((u) => /@/.test(u)) || '')]
         .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' · '),
-      install: cl.install || str(jc['Site / Address']) || cl.billing,
+      install: cl.install || str(jc['Site / Address']) || (plants.map((p) => p.location).find(Boolean) || '') || cl.billing,
     },
+    plantLine: plants.map((p) => [p.name, p.user, p.location].filter(Boolean).join(' · ')).join('\n'),
     contractLine: f.contract ? [f.contract.number, f.contract.funder && 'funder ' + f.contract.funder,
       f.contract.firstInvoice && '1st invoice ' + f.contract.firstInvoice].filter(Boolean).join(' · ') : '',
     system: f.contract ? f.contract.system : '',
@@ -247,12 +258,16 @@ async function coverSheetPdf(d) {
 
   s.heading('1. Client details');
   s.field('Name and Surname / Business name:', c.client.name);
+  s.field('Contact Person:', c.client.contact);
   s.field('Contact Number / Email:', c.client.reach);
   s.field('Installation Address:', c.client.install);
 
   s.heading('2. System installed details');
-  s.field('Contract:', c.contractLine);
-  s.block(c.system, 2);
+  // The system on the contract's own line, wrapping if long, rather than a box under it: the
+  // Contact Person line (6 Nov 2026) needed the room to keep a typical record on one page.
+  s.field('Contract:', [c.contractLine, c.system].filter(Boolean).join(' — '));
+  if (!c.contractLine && !c.system) s.field('System:', '');
+  if (c.plantLine) s.field('SolaX plant:', c.plantLine);
   if (c.equipment.length) {
     const W = J.CW;
     s.grid([{ t: 'Type', w: W * 0.16 }, { t: 'Make / Model', w: W * 0.34 }, { t: 'Serial Number', w: W * 0.26 },

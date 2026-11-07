@@ -74,6 +74,24 @@ const CONTRACT_FIELDS = (clientsTableId) => [
   { name: 'Notes', type: 'multilineText' },
 ];
 
+// The client's systems as SolaX Cloud knows them (Raymond, 6 Nov 2026), one row per plant: a
+// client can have several (Victory Village Main and Victory Village Ouma). The columns are SolaX's
+// plant list. Type and status are text, not selects: the API cannot add a choice, and a SolaX value
+// nobody foresaw must not fail an import. Status is as it was on the import date, never live.
+const PLANT_FIELDS = (clientsTableId) => [
+  { name: 'Plant Name', type: 'singleLineText' },
+  { name: 'Client', type: 'multipleRecordLinks', options: { linkedTableId: clientsTableId } },
+  { name: 'Contract Number', type: 'singleLineText' },
+  { name: 'Plant Type', type: 'singleLineText' },
+  { name: 'User Name', type: 'singleLineText', description: 'The client’s SolaX Cloud login, usually an email.' },
+  { name: 'Location', type: 'multilineText' },
+  { name: 'Installer / Distributor', type: 'singleLineText' },
+  { name: 'Country / Region', type: 'singleLineText' },
+  { name: 'Status at Import', type: 'singleLineText', description: 'Plant and grid status on the import date. Not live.' },
+  { name: 'Imported', type: 'date', options: { dateFormat: { name: 'iso' } } },
+  { name: 'Notes', type: 'multilineText' },
+];
+
 (async () => {
   const base = T.BASES.CLI;
   if (!base) throw new Error('BASES.CLI is not in api/_lib/tables.js');
@@ -89,6 +107,8 @@ const CONTRACT_FIELDS = (clientsTableId) => [
   }
   const contracts = byName('Contracts');
   if (!contracts) plan.push('create table Contracts');
+  const plants = byName('SolaX Plants');
+  if (!plants) plan.push('create table SolaX Plants');
 
   // The mirror field, in every operating base's Clients table. O&M and RES keep the same
   // structure (verify-res-mirror.js), so both get it.
@@ -120,6 +140,12 @@ const CONTRACT_FIELDS = (clientsTableId) => [
     const c = await call('POST', 'meta/bases/' + base + '/tables', {
       name: 'Contracts', description: 'Subscription and C&I contracts, one per number. No money.', fields: CONTRACT_FIELDS(clients.id) });
     console.log('created Contracts', c.id);
+  }
+  if (!plants) {
+    const p = await call('POST', 'meta/bases/' + base + '/tables', {
+      name: 'SolaX Plants', description: 'Each client’s plants as SolaX Cloud lists them. Loaded by scripts/load-solax-plants.js.',
+      fields: PLANT_FIELDS(clients.id) });
+    console.log('created SolaX Plants', p.id);
   }
   for (const m of mirrors) {
     await call('POST', 'meta/bases/' + T.BASES[m.sym] + '/tables/' + m.tableId + '/fields', {

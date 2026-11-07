@@ -126,6 +126,13 @@ module.exports = async function handler(req, res) {
       jobcard = (jcs.find((x) => x.id === jcId) || {}).fields || {};
     }
 
+    // The cover sheet's own reads (client register, equipment, documents) start now and run while
+    // the visits and spares below are read: one after the other they took a live cover sheet past
+    // the function's 30 seconds. gather catches its own read failures, so this never rejects.
+    const coverFacts = body.cover === true ? CS.gather({ auth, base, read: (m, sub) => readAll(auth, base, m, sub),
+      clientIds: ids(ticket.fields.Client).length ? ids(ticket.fields.Client) : ids(jobcard.Client),
+      contractNo: R.str(ticket.fields['Contract Number']) || R.str(jobcard['Contract Number']), jobcardId: jcId || '' }) : null;
+
     // People, so a technician link becomes a name rather than a record id.
     const names = {};
     try {
@@ -172,7 +179,9 @@ module.exports = async function handler(req, res) {
     // section with entries that may belong to another fault on the same installation.
     let activity = [];
     let activityNote = '';
-    try {
+    // The cover sheet prints no activity, and the activity log is the slowest table here: reading
+    // it took a live cover sheet past the function's 30 seconds (TKT-2026-0103, 7 Nov 2026).
+    if (body.cover !== true) try {
       activity = (await readAll(auth, base, 'activity_log'))
         .filter((x) => ids(x.fields.Ticket).includes(ticketId))
         .slice(0, MAX_ACTS)
@@ -207,7 +216,7 @@ module.exports = async function handler(req, res) {
       generatedAt: new Date().toISOString(),
     };
 
-    if (body.cover === true) return coverSheet(auth, ctx, base, ticket, jcId, jobcard, payload, res);
+    if (body.cover === true) return coverSheet(auth, ctx, ticket, jobcard, payload, await coverFacts, res);
     if (body.form === true) return ticketForm(auth, ctx, base, body, ticketId, jcId, payload, res);
 
     const pdf = await R.ticketReportPdf(payload);
@@ -242,10 +251,7 @@ module.exports = async function handler(req, res) {
  * the recommended action, the job card number and the "in file" checklist. Printed on demand and
  * never filed, like a reprint: it summarises the record as it stands now.
  */
-async function coverSheet(auth, ctx, base, ticket, jcId, jobcard, payload, res) {
-  const clientIds = ids(ticket.fields.Client).length ? ids(ticket.fields.Client) : ids(jobcard.Client);
-  const facts = await CS.gather({ auth, base, read: (m, sub) => readAll(auth, base, m, sub), clientIds,
-    contractNo: R.str(ticket.fields['Contract Number']) || R.str(jobcard['Contract Number']), jobcardId: jcId || '' });
+async function coverSheet(auth, ctx, ticket, jobcard, payload, facts, res) {
   const bytes = await CS.coverSheetPdf({ ticket: ticket.fields, jobcard, visits: payload.visits,
     spares: payload.spares, facts, generatedBy: auth.email });
   const ref = R.str(ticket.fields['Ticket Ref']) || ticket.id;

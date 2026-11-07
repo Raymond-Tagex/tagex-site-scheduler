@@ -3,6 +3,7 @@
 //   { op:'list',   base }                                  -> { clients:[…] }
 //   { op:'ensure', base, clientId }                        -> { mirrorId, created }
 //   { op:'create', base, name, contact?, mobile?, email?, sites? } -> { clientId, mirrorId }
+//   { op:'update', base, clientId, contact?, mobile?, email?, sites? } -> { client }
 //
 // WHY AN ENDPOINT AND NOT THE PROXY. A job card or ticket can only link to a Clients row in its
 // own base -- Airtable links do not cross bases -- so every base keeps a mirror of each client it
@@ -56,12 +57,12 @@ module.exports = async function handler(req, res) {
   if (rawId) return H.fail(res, 400, 'raw_id_rejected', 'This API accepts symbolic names only.');
 
   const op = String(body.op || '');
-  if (!['list', 'ensure', 'create'].includes(op)) return H.fail(res, 400, 'unknown_op', 'op must be list, ensure or create.');
+  if (!['list', 'ensure', 'create', 'update'].includes(op)) return H.fail(res, 400, 'unknown_op', 'op must be list, ensure, create or update.');
   const base = body.base == null || body.base === '' ? 'OM' : String(body.base);
   if (!T.OPS_BASES.includes(base)) return H.fail(res, 400, 'wrong_base', 'Clients are kept for C&I, O&M and RES.');
 
   const auth = await S.authenticate(req);
-  const action = op === 'list' ? 'View' : 'Create';
+  const action = op === 'list' ? 'View' : op === 'update' ? 'Update' : 'Create';
   if (!auth.ok) {
     await A.auditNow({ action, result: 'Denied', denialReason: auth.reason, module: 'clients', baseSymbol: base,
       ip: S.clientIp(req), userAgent: S.userAgent(req), detail: auth.detail });
@@ -116,13 +117,16 @@ module.exports = async function handler(req, res) {
     const siteRule = site.ok ? T.expandFieldRules(siteView.rule, 'site_information', base) : null;
     const siteFilter = site.ok ? P.buildReadFilter({ moduleKey: 'site_information', baseSymbol: base, rule: siteRule,
       scope: P.effectiveScope(auth.role, auth.user, siteRule), user: auth.user, clientFilter: null }) : null;
-    const [rows, register, contractRows, siteRows, siteNames] = await Promise.all([
+    const pl = { baseId: T.BASES[R.base], tableId: R.plants };
+    const [rows, register, contractRows, siteRows, siteNames, plantRows] = await Promise.all([
       listAll(mirror.baseId, mirror.tableId, filter ? { filterByFormula: filter } : {}),
       listAll(reg.baseId, reg.tableId),
       op === 'list' ? listAll(con.baseId, con.tableId) : null,
       // A site read that fails costs the search its site terms, never the client list.
       site.ok ? listAll(site.baseId, site.tableId, siteFilter ? { filterByFormula: siteFilter } : {}).catch(() => []) : [],
       site.ok ? at.fieldMaps(site.baseId, site.tableId).then((m) => m.idToName).catch(() => ({})) : {},
+      // SolaX plants (6 Nov 2026). A plant read that fails costs the plants, never the list.
+      op === 'list' && pl.tableId ? listAll(pl.baseId, pl.tableId).catch(() => []) : [],
     ]);
     const byMaster = new Map();
     for (const r of rows) {
@@ -133,6 +137,7 @@ module.exports = async function handler(req, res) {
 
     if (op === 'list') return list();
     if (op === 'ensure') return ensure();
+    if (op === 'update') return update();
     return create();
 
     // ── list ──────────────────────────────────────────────────────────────
@@ -170,6 +175,17 @@ module.exports = async function handler(req, res) {
         const entry = { number: str(f['SUB / SOL Number']), name: str(f['Site Name']), address: str(f['Property Address']) };
         if (entry.number || entry.name || entry.address) sitesOf.set(owner, (sitesOf.get(owner) || []).concat(entry));
       }
+      // A plant carries personal details under other names: its SolaX login is an email and its
+      // location an address. Each is read as the client field it stands for, so a role denied
+      // Email or Sites on clients is denied them here too.
+      const plantsOf = new Map();
+      for (const p of plantRows) {
+        const v = P.filterReadFields(rule, { Email: p.fields['User Name'], Sites: p.fields.Location }, regNames);
+        const entry = { name: str(p.fields['Plant Name']), type: str(p.fields['Plant Type']), user: str(v.Email),
+          location: str(v.Sites), installer: str(p.fields['Installer / Distributor']), contract: str(p.fields['Contract Number']),
+          status: str(p.fields['Status at Import']), imported: str(p.fields.Imported) };
+        for (const id of [].concat(p.fields.Client || [])) plantsOf.set(id, (plantsOf.get(id) || []).concat(entry));
+      }
       const out = [];
       for (const m of register) {
         const mirrors = byMaster.get(m.id) || [];
@@ -182,6 +198,7 @@ module.exports = async function handler(req, res) {
           // From Palladium (3 Nov 2026): the customer code(s), billing address and phone.
           palladium: str(f['Palladium Code']), address: str(f['Postal / Billing Address']), phone: str(f.Phone),
           siteInfo: sitesOf.get(m.id) || [],
+          plants: plantsOf.get(m.id) || [],
           contracts: (numbers.get(m.id) || []).filter(Boolean).sort(), mirrors,
           contractDetails: (details.get(m.id) || []).filter((d) => d.number)
             .sort((a, b) => a.number.localeCompare(b.number)),
@@ -219,6 +236,49 @@ module.exports = async function handler(req, res) {
       const made = await makeMirror(m.id, m.fields);
       if (made.fail) return made.fail;
       return H.ok(res, { mirrorId: made.id, created: true });
+    }
+
+    // ── update: a client's contact details, from the ticket or job card ────
+    //
+    // Raymond, 6 Nov 2026: most subscription clients reached the register with no phone, email or
+    // address (the Palladium export held 26 of ~250), so staff fill them in where they meet the
+    // gap. The register is written, and this base's copies with it, so the job card's own client
+    // record agrees at once rather than at the next sync. Only these four fields; the name is not
+    // editable here -- a rename touches every base and is the sync script's --names.
+    async function update() {
+      const clientId = str(body.clientId);
+      const m = REC_RE.test(clientId) && register.find((x) => x.id === clientId);
+      const deny = async (reason, status, detail) => {
+        await A.auditNow({ ...ctx, action: 'Update', result: 'Denied', denialReason: reason, recordId: clientId.slice(0, 20) });
+        return H.fail(res, status, reason, detail);
+      };
+      if (!m) return deny('not_found', 404, 'No such client in the register.');
+      const e = P.can(auth.perms, 'clients', 'edit');
+      if (!e.ok) return deny(e.reason, e.status, e.detail);
+      // A scoped role edits only a client it can see a copy of here, as the proxy would let it.
+      const copies = byMaster.get(m.id) || [];
+      if (!allRecords && !copies.length) return deny('scope_excluded', 403, 'That client is outside your access.');
+      const patch = {};
+      const take = (k, f) => { if (Object.prototype.hasOwnProperty.call(body, k)) patch[f] = str(body[k]); };
+      take('contact', 'Contact Person'); take('mobile', 'Mobile Number'); take('email', 'Email'); take('sites', 'Sites');
+      if (!Object.keys(patch).length) return H.fail(res, 400, 'bad_request', 'Nothing to change.');
+      for (const [k, v] of Object.entries(patch)) if (v.length > LIMITS[k]) return H.fail(res, 400, 'bad_request', k + ' is too long.');
+      if (patch.Email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patch.Email)) return H.fail(res, 400, 'bad_request', 'That email address does not look right.');
+      const wrule = T.expandFieldRules(e.rule, 'clients', base);
+      const check = P.validateWriteFields(wrule, patch, regNames);
+      if (!check.ok) return deny(check.reason, check.status || 403, check.detail);
+      // Airtable takes an empty phone or email as "clear it"; '' would be refused for the email type.
+      const out = {}; for (const [k, v] of Object.entries(patch)) out[k] = v === '' ? null : v;
+      const before = {}; for (const k of Object.keys(patch)) before[k] = m.fields[k] == null ? '' : str(m.fields[k]);
+      await at.update(reg.baseId, reg.tableId, m.id, out);
+      await A.auditFieldChanges({ ...ctx, recordId: m.id, before, after: patch });
+      // This base's copies, the same four fields where it has them (C&I has no Mobile Number).
+      const has = new Set(Object.values(mirrorNames));
+      const mp = {}; for (const [k, v] of Object.entries(out)) if (has.has(k)) mp[k] = v;
+      if (Object.keys(mp).length) for (const id of copies) await at.update(mirror.baseId, mirror.tableId, id, mp);
+      const f = P.filterReadFields(rule, { ...m.fields, ...patch }, regNames);
+      return H.ok(res, { client: { id: m.id, contact: str(f['Contact Person']), mobile: str(f['Mobile Number']),
+        email: str(f.Email), sites: str(f.Sites) } });
     }
 
     // ── create: a new client, in the register and this base ───────────────
