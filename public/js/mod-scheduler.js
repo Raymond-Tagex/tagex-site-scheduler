@@ -1605,6 +1605,7 @@ async function omLoadClients(){
       // For the search (3 Nov 2026): Palladium code(s), billing address, phones, and the SUB / SOL
       // number, name and address of each site the role may see.
       palladium:c.palladium||'', address:c.address||'', phone:c.phone||'', mobile:c.mobile||'', siteInfo:c.siteInfo||[],
+      plants:c.plants||[],
       fields:{[OM_F.CL_NAME]:c.name||'',[OM_F.CL_CONT]:c.contact||'',[OM_F.CL_EMAIL]:c.email||'',[OM_F.CL_SITE]:c.sites||''},
     }));
   }catch(e){ console.warn('Client register unavailable; reading this base\u2019s Clients instead.',e); }
@@ -1971,10 +1972,63 @@ function omTktContract(rec){
   return TX.contract.resolve(omConDetails(omTktClient(rec)),num);
 }
 function omJcContract(jc){ return TX.contract.resolve(omConDetails(omJcClient(jc)),omFstr(jc.fields,OM_F.JC_CONTRACT)); }
+/**
+ * The client a ticket or job card is for: who to call, where the system is, and its SolaX plants
+ * (Raymond, 6 Nov 2026). Most subscription clients reached the register with no phone, email or
+ * address, so a role that may edit clients fills the gap here; it is saved to the register
+ * (/api/client-register update), and so reaches every app. A detail not recorded says so rather
+ * than leaving a blank that reads as nothing to know.
+ */
+function omClientCard(cli,recId){
+  if(!cli) return '';
+  const f=cli.fields;
+  const row=(k,v)=>'<div class="om-fact"><span>'+esc(k)+'</span>'
+    +(v?'<b>'+esc(v)+'</b>':'<b class="om-miss">not recorded</b>')+'</div>';
+  const phones=[cli.mobile,cli.phone].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(' \u00b7 ');
+  const plants=(cli.plants||[]).map(p=>'<div class="om-plant"><b>'+esc(p.name||'(unnamed plant)')+'</b>'
+    +(p.type?' \u00b7 '+esc(p.type):'')+(p.contract?' \u00b7 '+esc(p.contract):'')
+    +'<br>'+[p.user,p.location,p.installer].filter(Boolean).map(esc).join(' \u00b7 ')
+    +(p.status?'<br><span class="om-hint">'+esc(p.status)+(p.imported?' on '+esc(p.imported):'')+' (SolaX, not live)</span>':'')+'</div>').join('');
+  const may=TX.can('clients','edit')&&!!cli.regId;
+  const inp=(k,label,v,type)=>'<label>'+esc(label)+'<input type="'+(type||'text')+'" id="om-ce-'+k+'-'+esc(recId)+'" value="'+esc(v||'')+'"></label>';
+  return '<div class="om-fcard om-clicard" id="om-clicard-'+esc(recId)+'"><div class="om-fttl">Client</div><div class="om-facts">'
+    +row('Name',omCliName(cli))+row('Contact person',f[OM_F.CL_CONT])+row('Contact number',phones)
+    +row('Email',f[OM_F.CL_EMAIL])+row('Installation address',f[OM_F.CL_SITE]||cli.address)+'</div>'
+    +(plants?'<div class="om-fttl" style="margin-top:10px">SolaX plants</div>'+plants
+      :'<div class="om-hint" style="margin-top:6px">No SolaX plant recorded for this client.</div>')
+    +(may?'<button class="btn ghost sm" data-act="omCliEditOpen" data-a1="'+esc(recId)+'" style="margin-top:8px">Edit contact details</button>'
+      +'<div class="om-cliedit om-mongrid" id="om-cliedit-'+esc(recId)+'" hidden>'
+      +inp('cont','Contact person',f[OM_F.CL_CONT])+inp('mob','Contact number',cli.mobile,'tel')
+      +inp('email','Email',f[OM_F.CL_EMAIL],'email')+inp('site','Installation address',f[OM_F.CL_SITE])
+      +'<div id="om-ce-msg-'+esc(recId)+'"></div>'
+      +'<div><button class="btn sm" data-act="omCliEditSave" data-a1="'+esc(recId)+'" data-a2="'+esc(cli.regId)+'">Save</button> '
+      +'<button class="btn ghost sm" data-act="omCliEditOpen" data-a1="'+esc(recId)+'">Cancel</button></div></div>':'')
+    +'</div>';
+}
+function omCliEditOpen(recId){ const b=document.getElementById('om-cliedit-'+recId); if(b) b.hidden=!b.hidden; }
+async function omCliEditSave(recId,regId){
+  const v=(k)=>{const el=document.getElementById('om-ce-'+k+'-'+recId); return el?el.value.trim():'';};
+  const msg=document.getElementById('om-ce-msg-'+recId);
+  const cli=omCliData.find(c=>c.regId===regId); if(!cli) return;
+  if(msg) msg.innerHTML='<div class="om-loading"><span class="om-sp"></span>Saving to the client register\u2026</div>';
+  try{
+    const r=await TX.request('/api/client-register',{op:'update',base:SCHED_BASE,clientId:regId,
+      contact:v('cont'),mobile:v('mob'),email:v('email'),sites:v('site')});
+    const c=r.client||{};
+    cli.fields[OM_F.CL_CONT]=c.contact||''; cli.fields[OM_F.CL_EMAIL]=c.email||''; cli.fields[OM_F.CL_SITE]=c.sites||'';
+    cli.mobile=c.mobile||'';
+    const card=document.getElementById('om-clicard-'+recId);
+    if(card) card.outerHTML=omClientCard(cli,recId);
+    toast('Contact details saved to the client register','ok');
+  }catch(e){
+    if(msg) msg.innerHTML='<div class="om-err">\u2715 '+esc(TX.errorText(e))+'</div>';
+  }
+}
+
 function omConPanel(kind,rec){
   const tkt=kind==='tkt';
   const cli=tkt?omTktClient(rec):omJcClient(rec);
-  return TX.contract.panelHtml({
+  return omClientCard(cli,rec.id)+TX.contract.panelHtml({
     res: tkt?omTktContract(rec):omJcContract(rec), details: omConDetails(cli), esc,
     today: new Date().toISOString().slice(0,10),
     canEdit: tkt ? TX.can('tickets','edit')&&TX.canField('tickets','Contract Number','write')
@@ -4596,6 +4650,8 @@ async function omSubmitNewJC(){
     add('omTktSaveCost', typeof omTktSaveCost === 'function' ? omTktSaveCost : null);
     add('omFilterJCs', typeof omFilterJCs === 'function' ? omFilterJCs : null);
     add('omCliPick', typeof omCliPick === 'function' ? omCliPick : null);
+    add('omCliEditOpen', typeof omCliEditOpen === 'function' ? omCliEditOpen : null);
+    add('omCliEditSave', typeof omCliEditSave === 'function' ? omCliEditSave : null);
     add('omSaveNewCli', typeof omSaveNewCli === 'function' ? omSaveNewCli : null);
     add('omCancelNewCli', typeof omCancelNewCli === 'function' ? omCancelNewCli : null);
     add('omJCPick', typeof omJCPick === 'function' ? omJCPick : null);

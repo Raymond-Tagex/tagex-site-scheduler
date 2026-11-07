@@ -132,6 +132,18 @@ register: **Clients** and **Contracts** (SUB/C&I numbers from the SxE cost log; 
   number match ranks above a name, a name above a hidden term. Site terms come only from sites the
   role may view. **"+ New client"** under the list (`data-create`, for `clients:create`) saves to the
   register at once and chooses the client; a name already there chooses that one instead.
+- **Client contacts are filled where the gap is met** (Raymond, 6 Nov 2026). The Palladium export
+  held 26 of ~250 subscription clients, so most have no phone, email or address. Ticket and job card
+  screens show a **Client** card (`omClientCard`, inside `omConPanel`): contact person, numbers,
+  email, installation address, SolaX plants; "not recorded" where empty. `clients:edit` may edit the
+  four contact fields there (`/api/client-register` **update**): written to the register and this
+  base's copies, each change audited old to new. The name is not editable there.
+- **SolaX Plants** (register table `T.CLIENT_REGISTER.plants`), one row per plant, linked to its
+  client: `scripts/load-solax-plants.js <export.csv|xlsx>` loads SolaX Cloud's plant list (dry run
+  first), matching by login email, a SUB / SOL number in the plant name, the name, then location;
+  anything ambiguous is loaded unlinked and reported. It fills a client's empty Email / Sites from
+  the plant. Status is "at import", never live. A plant's User Name and Location are read **as the
+  clients rule's Email and Sites**, so a role denied those is denied them on plants too.
 - **Not yet:** the other apps (delivery, residential, RMA, C&I scheduler) and Site Information's
   client matching, which still read their own base's Clients.
 - The cost log holds personal information. It is read from the .xlsx and never committed.

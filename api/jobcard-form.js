@@ -117,6 +117,11 @@ module.exports = async function handler(req, res) {
 
     const f = jobcard.fields;
 
+    // The cover sheet's own reads start now, alongside the costing, visits and tickets below,
+    // rather than after them (see ticket-report.js). gather catches its own failures.
+    const coverFacts = body.cover === true ? CS.gather({ auth, base, read: (m, sub) => readAll(auth, base, m, sub),
+      clientIds: ids(f.Client), contractNo: String(f['Contract Number'] || '').trim(), jobcardId: jobCardId }) : null;
+
     // The linked records the form prints. Each is optional: a role that may not read costs
     // still gets a job card, with that section blank rather than an error.
     let costing = {};
@@ -169,8 +174,7 @@ module.exports = async function handler(req, res) {
     // Same right (export), printed on demand and never filed: it is a summary of the record as it
     // stands, so a filed copy would be out of date the moment the job moved on.
     if (body.cover === true) {
-      const facts = await CS.gather({ auth, base, read: (m, sub) => readAll(auth, base, m, sub),
-        clientIds: ids(f.Client), contractNo: String(f['Contract Number'] || '').trim(), jobcardId: jobCardId });
+      const facts = await coverFacts;
       const cover = await CS.coverSheetPdf({ jobcard: f, visits, ticketRefs, facts, generatedBy: auth.email });
       const ref = String(f['JC Reference'] || jobCardId);
       await A.auditNow({ ...ctx, action: 'Export', result: 'Allowed', recordId: jobCardId, newValue: 'cover sheet printed for ' + ref });

@@ -379,6 +379,8 @@ const CLIENT_REGISTER = Object.freeze({
   base: 'CLI',
   clients:   'tbl0mJrPEf6wRX4fl',
   contracts: 'tblZ0cNUogFgZFpmf',
+  // One row per SolaX Cloud plant, linked to its client (Raymond, 6 Nov 2026).
+  plants:    'tblPmybAe46dYYTCV',
 });
 
 // The bases the scheduler and tickets work in. Not C&I: its scheduler is a separate

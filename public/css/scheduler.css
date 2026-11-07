@@ -390,6 +390,11 @@
      had no equivalent: a two-column fact list, a spares table, and the detail header. */
   .mod-scheduler .om-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
   .mod-scheduler .om-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px 14px;}
+  /* The client card: a detail not recorded reads as missing, not as blank. */
+  .mod-scheduler .om-miss{color:var(--muted2);font-weight:400;font-style:italic;}
+  .mod-scheduler .om-plant{font-family:monospace;font-size:10px;padding:5px 0;border-bottom:1px solid var(--line);line-height:1.6;}
+  .mod-scheduler .om-cliedit{margin-top:8px;}
+  .mod-scheduler .om-cliedit[hidden]{display:none;}
   .mod-scheduler .om-fact{display:flex;justify-content:space-between;gap:10px;font-family:monospace;font-size:10px;padding:4px 0;border-bottom:1px solid var(--line);}
   .mod-scheduler .om-fact span{color:var(--muted2);}
   .mod-scheduler .om-fact b{color:var(--text);font-weight:600;text-align:right;}
