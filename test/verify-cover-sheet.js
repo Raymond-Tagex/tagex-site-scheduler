@@ -145,6 +145,17 @@ const TICKET = {
   const f5 = await CS.gather({ auth: noMail, base: 'OM', read: reader(noMail, []), clientIds: ['recOMBISSET000001'], contractNo: 'SUB-148' });
   t('a role denied Email and Sites does not get them through the plant', [f5.client.plants[0].user, f5.client.plants[0].location], ['', '']);
 
+  t('section 1 carries the contract panel: funder, number and kind', c.con && c.con.head, 'PPA · SUB-148');
+  t('the system and the warranty start', c.con && [c.con.system, c.con.start], ['2x 7.5kw G4 Single phase', '2025-09-25']);
+  t('each warranty class, in or out, as the screen shows it', c.warranty.map((w) => w.label + ': ' + w.status),
+    ['Solax equipment 10 yrs: in warranty until 2035-09-25', 'PV panels 25 yrs: in warranty until 2050-09-25',
+      'Workmanship 2 yrs: in warranty until 2027-09-25', 'Material 1 yr: expired 2026-09-25']);
+  t('and the funder’s rule', c.con && c.con.rule, 'PPA is paid a monthly O&M fee by the client. Work within TAGEX O&M\'s pre-approved PPA budget.');
+  t('the contact number and email are their own lines', [c.client.phone, c.client.email], ['082 111 2222 · 011 555 0000', 'sean@bisset.co.za']);
+  const noCon = CS.contents({ ticket: TICKET, facts: { ...facts, contract: null, contractWhy: { how: 'choose', count: 2 } }, today: '2026-11-05' });
+  t('with no settled contract the panel’s reason is printed, not blank lines', [noCon.con, noCon.conWhy],
+    [null, 'This client has 2 contracts. Choose the one this is for: funder and warranty depend on it.']);
+
   const bare = CS.contents({ jobcard: { 'JC Reference': 'OM-1', 'Site / Address': ['Plot 9'] }, facts: {}, today: '2026-11-05' });
   t('with nothing known the lines stay blank to fill in, not filled with guesses',
     [bare.numbers, bare.client.reach, bare.action, bare.quotation, bare.technician, bare.warranty], ['', '', '', false, '', []]);
