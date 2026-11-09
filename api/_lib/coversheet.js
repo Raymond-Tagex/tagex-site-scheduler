@@ -37,6 +37,8 @@ const { rgb } = require('pdf-lib');
 
 const MUTED = rgb(0.42, 0.45, 0.5);   // the forms' prompt-line grey (jobcardform.js)
 const ACCENT = rgb(0.16, 0.42, 0.28); // the forms' title green (jobcardform.js)
+const INK = rgb(0.08, 0.09, 0.11);    // the forms' text (jobcardform.js)
+const WARRANTY_OK = rgb(0.13, 0.5, 0.25); // the panel's "in warranty" green
 
 const str = (v) => {
   if (v == null) return '';
@@ -114,17 +116,21 @@ async function gather(o) {
 
   // ── the contract: the one the record names, or the client's only one (contract-panel rules) ──
   const mine = reg ? contracts.filter((c) => ids(c.fields.Client).includes(reg.id)) : [];
-  const details = mine.map((c) => ({ number: str(c.fields['Contract Number']), funder: str(c.fields.Portfolio),
-    firstInvoice: day(c.fields['First Invoice Date']), system: str(c.fields['System Description']) }));
-  let picked = C.resolve(reg ? details : null, o.contractNo).contract;
+  const asDetail = (c) => ({ number: str(c.fields['Contract Number']), funder: str(c.fields.Portfolio),
+    firstInvoice: day(c.fields['First Invoice Date']), system: str(c.fields['System Description']), kind: str(c.fields['Contract Kind']) });
+  const details = mine.map(asDetail);
+  const rs = C.resolve(reg ? details : null, o.contractNo);
+  let picked = rs.contract;
   // A record can name a contract its client's register entry does not hold (a stale or misfiled
   // client); the number is still a contract, so look for it across the register.
   if (!picked && o.contractNo) {
     const hit = contracts.find((c) => norm(c.fields['Contract Number']) === norm(o.contractNo));
-    if (hit) picked = { number: str(hit.fields['Contract Number']), funder: str(hit.fields.Portfolio),
-      firstInvoice: day(hit.fields['First Invoice Date']), system: str(hit.fields['System Description']) };
+    if (hit) picked = asDetail(hit);
   }
   if (picked) out.contract = { ...picked, warranty: C.warranty(picked.firstInvoice) };
+  // Why there is no contract, in the contract panel's terms (stale / choose / none / unknown), so the
+  // sheet says what the screen says rather than leaving the lines blank without a reason.
+  else out.contractWhy = { how: rs.how, number: rs.number || o.contractNo || '', count: details.length };
   const contractNo = (picked && picked.number) || o.contractNo || '';
 
   // ── equipment on that contract (removed or replaced units are no longer the system) ──
@@ -225,16 +231,37 @@ function contents(d) {
       reach: [...(/[a-z]{2}/i.test(cl.contact || '') ? [] : [cl.contact]), ...(cl.phones || []),
         cl.email || (plants.map((p) => p.user).find((u) => /@/.test(u)) || '')]
         .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' · '),
+      // The same, split as the Client card shows it: numbers on one line, the email on its own.
+      phone: [...(/[a-z]{2}/i.test(cl.contact || '') ? [] : [cl.contact]), ...(cl.phones || [])]
+        .filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' · '),
+      email: cl.email || (plants.map((p) => p.user).find((u) => /@/.test(u)) || ''),
       install: cl.install || str(jc['Site / Address']) || (plants.map((p) => p.location).find(Boolean) || '') || cl.billing,
     },
     plantLine: plants.map((p) => [p.name, p.user, p.location].filter(Boolean).join(' · ')).join('\n'),
-    contractLine: f.contract ? [f.contract.number, f.contract.funder && 'funder ' + f.contract.funder,
-      f.contract.firstInvoice && '1st invoice ' + f.contract.firstInvoice].filter(Boolean).join(' · ') : '',
+    // The contract panel of the ticket and job card screens, for section 1 (Raymond, 9 Nov 2026).
+    con: f.contract ? {
+      head: [f.contract.funder || 'No funder', f.contract.number, f.contract.kind].filter(Boolean).join(' · '),
+      system: f.contract.system, start: f.contract.firstInvoice,
+      // The funder's rule, as the panel words it.
+      rule: f.contract.funder ? f.contract.funder + ' is paid a monthly O&M fee by the client. Work within TAGEX O&M\'s pre-approved '
+        + f.contract.funder + ' budget.' : '',
+    } : null,
+    conWhy: f.contract ? '' : (() => {
+      const y = f.contractWhy || { how: 'unknown' };
+      return {
+        stale: 'Contract ' + y.number + ' is on this record but not in the client\'s contracts. Check it before any work is costed.',
+        choose: 'This client has ' + y.count + ' contracts. Choose the one this is for: funder and warranty depend on it.',
+        none: 'No contract in the register for this client. Funder and warranty are unknown - check before any work is costed.',
+        unknown: 'The contract register could not be read, or there is no client yet. Funder and warranty are unknown.',
+      }[y.how] || '';
+    })(),
     system: f.contract ? f.contract.system : '',
     equipment: f.equipment || [],
     problem: problem.filter(Boolean).join('\n'),
     action: action.join('\n'),
-    warranty: w.map((x) => x.label.replace(/ \(.*\)$/, '') + ' to ' + x.until + (x.inWarranty ? ' (in warranty)' : ' (ended)')),
+    // "Solax equipment 10 yrs" / "in warranty until 2036-07-24": the panel's four classes, short.
+    warranty: w.map((x) => ({ label: x.label.replace(/ \(.*\)$/, '') + ' ' + x.years + (x.years === 1 ? ' yr' : ' yrs'),
+      status: (x.inWarranty ? 'in warranty until ' : 'expired ') + x.until, ok: x.inWarranty })),
     quotation: str(jc.Status) === 'Quotation Pending',
     siteInspection: acts.includes('Site Inspection'),
     technician: str(jc['Technician / Installer']) || latestTech,
@@ -242,6 +269,22 @@ function contents(d) {
     checklist: inFile(jc, f.documents),
     generatedBy: d.generatedBy || '',
   };
+}
+
+const BAND = rgb(0.93, 0.94, 0.96);   // the forms' section band (jobcardform.js)
+
+/**
+ * A section band, as the job card's heading() draws it but with less air above and below. With
+ * the contract in section 1 (9 Nov 2026) the shared spacing pushed the "in file" lines of a
+ * typical record onto a second page; six bands at 6pt less each give that room back.
+ */
+function band(s, text) {
+  const size = J.SECTION_HEADING, bandH = size + 6.5;
+  s.need(58);
+  s.y -= 17 + (size - 8.5);
+  s.rect(J.M, s.y - 3, J.CW, bandH, { fill: BAND, bw: 0 });
+  s.write(String(text).toUpperCase(), J.M + 5, s.y - 3 + (bandH - 0.72 * size) / 2, size, s.f.bold, ACCENT);
+  s.y -= 4;
 }
 
 /** Draw the cover sheet. @returns {Promise<Uint8Array>} */
@@ -256,18 +299,44 @@ async function coverSheetPdf(d) {
   s.y -= 2;
   s.row([{ l: 'Date:', w: 0.24 }, { l: 'Reference Number:', w: 0.38 }, { l: 'SOL / SUB Number:' }], [c.date, c.ref, c.numbers]);
 
-  s.heading('1. Client details');
+  band(s, '1. Client details');
   s.field('Name and Surname / Business name:', c.client.name);
-  s.field('Contact Person:', c.client.contact);
-  s.field('Contact Number / Email:', c.client.reach);
+  // As the screen's Client card sets them out (Raymond, 9 Nov 2026), two to a line so the contract
+  // below still leaves the sheet on one page.
+  s.row([{ l: 'Contact Person:', w: 0.45 }, { l: 'Contact Number:' }], [c.client.contact, c.client.phone]);
+  s.field('Email:', c.client.email);
   s.field('Installation Address:', c.client.install);
 
-  s.heading('2. System installed details');
-  // The system on the contract's own line, wrapping if long, rather than a box under it: the
-  // Contact Person line (6 Nov 2026) needed the room to keep a typical record on one page.
-  s.field('Contract:', [c.contractLine, c.system].filter(Boolean).join(' — '));
-  if (!c.contractLine && !c.system) s.field('System:', '');
+  // The contract, as the ticket and job card screens show it (Raymond, 9 Nov 2026): funder, number,
+  // kind, system, warranty start, each warranty class's standing, and the funder's rule. With no
+  // settled contract the panel's own reason is printed, never blank lines that look like "none".
+  if (c.con) {
+    s.row([{ l: 'Funder / Contract:', w: 0.4 }, { l: 'System Installed:' }], [c.con.head, c.con.system]);
+    if (c.warranty.length) {
+      // The four classes on one line, as the panel sets them side by side, under the start date.
+      s.need(36); s.y -= 13;
+      s.write('Warranty from the 1st invoice, ' + (c.con.start || '-') + ':', J.M, s.y, 8, s.f.bold);
+      s.y -= 10.5;
+      const colW = J.CW / c.warranty.length;
+      c.warranty.forEach((x, i) => s.write(x.label, J.M + i * colW, s.y, 7.5, s.f.bold));
+      s.y -= 9.5;
+      c.warranty.forEach((x, i) => s.write(x.status, J.M + i * colW, s.y, 7.5, x.ok ? s.f.reg : s.f.bold, x.ok ? WARRANTY_OK : INK));
+    }
+    // The funder's rule and the capital expenditure line, together when they fit.
+    const capex = 'Capital expenditure is not covered under warranty.';
+    s.need(24); s.y -= 12;
+    const ruleW = c.con.rule ? s.width(c.con.rule + '  ', 7.5) : 0;
+    if (c.con.rule) s.write(c.con.rule, J.M, s.y, 7.5, s.f.reg, MUTED);
+    if (ruleW && ruleW + s.width(capex, 7.5, s.f.bold) > J.CW) s.y -= 9.5;
+    s.write(capex, ruleW && ruleW + s.width(capex, 7.5, s.f.bold) <= J.CW ? J.M + ruleW : J.M, s.y, 7.5, s.f.bold);
+  } else {
+    s.field('Contract:', c.conWhy);
+  }
+
+  band(s, '2. System installed details');
+  // The contract, system and warranty are in section 1; this is what is on site.
   if (c.plantLine) s.field('SolaX plant:', c.plantLine);
+  if (!c.plantLine && !c.equipment.length) s.field('Equipment / Serial Numbers:', '');
   if (c.equipment.length) {
     const W = J.CW;
     s.grid([{ t: 'Type', w: W * 0.16 }, { t: 'Make / Model', w: W * 0.34 }, { t: 'Serial Number', w: W * 0.26 },
@@ -275,30 +344,25 @@ async function coverSheetPdf(d) {
     c.equipment.map((e) => [e.type, e.make, e.serial, e.qty, e.until]));
   }
 
-  s.heading('3. Problem / customer concerns');
+  band(s, '3. Problem / customer concerns');
   s.note('Provide customer concerns, including any relevant dates, error codes, and previous work done.');
   s.block(c.problem, 3);
 
-  // The template's heading runs on with "and/or additional materials / labour required", which
-  // does not fit the band: that half is the prompt line, as section 3's is.
-  s.heading('4. Possible solution / recommended action');
-  s.note('Include any additional materials and / or labour required.');
+  // The template's heading ("possible solution / recommended action and/or additional materials /
+  // labour required") is too long for the band, so it is shortened here rather than given a prompt
+  // line: that line cost the room the contract in section 1 needed.
+  band(s, '4. Solution / action / materials / labour');
   s.block(c.action, 3);
 
-  s.heading('5. Estimated cost');
+  band(s, '5. Estimated cost');
   const W = J.CW;
   s.grid([{ t: 'Description', w: W * 0.6 }, { t: 'Estimated Cost', w: W * 0.4 }],
     [['Labour', 'R'], ['Materials / Equipment', 'R'], ['Additional Costs', 'R'],
       Object.assign(['TOTAL ESTIMATED COST', 'R'], { bold: true })], { rowH: 13 });
 
-  s.heading('6. Office use');
+  band(s, '6. Office use');
+  // The warranty dates are in section 1; the answer here is still a person's (see the header).
   s.ticks(['Yes', 'No', 'To be confirmed'], [], { label: 'Is the work covered under warranty?' });
-  // Two classes to a line, so the dates are read rather than cut off at the margin.
-  for (let i = 0; i < c.warranty.length; i += 2) {
-    const two = c.warranty.slice(i, i + 2).join(';   ');
-    s.need(12); s.y -= i ? 10 : 12;
-    s.write((i ? '' : 'From the 1st invoice: ') + two, i ? J.M + 92 : J.M, s.y, 8, s.f.reg, MUTED);
-  }
   s.row([{ l: 'Quotation Required:', yes: true }, { l: 'Site Inspection Required:', yes: true }], [c.quotation, c.siteInspection]);
   s.row([{ l: 'Assigned Technician:' }, { l: 'Quotation / Job Card Number:' }], [c.technician, c.jcRef]);
   s.field('Additional Notes:', '');
