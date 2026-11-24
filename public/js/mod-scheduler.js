@@ -3459,6 +3459,7 @@ async function omOpenDetail(id){
   await omLoadEquip();
   await omLoadFullJc(rec);
   await omLoadCosting(rec);
+  await omLoadReturns(rec);
   omBuildDetail(rec,actLog);
 }
 
@@ -3717,6 +3718,29 @@ function jcCostNumeric(){
 
 // { jcId, rec, error, many } for the job card on screen; rec is null when it has no Costing.
 let omJcCost = null;
+
+// { jcId, rows, error } for the job card on screen; null where nothing is drawn: RES (no Stock Returns
+// table), a role without stock_returns:view, or a job card whose link field the role cannot read.
+// Read only -- the delivery app's server writes every return (public/js/stock-returns-panel.js).
+let omJcReturns = null;
+
+async function omLoadReturns(rec){
+  omJcReturns = null;
+  const SRP = TX.stockReturns;
+  if(!SRP || !TX.can('stock_returns','view')) return;
+  const ids = SRP.idsOf(rec.fields, SCHED_BASE);
+  if(ids === null) return;
+  const canCost = TX.can('costing','view');
+  omJcReturns = { jcId: rec.id, rows: [], error: '' };
+  try{
+    const got = [];
+    for(const filterByFormula of SRP.filters(ids)){
+      const r = await TX.list(SCHED_BASE,'stock_returns',{ filterByFormula, fields: SRP.fieldsFor(canCost), pageSize: 100 });
+      got.push(...(r.records||[]));
+    }
+    omJcReturns.rows = SRP.rows(got, canCost);
+  }catch(e){ omJcReturns.error = TX.errorText(e); }
+}
 
 async function omLoadCosting(rec){
   omJcCost = null;
@@ -4004,6 +4028,7 @@ function omBuildDetail(rec,actLog){
     ${omRow('Documents',      omLinkCount(f, OM_F.JC_DOCS, 'document'))}
     ${omRow('Sign-offs',      omLinkCount(f, OM_F.JC_SIGN, 'sign-off'))}
     ${canCost ? omRow('Costing', omLinkCount(f, OM_F.JC_COST, 'entry')) : ''}
+    ${TX.stockReturns && omJcReturns && omJcReturns.jcId === id ? TX.stockReturns.panelHtml(omJcReturns, { esc, canCost }) : ''}
     <div class="om-df"><label>Record ID</label><div style="font-family:monospace;font-size:10px;color:var(--muted2);">${id}</div></div>
     ${jcDetailForm(rec)}
     <div id="om-jclog">${jcLogisticsHtml(rec)}</div>

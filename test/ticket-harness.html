@@ -30,6 +30,7 @@
 <script src="/js/core.js"></script>
 <script src="/js/pick.js"></script>
 <script src="/js/contract-panel.js"></script>
+<script src="/js/stock-returns-panel.js"></script>
 <script>
 // ── field ids, written out so a typo in the app is a failure here ───────────
 const FID = {
@@ -384,6 +385,14 @@ function stubTX() {
       if (q.table === 'people') return { records: PEOPLE };
       if (q.table === 'site_visits') return { records: VISITS };
       if (q.table === 'site_equipment') return { records: EQUIP.map((r) => ({ id:r.id, fields:{ ...r.fields } })) };
+      // Stock returns, answered by the RECORD_ID() lookup the screen sends and trimmed to the fields it asks for.
+      if (q.table === 'stock_returns') {
+        (window.SR_READS = window.SR_READS || []).push(JSON.parse(JSON.stringify(q.params || {})));
+        const want = (q.params && q.params.fields) || null;
+        const ids = [...String((q.params && q.params.filterByFormula) || '').matchAll(/RECORD_ID\(\)="(rec\w+)"/g)].map((m) => m[1]);
+        return { records: ids.filter((id) => (window.SR_RECS || {})[id]).map((id) => ({ id, fields: Object.fromEntries(
+          Object.entries(window.SR_RECS[id]).filter(([k]) => !want || want.includes(k))) })) };
+      }
       return { records: [] };
     }
     const key = q.table + (q.sub ? ':' + q.sub : '');
@@ -1689,6 +1698,43 @@ async function suite(log) {
     t('a role without costing access gets no logistics block', box() ? box().innerHTML.trim() : '', '');
     t('and Costing is never asked for', window.READS.some((r) => r.table === 'costing'), false);
 
+    // Stock returns (the delivery app's, 23 Nov 2026), linked to the job card: shown, never written here.
+    window.SR_RECS = {
+      recSR1: { 'Return Number':'SR-0001', Status:'Received', 'Return Date':'2026-11-20', 'DN Number':'DN-0042', 'Credit Value':100 },
+      recSR2: { 'Return Number':'SR-0002', Status:'Closed', 'Return Date':'2026-11-22', 'DN Number':'DN-0043', 'Credit Value':50.25 },
+      recSR3: { 'Return Number':'SR-0003', Status:'Submitted', 'Return Date':'2026-11-23', 'DN Number':'DN-0043', 'Credit Value':999 },
+    };
+    jc1.fields.fldBuIF7PduXj9jh9 = ['recSR1', 'recSR2', 'recSR3'];
+    const srBox = () => document.querySelector('#om-view-detail .om-sr');
+    TX.can = realCan;
+    window.SR_READS = []; window.SENT = [];
+    await openJc1();
+    t('the job card shows its stock returns: number, status, date and delivery note',
+      !!srBox() && ['SR-0001', 'SR-0002', 'SR-0003', 'Received', 'Closed', 'Submitted', '22 Nov 2026', 'DN-0042'].every((s) => srBox().textContent.includes(s)), true);
+    t('newest first', srBox() && [...srBox().querySelectorAll('tbody tr td:first-child')].map((td) => td.textContent), ['SR-0003', 'SR-0002', 'SR-0001']);
+    t('a role with costing view sees each credit and the received + closed total',
+      !!srBox() && /R\s?999[.,]00/.test(srBox().textContent) && /Credited to this job[^R]*R\s?150[.,]25/.test(srBox().textContent), true);
+    t('the returns are read by record id, from O&M', window.SR_READS.length === 1 && /RECORD_ID\(\)="recSR1"/.test(window.SR_READS[0].filterByFormula), true);
+    t('nothing is written to stock returns', window.SENT.some((x) => /stock_return/.test(x.table)), false);
+
+    TX.can = (m) => m !== 'costing';
+    window.SR_READS = [];
+    await openJc1();
+    t('without costing view the returns are still listed', !!srBox() && srBox().textContent.includes('SR-0002'), true);
+    t('but with no credit column, amount or total', !!srBox() && /Credit|R\s?\d/.test(srBox().textContent), false);
+    t('and the credit is not even asked for', window.SR_READS.some((p) => (p.fields || []).includes('Credit Value')), false);
+
+    TX.can = (m) => m !== 'stock_returns';
+    window.SR_READS = [];
+    await openJc1();
+    t('a role without stock_returns view gets no section and no read', [!!srBox(), window.SR_READS.length], [false, 0]);
+
+    TX.can = realCan;
+    jc1.fields.fldBuIF7PduXj9jh9 = [];
+    await openJc1();
+    t('a job card with no returns says so', !!srBox() && /None\./.test(srBox().textContent), true);
+    delete jc1.fields.fldBuIF7PduXj9jh9;
+
     // A job card with no Costing yet: one is started, linked to it.
     TX.can = realCan;
     jc1.fields.fldO7Uk0MU2gIkNnB = [];
@@ -2533,6 +2579,12 @@ if (IS_RUNNER) {
 
 // ── mutants: each one a bug this file is supposed to catch ──────────────────
 const MUTANTS = [
+  ['the job card screen does not load its stock returns',
+   'await omLoadReturns(rec);',
+   ''],
+  ['the stock returns credit is shown to a role without costing view',
+   "TX.stockReturns.panelHtml(omJcReturns, { esc, canCost })",
+   "TX.stockReturns.panelHtml(omJcReturns, { esc, canCost: true })"],
   ['the cost of a ticket is shown to a role that may not read it',
    "${TX.canField('tickets','Ticket Cost','read')?`",
    "${true?`"],

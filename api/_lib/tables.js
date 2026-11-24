@@ -94,6 +94,18 @@ const TABLES = {
     CI: 'tbloMBkQNCafn8rLI',
     OM: 'tblhstPiOo5SgAF6x',
   },
+  // Stock back from site against a delivery note (the delivery app's, 23 Nov 2026), linked to the job card. Shown
+  // on the job card screen and never written here: the delivery app's server (its api/_lib/stockreturn.js) holds
+  // every rule -- quantity no more than is left on the note line, two people per return, credit priced by the
+  // server -- so readOnly makes at.js refuse create, update and delete whatever the role says. O&M-only
+  // (OM_ONLY): RES has no such table. Its lines are not whitelisted; nothing here reads them.
+  stock_returns: {
+    OM: 'tblaLkt4PGXtTBgnP',
+    readOnly: true,
+    // Credit Value is money taken off the job's materials: read only by whoever may view costing, held by
+    // at.js on the server as well as on the screen.
+    costingFields: ['Credit Value'],
+  },
   // The PALLADIUM base is the one stock list for every TAGEX app (Raymond, 17 Oct 2026: "ALL
   // applications must use the PALLADIUM base"). The C&I and O&M Stock Items tables
   // (tblaWIGSRHtKbaYBE, tbl1lGcVzPHz3QLZ8) stay in their bases but are no longer whitelisted: a CI
@@ -330,6 +342,7 @@ const SCOPE_FIELDS = {
     parentLink:   { CI: 'Picking Slip', OM: 'Picking Slip' },
   },
   signatures: {},   // reached only through their document; no scope of their own
+  stock_returns: {}, // read only on its job card's screen, by id from the job card's link
   stock_items:  {},
   people:       {},
   costing:      {},
@@ -351,7 +364,7 @@ const SCOPE_FIELDS = {
 // base. Mirroring it would point RES at a table id that does not exist there -- and for FICA
 // data, would open a second door to it.
 // ─────────────────────────────────────────────────────────────
-const OM_ONLY = new Set(['restricted_personal', 'subscribers']);
+const OM_ONLY = new Set(['restricted_personal', 'subscribers', 'stock_returns']);
 
 function mirrorOmToRes(map) {
   for (const [key, entry] of Object.entries(map)) {
