@@ -18,6 +18,8 @@
     'dashboard', 'job_cards', 'clients', 'subscribers', 'clients_report', 'clients_money', 'documents', 'restricted_personal',
     'picking_slips', 'picking_slip_items',
     'delivery_notes', 'delivery_lines', 'signatures',
+    // Read here on a job card's screen, never written (tables.js readOnly); the delivery app's key.
+    'stock_returns',
     'site_information', 'site_equipment',
     'stock_items', 'site_visits', 'activity_log',
     'costing', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports',
@@ -41,7 +43,7 @@
       'dashboard', 'job_cards', 'clients', 'subscribers', 'documents', 'restricted_personal',
       'stock_requests', 'stock_request_items', 'tagex_bom', 'tagex_bom_lines',
       'suppliers', 'supplier_quotes', 'quote_lines', 'other_requests', 'other_request_lines',
-      'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures',
+      'picking_slips', 'picking_slip_items', 'delivery_notes', 'delivery_lines', 'signatures', 'stock_returns', 'stock_return_lines',
       'stock_items', 'stock_screen', 'site_visits', 'activity_log',
       'costing', 'project_costing', 'clients_report', 'clients_money', 'people', 'users', 'access_levels', 'audit_log', 'sessions', 'reports'] },
     { app: 'O&M scheduler', keys: [

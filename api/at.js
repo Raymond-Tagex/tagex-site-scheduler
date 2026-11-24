@@ -128,6 +128,14 @@ module.exports = async function handler(req, res) {
   const { baseId, tableId } = resolved;
   ctx.table = resolved.sub ? `${tableSymbol}/${resolved.sub}` : tableSymbol;
 
+  // A read-only module (stock_returns) is written by another app's server, which holds its rules. Refused here
+  // whatever the role says, before the role is even asked, so no grant in IAM can open a write path in this app.
+  if (resolved.config.readOnly && op !== 'list' && op !== 'get') {
+    await A.auditNow({ ...ctx, action: op === 'create' ? 'Create' : op === 'delete' ? 'Delete' : 'Update',
+      result: 'Denied', denialReason: 'read_only_module', recordId });
+    return H.fail(res, 403, 'read_only_module', 'This record is kept by another application and cannot be changed here.');
+  }
+
   // ── STEP 4 — module + operation, then per-user overrides ────────────────
   const verb = P.OP_FOR_AIRTABLE[op];
   const allowed = P.can(auth.perms, tableSymbol, verb);
@@ -141,7 +149,15 @@ module.exports = async function handler(req, res) {
   }
   // The role names a field once, in the operations vocabulary. Expand it to whatever THIS base
   // calls the same thing, so a rule cannot be escaped simply by reading from a different base.
-  const rule = T.expandFieldRules(allowed.rule, tableSymbol, baseSymbol);
+  let rule = T.expandFieldRules(allowed.rule, tableSymbol, baseSymbol);
+  // Money on a module that is not costing (a stock return's Credit Value) follows costing:view. Added to the
+  // role's deny_read, so it is stripped from the answer and a filter or sort on it is refused, like any denied field.
+  const costingFields = resolved.config.costingFields;
+  if (Array.isArray(costingFields) && costingFields.length && !P.can(auth.perms, 'costing', 'view').ok) {
+    const f = rule.fields || {};
+    rule = Object.assign({}, rule, { fields: Object.assign({}, f,
+      { deny_read: [...new Set([...(Array.isArray(f.deny_read) ? f.deny_read : []), ...costingFields])] }) });
+  }
 
   // Restricted personal data: role permission is not enough, the per-user flag is required too.
   const gate = P.canViewRestricted(rule, auth.role, auth.user);
