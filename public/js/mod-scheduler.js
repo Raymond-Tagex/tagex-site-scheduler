@@ -4342,8 +4342,44 @@ function omGoView(name){
   if(name==='newjc'){ omNjcForTkt=''; omRenderNewJC(); }
   if(name==='new')   omSetReportedNow();
   if(name==='tickets') omShowTickets();
+  omPaintCat(name);
   omSyncPrintBtn();
 }
+
+// ── Two levels on the O&M Tickets bar (Raymond, 24 Nov 2026, as on the delivery app) ──────────────────────────────
+// The bar shows Dashboard and the categories; the chosen category's pages are the row beneath (#om-subbar). A ticket
+// or job card opened from a list stays under Work. The Dashboard and the "+ New" forms show no row.
+const OM_CAT_OF = { tickets:'work', jc:'work', tktdetail:'work', detail:'work', triage:'work',
+  cli:'records', ppl:'records', log:'records' };
+const OM_CAT_FIRST = { work:'tickets', records:'cli' };
+const omLastInCat = {};
+function omPaintCat(name){
+  const cat = OM_CAT_OF[name] || null;
+  if(cat && document.getElementById('ombn-'+name)) omLastInCat[cat]=name;
+  document.querySelectorAll('.om-cat').forEach(c=>{
+    const on = c.dataset.a1===cat;
+    c.classList.toggle('ghost',!on);
+    c.style.background = on ? '#f0a500' : '';
+    c.style.color = on ? '#0a0a0b' : '';
+    c.setAttribute('aria-expanded', String(on));
+  });
+  const bar=document.getElementById('om-subbar');
+  if(!bar) return;
+  bar.hidden=!cat;
+  bar.querySelectorAll('.om-subgrp').forEach(g=>{ g.hidden = g.dataset.cat!==cat; });
+}
+function omOpenCat(cat){
+  if(!OM_CAT_FIRST[cat]) return;
+  omGoView(omLastInCat[cat] || OM_CAT_FIRST[cat]);
+}
+// The open-ticket count shows on Work too, so it is seen from the Dashboard as it was before the pages moved under it.
+(function omMirrorWorkBadge(){
+  const src=document.getElementById('om-tktbadge'), dst=document.getElementById('omcat-workbadge');
+  if(!src||!dst||typeof MutationObserver!=='function') return;
+  const copy=()=>{ const shown=src.style.display!=='none' && src.textContent.trim()!==''; dst.hidden=!shown; dst.textContent=shown?src.textContent:''; };
+  new MutationObserver(copy).observe(src,{ attributes:true, childList:true, characterData:true, subtree:true });
+  copy();
+})();
 
 /**
  * The Print button sits in the top bar, which every tab shares, so it is only offered while the
@@ -4613,6 +4649,7 @@ async function omSubmitNewJC(){
     const reg = {};
     const add = (name, fn) => { if (typeof fn === 'function') reg[name] = fn; };
     add('omGoView', typeof omGoView === 'function' ? omGoView : null);
+    add('omOpenCat', typeof omOpenCat === 'function' ? omOpenCat : null);
     add('omSetFilter', typeof omSetFilter === 'function' ? omSetFilter : null);
     add('omStatDrill', typeof omStatDrill === 'function' ? omStatDrill : null);
     add('omTktSetContract', omTktSetContract);

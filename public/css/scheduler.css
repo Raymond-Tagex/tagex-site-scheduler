@@ -34,13 +34,16 @@
   .mod-scheduler .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line2)}
   .mod-scheduler .btn.ghost:hover{border-color:var(--accent-ink);color:var(--accent-ink)}
   .mod-scheduler .btn.sm{padding:7px 12px;font-size:12px}
-  /* The O&M Tickets bar, grouped (24 Nov 2026): a hairline and a small label before each group, and the two
-     "+ New" actions on the right, dashed so they read as actions, not places. */
-  .mod-scheduler .om-navgrp{display:flex;align-items:center;gap:6px;padding-left:10px;margin-left:4px;border-left:1px solid var(--line2)}
-  .mod-scheduler .om-navlbl{font-family:monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);opacity:.8;white-space:nowrap}
+  /* The O&M Tickets bar, two levels (24 Nov 2026): Dashboard and the categories (Work, Records) in the bar, the chosen
+     category's pages in the row beneath; the two "+ New" actions on the right, dashed so they read as actions. */
+  .mod-scheduler .om-cat::after{content:' \25BE';opacity:.6}
+  .mod-scheduler .om-catbadge{background:#ef4444;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:3px}
+  .mod-scheduler .om-catbadge[hidden]{display:none}
+  .mod-scheduler .om-subbar{display:flex;gap:6px;align-items:center;padding:6px 16px;background:var(--surface);border-bottom:1px solid var(--line)}
+  .mod-scheduler .om-subbar[hidden],.mod-scheduler .om-subgrp[hidden]{display:none}
+  .mod-scheduler .om-subgrp{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .mod-scheduler .om-navacts{display:flex;align-items:center;gap:6px}
   .mod-scheduler .btn.ghost.om-newbtn{border-style:dashed}
-  @media (max-width:760px){ .mod-scheduler .om-navlbl{display:none} .mod-scheduler .om-navgrp{padding-left:6px;margin-left:0} }
   .mod-scheduler .btn.danger{background:var(--bad);color:#fff}
   .mod-scheduler .gate-err{color:var(--bad);font-size:12px;margin-top:10px;min-height:16px}
 
