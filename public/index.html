@@ -261,19 +261,13 @@
   <!-- O&M TICKETS PANEL -->
   <section id="view-omtickets" class="view hidden" style="height:100%;padding:0;overflow:hidden;display:flex;flex-direction:column;">
     <div style="background:var(--surface);border-bottom:1px solid var(--line);padding:8px 16px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <!-- Grouped (Raymond, 24 Nov 2026: tidy the tabs as on the delivery app): WORK in the order it runs -- a ticket,
-           then the job card it becomes -- RECORDS for reference, and the two things that make something new set apart
-           on the right as actions rather than places. The ids and data-act are unchanged: omGoView lights them by id. -->
+      <!-- Two levels (Raymond, 24 Nov 2026, as on the delivery app): the bar shows Dashboard and the categories only --
+           WORK (a ticket, then the job card it becomes) and RECORDS -- and the two "+ New" actions on the right. A
+           category's pages are the row beneath (#om-subbar), and only the chosen category's group is shown there. The page
+           buttons keep their ids and data-act, so omGoView and the badges reach them as before. -->
       <button class="btn sm" id="ombn-dash"   data-act="omGoView" data-a1="dash"   style="background:#f0a500;color:#0a0a0b;">Dashboard</button>
-      <div class="om-navgrp" role="group" aria-label="Work"><span class="om-navlbl" aria-hidden="true">Work</span>
-        <button class="btn ghost sm" id="ombn-tickets" data-act="omGoView" data-a1="tickets">Tickets <span id="om-tktbadge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:3px;"></span><span id="om-monbadge" class="om-monbadge" style="display:none"></span></button>
-        <button class="btn ghost sm" id="ombn-jc"     data-act="omGoView" data-a1="jc">Job Cards <span id="om-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:3px;"></span></button>
-      </div>
-      <div class="om-navgrp" role="group" aria-label="Records"><span class="om-navlbl" aria-hidden="true">Records</span>
-        <button class="btn ghost sm" id="ombn-cli"    data-act="omGoView" data-a1="cli">Clients</button>
-        <button class="btn ghost sm" id="ombn-ppl"    data-act="omGoView" data-a1="ppl">People / Staff</button>
-        <button class="btn ghost sm" id="ombn-log"    data-act="omGoView" data-a1="log">Activity Log</button>
-      </div>
+      <button class="btn ghost sm om-cat" id="omcat-work" data-act="omOpenCat" data-a1="work">Work <span id="omcat-workbadge" class="om-catbadge" hidden></span></button>
+      <button class="btn ghost sm om-cat" id="omcat-records" data-act="omOpenCat" data-a1="records">Records</button>
       <div style="flex:1"></div>
       <div class="om-navacts" role="group" aria-label="New">
         <button class="btn ghost sm om-newbtn" id="ombn-new"    data-act="omGoView" data-a1="new">+ New Ticket</button>
@@ -281,6 +275,17 @@
       </div>
       <div id="om-dot" style="width:7px;height:7px;border-radius:50%;background:#464e62;flex-shrink:0;"></div>
       <span id="om-pill" style="font-family:monospace;font-size:9px;color:#8b92a8;">—</span>
+    </div>
+    <div class="om-subbar" id="om-subbar" hidden>
+      <div class="om-subgrp" data-cat="work" role="group" aria-label="Work">
+        <button class="btn ghost sm" id="ombn-tickets" data-act="omGoView" data-a1="tickets">Tickets <span id="om-tktbadge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:3px;"></span><span id="om-monbadge" class="om-monbadge" style="display:none"></span></button>
+        <button class="btn ghost sm" id="ombn-jc"     data-act="omGoView" data-a1="jc">Job Cards <span id="om-badge" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:0 5px;font-size:10px;margin-left:3px;"></span></button>
+      </div>
+      <div class="om-subgrp" data-cat="records" role="group" aria-label="Records" hidden>
+        <button class="btn ghost sm" id="ombn-cli"    data-act="omGoView" data-a1="cli">Clients</button>
+        <button class="btn ghost sm" id="ombn-ppl"    data-act="omGoView" data-a1="ppl">People / Staff</button>
+        <button class="btn ghost sm" id="ombn-log"    data-act="omGoView" data-a1="log">Activity Log</button>
+      </div>
     </div>
     <div style="flex:1;overflow:hidden;position:relative;" id="om-views">
 
